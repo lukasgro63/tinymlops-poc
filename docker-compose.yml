@@ -1,0 +1,124 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database for TinySphere
+  postgres:
+    image: postgres:14
+    container_name: tinysphere-postgres
+    environment:
+      POSTGRES_USER: tinysphere
+      POSTGRES_PASSWORD: tinysphere
+      POSTGRES_DB: tinysphere
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - tinysphere-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tinysphere"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # PostgreSQL database for MLflow
+  mlflow-postgres:
+    image: postgres:14
+    container_name: mlflow-postgres
+    environment:
+      POSTGRES_USER: mlflow
+      POSTGRES_PASSWORD: mlflow
+      POSTGRES_DB: mlflow
+    volumes:
+      - mlflow-postgres-data:/var/lib/postgresql/data
+    networks:
+      - tinysphere-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # MinIO S3-compatible storage for artifacts
+  minio:
+    image: minio/minio:latest
+    container_name: tinysphere-minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    networks:
+      - tinysphere-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # MLflow tracking server
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: tinysphere-mlflow
+    depends_on:
+      mlflow-postgres:
+        condition: service_healthy
+      minio-setup:
+        condition: service_completed_successfully
+    command: >
+      bash -c "pip install psycopg2-binary && 
+      mlflow server 
+      --backend-store-uri postgresql://mlflow:mlflow@mlflow-postgres:5432/mlflow 
+      --default-artifact-root s3://mlflow/
+      --host 0.0.0.0"
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+    ports:
+      - "5001:5000"
+    networks:
+      - tinysphere-network
+
+  # TinySphere API service
+  tinysphere-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.tinysphere
+    container_name: tinysphere-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://tinysphere:tinysphere@postgres:5432/tinysphere
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_SECURE: "False"
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8000:8000"
+    networks:
+      - tinysphere-network
+    volumes:
+      - ./tinysphere:/app/tinysphere
+      - ./tinylcm:/app/tinylcm
+
+networks:
+  tinysphere-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  mlflow-postgres-data:
+  minio-data:
