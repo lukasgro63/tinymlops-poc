@@ -1,0 +1,29 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Zuerst TinyLCM installieren
+COPY tinylcm/ /app/tinylcm/
+WORKDIR /app/tinylcm
+RUN pip install --no-cache-dir -e .
+
+# Zurück zum App-Root
+WORKDIR /app
+
+# TinySphere Requirements installieren
+COPY tinysphere/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# TinySphere Code kopieren
+COPY tinysphere/ /app/tinysphere/
+
+# PYTHONPATH setzen für korrekte Imports
+ENV PYTHONPATH=/app/tinylcm:/app
+
+CMD ["uvicorn", "tinysphere.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

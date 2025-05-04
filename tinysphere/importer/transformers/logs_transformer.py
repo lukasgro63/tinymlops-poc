@@ -1,0 +1,188 @@
+import csv
+import datetime
+import json
+import logging
+from pathlib import Path
+from typing import Any, Dict, List
+
+import mlflow
+
+from tinysphere.importer.transformers.base import DataTransformer
+
+
+class LogsTransformer(DataTransformer):
+    def __init__(self):
+        # Logger initialisieren
+        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+    
+    def can_transform(self, package_type: str, files: List[Path]) -> bool:
+        # Unterstützte Pakettypen
+        if package_type.lower() not in ["logs", "data_log", "components"]:
+            return False
+        
+        # Erweiterte Suche nach Log-Dateien mit verschiedenen Namensmustern
+        log_files = []
+        log_extensions = ['.csv', '.jsonl', '.log']
+        
+        for file in files:
+            # Nach Dateien mit unterstützten Endungen suchen
+            if any(file.suffix.lower() == ext for ext in log_extensions):
+                # Für JSONL-Dateien spezielle Regeln anwenden
+                if file.suffix.lower() == '.jsonl':
+                    # Standard-Logdateien akzeptieren
+                    if file.name.lower() == 'inference_log.jsonl':
+                        log_files.append(file)
+                    # Auch Logdateien mit Zeitstempeln akzeptieren
+                    elif file.name.lower().startswith('inference_log_'):
+                        log_files.append(file)
+                    # Allgemeine Logdateien mit extension akzeptieren
+                    elif 'log' in file.name.lower():
+                        log_files.append(file)
+                # Für andere Log-Dateitypen sind wir weniger restriktiv
+                else:
+                    log_files.append(file)
+        
+        has_log_files = len(log_files) > 0
+        
+        # Für "components"-Pakete: Vermeiden von Konflikten mit anderen Transformern
+
+        
+        # Log-Dateien gefunden
+        if has_log_files:
+            self.logger.info(f"Found log files in package with type '{package_type}': {[f.name for f in log_files]}")
+        
+        return has_log_files
+    
+    def transform(self, package_id: str, device_id: str, files: List[Path], metadata: Dict[str, Any]) -> Dict[str, Any]:
+        # MLflow-Experiment einrichten
+        mlflow.set_experiment(f"device_{device_id}")
+        
+        # Erweiterte Log-Dateisuche
+        log_files = []
+        log_extensions = ['.csv', '.jsonl', '.log']
+        
+        for file in files:
+            if any(file.suffix.lower() == ext for ext in log_extensions):
+                if file.suffix.lower() == '.jsonl':
+                    if file.name.lower() == 'inference_log.jsonl' or file.name.lower().startswith('inference_log_'):
+                        log_files.append(file)
+                    elif 'log' in file.name.lower():
+                        log_files.append(file)
+                else:
+                    log_files.append(file)
+        
+        if not log_files:
+            return {"status": "error", "message": "No log file found in package"}
+        
+        # Erste gefundene Log-Datei verwenden
+        log_file = log_files[0]
+        self.logger.info(f"Using log file: {log_file}")
+        
+        log_stats = {
+            "entry_count": 0,
+            "predictions": {},
+            "confidence_avg": 0,
+            "confidence_values": []
+        }
+        
+        # Log-Datei parsen basierend auf dem Dateityp
+        if log_file.suffix.lower() == '.csv':
+            log_stats = self._process_csv_log(log_file)
+        elif log_file.suffix.lower() == '.jsonl':
+            log_stats = self._process_jsonl_log(log_file)
+        else:
+            # Einfache Textlog-Datei
+            log_stats["entry_count"] = sum(1 for _ in open(log_file, 'r'))
+        
+        # MLflow-Run starten
+        with mlflow.start_run(run_name=f"logs_import_{package_id}"):
+            # Parameter loggen
+            mlflow.log_param("device_id", device_id)
+            mlflow.log_param("package_id", package_id)
+            mlflow.log_param("log_source", log_file.name)
+            mlflow.log_param("entry_count", log_stats["entry_count"])
+            
+            # Metriken loggen
+            if log_stats["confidence_values"]:
+                mlflow.log_metric("avg_confidence", log_stats["confidence_avg"])
+            
+            # Vorhersageverteilung als Parameter loggen
+            for pred, count in log_stats["predictions"].items():
+                mlflow.log_param(f"prediction_{pred}", count)
+            
+            # Original-Datei als Artefakt loggen
+            mlflow.log_artifact(str(log_file))
+            
+            # Run-ID erhalten
+            run_id = mlflow.active_run().info.run_id
+        
+        return {
+            "status": "success",
+            "message": "Logs imported successfully",
+            "mlflow_run_id": run_id,
+            "entry_count": log_stats["entry_count"]
+        }
+    
+    def _process_csv_log(self, log_file: Path) -> Dict[str, Any]:
+        """Process CSV log file"""
+        stats = {
+            "entry_count": 0,
+            "predictions": {},
+            "confidence_avg": 0,
+            "confidence_values": []
+        }
+        
+        with open(log_file, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                stats["entry_count"] += 1
+                
+                if "prediction" in row:
+                    pred = row["prediction"]
+                    if pred not in stats["predictions"]:
+                        stats["predictions"][pred] = 0
+                    stats["predictions"][pred] += 1
+                
+                if "confidence" in row:
+                    try:
+                        conf = float(row["confidence"])
+                        stats["confidence_values"].append(conf)
+                    except:
+                        pass
+        
+        if stats["confidence_values"]:
+            stats["confidence_avg"] = sum(stats["confidence_values"]) / len(stats["confidence_values"])
+        
+        return stats
+    
+    def _process_jsonl_log(self, log_file: Path) -> Dict[str, Any]:
+        """Process JSONL log file"""
+        stats = {
+            "entry_count": 0,
+            "predictions": {},
+            "confidence_avg": 0,
+            "confidence_values": []
+        }
+        
+        with open(log_file, 'r') as f:
+            for line in f:
+                try:
+                    entry = json.loads(line.strip())
+                    stats["entry_count"] += 1
+                    
+                    if "prediction" in entry:
+                        pred = entry["prediction"]
+                        if pred not in stats["predictions"]:
+                            stats["predictions"][pred] = 0
+                        stats["predictions"][pred] += 1
+                    
+                    if "confidence" in entry and entry["confidence"] is not None:
+                        conf = float(entry["confidence"])
+                        stats["confidence_values"].append(conf)
+                except:
+                    pass
+        
+        if stats["confidence_values"]:
+            stats["confidence_avg"] = sum(stats["confidence_values"]) / len(stats["confidence_values"])
+        
+        return stats
