@@ -12,7 +12,18 @@ logger = logging.getLogger(__name__)
 PathLike = Union[str, Path]
 T = TypeVar('T')
 
-def ensure_dir(dir_path: PathLike) -> Path:
+def ensure_directory_exists(dir_path: PathLike) -> Path:
+    """Ensure that the specified directory exists, creating it if necessary.
+    
+    Args:
+        dir_path: Path to the directory to ensure exists
+        
+    Returns:
+        Path object for the directory
+        
+    Raises:
+        OSError: If the directory cannot be created
+    """
     path_obj = Path(dir_path)
     try:
         path_obj.mkdir(parents=True, exist_ok=True)
@@ -21,6 +32,11 @@ def ensure_dir(dir_path: PathLike) -> Path:
         logger.error(f"Failed to create or access directory {path_obj}: {e}")
         raise
     return path_obj
+
+# Keep ensure_dir for backwards compatibility
+def ensure_dir(dir_path: PathLike) -> Path:
+    """Alias for ensure_directory_exists for backward compatibility."""
+    return ensure_directory_exists(dir_path)
 
 def get_file_size(file_path: PathLike) -> int:
     path_obj = Path(file_path)
