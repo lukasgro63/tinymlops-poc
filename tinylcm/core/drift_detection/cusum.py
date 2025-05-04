@@ -1,9 +1,10 @@
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Union
 import copy
 import numpy as np
 
 from tinylcm.utils.logging import setup_logger
+from tinylcm.core.drift_detection.base import DriftDetector
 
 logger = setup_logger(__name__)
 
@@ -24,7 +25,7 @@ class CUSUMState:
     cumsum_history: List[float] = field(default_factory=list)
     
 
-class AccuracyCUSUM:
+class AccuracyCUSUM(DriftDetector):
     """CUSUM detector for monitoring classification accuracy.
     
     The Cumulative Sum (CUSUM) detector monitors the accuracy of a classifier
@@ -33,6 +34,10 @@ class AccuracyCUSUM:
     
     This implementation is optimized for resource-constrained devices and can
     operate with or without NumPy.
+    
+    Note: This is a label-based drift detector that requires ground truth labels
+    to calculate accuracy. For autonomous drift detection without labels, see the
+    modules confidence.py, distribution.py, and features.py.
     """
     
     def __init__(
@@ -57,6 +62,7 @@ class AccuracyCUSUM:
         
         # Initialize internal state
         self.state = CUSUMState()
+        self._last_detection_result = (False, None)
         
         logger.debug(
             f"Initialized AccuracyCUSUM with baseline={baseline_accuracy}, "
@@ -105,9 +111,21 @@ class AccuracyCUSUM:
                 f"(current_accuracy={accuracy:.4f}, cumsum={self.state.cumsum:.4f})"
             )
             
-            return True, self.state.drift_point_index
+            self._last_detection_result = (True, self.state.drift_point_index)
+            return self._last_detection_result
         
-        return False, None
+        self._last_detection_result = (False, None)
+        return self._last_detection_result
+    
+    def check_for_drift(self) -> Tuple[bool, Optional[int]]:
+        """Check if drift has been detected.
+        
+        For AccuracyCUSUM, this simply returns the most recent detection result.
+        
+        Returns:
+            Tuple of (drift_detected, drift_point_index)
+        """
+        return self._last_detection_result
     
     def estimate_drift_timing(self, batch_size: int) -> int:
         """Estimate the exact sample index where drift likely began.
@@ -138,6 +156,7 @@ class AccuracyCUSUM:
         self.state.min_cumsum = float('inf')
         self.state.min_cumsum_index = 0
         self.state.drift_point_index = None
+        self._last_detection_result = (False, None)
         
         logger.debug("CUSUM detector reset")
     
@@ -190,3 +209,9 @@ class AccuracyCUSUM:
             accuracy_history=cusum_state.get("accuracy_history", []).copy(),
             cumsum_history=cusum_state.get("cumsum_history", []).copy()
         )
+        
+        # Update detection result
+        if self.state.drift_point_index is not None:
+            self._last_detection_result = (True, self.state.drift_point_index)
+        else:
+            self._last_detection_result = (False, None)

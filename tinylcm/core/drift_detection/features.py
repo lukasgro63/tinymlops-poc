@@ -1,0 +1,494 @@
+from typing import Dict, Any, List, Optional, Tuple, Union, Callable
+import time
+import math
+from collections import deque
+import random
+
+import numpy as np
+
+from tinylcm.utils.logging import setup_logger
+from tinylcm.core.drift_detection.base import AutonomousDriftDetector
+
+logger = setup_logger(__name__)
+
+
+class FeatureMonitor(AutonomousDriftDetector):
+    """Autonomous drift detector that tracks statistical properties of feature vectors.
+    
+    This detector monitors feature vectors (embeddings or raw features) for significant
+    changes in their statistical properties, detecting drift when the data distribution
+    changes. It uses incremental tracking of mean and variance for efficiency.
+    
+    By monitoring the feature space, it can detect changes in the input distribution
+    even before they cause changes in model outputs, allowing for early drift detection.
+    """
+    
+    def __init__(
+        self,
+        window_size: int = 100,
+        threshold: float = 3.0,
+        reference_size: int = 300,
+        max_features: Optional[int] = None,
+        sampling_rate: float = 1.0,
+        use_numpy: bool = True,
+        distance_metric: str = 'euclidean'
+    ):
+        """Initialize the feature monitor.
+        
+        Args:
+            window_size: Size of sliding window for recent feature statistics
+            threshold: Threshold for detecting feature drift (standard deviations)
+            reference_size: Number of samples to use for establishing baseline
+            max_features: Maximum number of features to monitor (uses random selection if needed)
+            sampling_rate: Fraction of samples to process (for resource constraints)
+            use_numpy: Whether to use NumPy for calculations
+            distance_metric: Distance metric for feature space ('euclidean', 'cosine', 'manhattan')
+        """
+        super().__init__()
+        self.window_size = window_size
+        self.threshold = threshold
+        self.reference_size = reference_size
+        self.max_features = max_features
+        self.sampling_rate = sampling_rate
+        self.use_numpy = use_numpy
+        self.distance_metric = distance_metric
+        
+        # Validate distance metric
+        if self.distance_metric not in ['euclidean', 'cosine', 'manhattan']:
+            raise ValueError("Distance metric must be 'euclidean', 'cosine', or 'manhattan'")
+        
+        # Initial state
+        self.n_samples = 0
+        self.reference_samples = []
+        self.selected_features = None
+        self.reference_mean = None
+        self.reference_std = None
+        self.reference_min = None
+        self.reference_max = None
+        
+        # Sliding window for recent samples
+        self.current_window = deque(maxlen=window_size)
+        self.current_distances = deque(maxlen=window_size)
+        
+        # Drift detection state
+        self.training_mode = True
+        self.drift_detected = False
+        self.drift_point_index = None
+        self.last_update_time = time.time()
+        
+        # Control chart variables
+        self.ewma_value = None
+        self.ewma_history = []
+        self.distance_history = []
+        self.ucl = None
+        self.lcl = None
+        
+        logger.debug(
+            f"Initialized FeatureMonitor with window_size={window_size}, "
+            f"threshold={threshold}, reference_size={reference_size}, "
+            f"metric={distance_metric}"
+        )
+    
+    def update(self, record: Dict[str, Any]) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """Update the detector with a new feature vector.
+        
+        Args:
+            record: Dictionary containing the inference data. Should include a 'features'
+                   key with the feature vector.
+                   
+        Returns:
+            Tuple of (drift_detected, drift_info)
+        """
+        # Extract features from record
+        if 'features' not in record:
+            logger.warning("Features missing in record, skipping update")
+            return False, None
+        
+        features = record['features']
+        
+        # Handle invalid features
+        if features is None:
+            logger.warning("Invalid features value: None, skipping update")
+            return False, None
+        
+        # Apply sampling rate - probabilistically skip some samples
+        if random.random() > self.sampling_rate:
+            return False, None
+            
+        # Convert to numpy array if not already
+        if self.use_numpy and np:
+            if not isinstance(features, np.ndarray):
+                features = np.array(features, dtype=np.float32)
+                
+        # Select features if needed
+        if self.max_features is not None and len(features) > self.max_features:
+            if self.selected_features is None:
+                # First time - randomly select features to monitor
+                if self.use_numpy and np:
+                    self.selected_features = np.sort(
+                        np.random.choice(len(features), self.max_features, replace=False)
+                    )
+                else:
+                    indices = list(range(len(features)))
+                    random.shuffle(indices)
+                    self.selected_features = sorted(indices[:self.max_features])
+                    
+                logger.debug(f"Selected {len(self.selected_features)} features to monitor")
+            
+            # Extract only the selected features
+            if self.use_numpy and np:
+                features = features[self.selected_features]
+            else:
+                features = [features[i] for i in self.selected_features]
+        
+        # Update counter
+        self.n_samples += 1
+        self.last_update_time = time.time()
+        
+        # Handle training phase
+        if self.training_mode:
+            self.reference_samples.append(features)
+            
+            if len(self.reference_samples) >= self.reference_size:
+                self._initialize_reference()
+                self.training_mode = False
+                logger.debug(f"Finished training phase with {len(self.reference_samples)} samples")
+            return False, None
+        
+        # Calculate distance from reference
+        distance = self._calculate_distance(features)
+        self.current_distances.append(distance)
+        self.distance_history.append(distance)
+        
+        # Add to sliding window
+        self.current_window.append(features)
+        
+        # Update EWMA
+        if self.ewma_value is None:
+            self.ewma_value = distance
+        else:
+            # Use smoothing factor of 0.2 for responsiveness
+            self.ewma_value = 0.2 * distance + 0.8 * self.ewma_value
+        
+        self.ewma_history.append(self.ewma_value)
+        
+        # Check for drift
+        if not self.drift_detected and self.ewma_value > self.ucl:
+            self.drift_detected = True
+            self.drift_point_index = self.n_samples
+            
+            drift_info = {
+                'detector': 'FeatureMonitor',
+                'detected_at_sample': self.drift_point_index,
+                'timestamp': self.last_update_time,
+                'metric': 'feature_distance',
+                'current_value': distance,
+                'ewma_value': self.ewma_value,
+                'distance_metric': self.distance_metric,
+                'upper_control_limit': self.ucl,
+                'reference_mean': self._serialize_value(self.reference_mean),
+                'reference_std': self._serialize_value(self.reference_std)
+            }
+            
+            logger.info(
+                f"Feature drift detected at sample {self.drift_point_index} "
+                f"(distance={distance:.4f}, ewma={self.ewma_value:.4f}, ucl={self.ucl:.4f})"
+            )
+            
+            # Notify callbacks
+            self._notify_callbacks(drift_info)
+            
+            return True, drift_info
+        
+        return False, None
+    
+    def _serialize_value(self, value):
+        """Convert numpy arrays to lists for serialization."""
+        if self.use_numpy and np and isinstance(value, np.ndarray):
+            return value.tolist()
+        return value
+    
+    def check_for_drift(self) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """Check if drift has been detected.
+        
+        Returns:
+            Tuple of (drift_detected, drift_info)
+        """
+        if self.drift_detected:
+            current_stats = self._calculate_window_statistics()
+            
+            drift_info = {
+                'detector': 'FeatureMonitor',
+                'detected_at_sample': self.drift_point_index,
+                'timestamp': self.last_update_time,
+                'metric': 'feature_distance',
+                'ewma_value': self.ewma_value,
+                'upper_control_limit': self.ucl,
+                'distance_metric': self.distance_metric,
+                'current_stats': current_stats,
+                'reference_stats': {
+                    'mean': self._serialize_value(self.reference_mean),
+                    'std': self._serialize_value(self.reference_std),
+                    'min': self._serialize_value(self.reference_min),
+                    'max': self._serialize_value(self.reference_max)
+                }
+            }
+            
+            return True, drift_info
+        
+        return False, None
+    
+    def reset(self) -> None:
+        """Reset the detector state after drift has been handled."""
+        # Reset drift detection flags but keep reference statistics
+        self.drift_detected = False
+        self.drift_point_index = None
+        
+        # Optionally update reference to current window
+        # self._initialize_reference_from_window()
+        
+        logger.debug("FeatureMonitor reset")
+    
+    def _initialize_reference(self) -> None:
+        """Initialize reference statistics from collected samples."""
+        if self.use_numpy and np:
+            # Convert reference samples to array
+            reference_array = np.array(self.reference_samples)
+            
+            # Calculate reference statistics
+            self.reference_mean = np.mean(reference_array, axis=0)
+            self.reference_std = np.std(reference_array, axis=0)
+            self.reference_min = np.min(reference_array, axis=0)
+            self.reference_max = np.max(reference_array, axis=0)
+            
+            # Calculate distances for each reference sample
+            distances = []
+            for sample in self.reference_samples:
+                distance = self._calculate_distance(sample)
+                distances.append(distance)
+            
+            mean_distance = np.mean(distances)
+            std_distance = np.std(distances)
+            
+            # Set control limits
+            self.ucl = mean_distance + self.threshold * std_distance
+            self.lcl = max(0, mean_distance - self.threshold * std_distance)
+            
+        else:
+            # Pure Python implementation for devices without NumPy
+            n_features = len(self.reference_samples[0])
+            n_samples = len(self.reference_samples)
+            
+            # Calculate mean
+            self.reference_mean = [0.0] * n_features
+            for i in range(n_features):
+                for sample in self.reference_samples:
+                    self.reference_mean[i] += sample[i]
+                self.reference_mean[i] /= n_samples
+            
+            # Calculate std_dev
+            self.reference_std = [0.0] * n_features
+            for i in range(n_features):
+                for sample in self.reference_samples:
+                    self.reference_std[i] += (sample[i] - self.reference_mean[i]) ** 2
+                self.reference_std[i] = math.sqrt(self.reference_std[i] / n_samples)
+            
+            # Calculate min/max
+            self.reference_min = [float('inf')] * n_features
+            self.reference_max = [float('-inf')] * n_features
+            for i in range(n_features):
+                for sample in self.reference_samples:
+                    self.reference_min[i] = min(self.reference_min[i], sample[i])
+                    self.reference_max[i] = max(self.reference_max[i], sample[i])
+            
+            # Calculate distances for control limits
+            distances = []
+            for sample in self.reference_samples:
+                distance = self._calculate_distance(sample)
+                distances.append(distance)
+            
+            mean_distance = sum(distances) / len(distances)
+            sum_squared_diff = sum((d - mean_distance) ** 2 for d in distances)
+            std_distance = math.sqrt(sum_squared_diff / len(distances))
+            
+            # Set control limits
+            self.ucl = mean_distance + self.threshold * std_distance
+            self.lcl = max(0, mean_distance - self.threshold * std_distance)
+        
+        logger.debug(
+            f"Initialized reference statistics with {len(self.reference_samples)} samples. "
+            f"Control limits: UCL={self.ucl:.4f}, LCL={self.lcl:.4f}"
+        )
+    
+    def _calculate_distance(self, features) -> float:
+        """Calculate the distance between a feature vector and the reference."""
+        if self.reference_mean is None:
+            return 0.0
+            
+        if self.distance_metric == 'euclidean':
+            return self._euclidean_distance(features, self.reference_mean)
+        elif self.distance_metric == 'cosine':
+            return self._cosine_distance(features, self.reference_mean)
+        elif self.distance_metric == 'manhattan':
+            return self._manhattan_distance(features, self.reference_mean)
+        else:
+            return self._euclidean_distance(features, self.reference_mean)
+    
+    def _euclidean_distance(self, x, y) -> float:
+        """Calculate Euclidean distance between two vectors."""
+        if self.use_numpy and np:
+            return float(np.sqrt(np.sum((x - y) ** 2)))
+        else:
+            return math.sqrt(sum((x[i] - y[i]) ** 2 for i in range(len(x))))
+    
+    def _cosine_distance(self, x, y) -> float:
+        """Calculate cosine distance between two vectors."""
+        if self.use_numpy and np:
+            dot_product = np.dot(x, y)
+            norm_x = np.linalg.norm(x)
+            norm_y = np.linalg.norm(y)
+            similarity = dot_product / (norm_x * norm_y)
+            return float(1.0 - similarity)
+        else:
+            dot_product = sum(x[i] * y[i] for i in range(len(x)))
+            norm_x = math.sqrt(sum(x[i] ** 2 for i in range(len(x))))
+            norm_y = math.sqrt(sum(y[i] ** 2 for i in range(len(y))))
+            similarity = dot_product / (norm_x * norm_y) if norm_x * norm_y != 0 else 0
+            return 1.0 - similarity
+    
+    def _manhattan_distance(self, x, y) -> float:
+        """Calculate Manhattan distance between two vectors."""
+        if self.use_numpy and np:
+            return float(np.sum(np.abs(x - y)))
+        else:
+            return sum(abs(x[i] - y[i]) for i in range(len(x)))
+    
+    def _calculate_window_statistics(self) -> Dict[str, Any]:
+        """Calculate statistics for the current window of samples."""
+        if not self.current_window:
+            return {}
+            
+        if self.use_numpy and np:
+            window_array = np.array(list(self.current_window))
+            stats = {
+                'mean': self._serialize_value(np.mean(window_array, axis=0)),
+                'std': self._serialize_value(np.std(window_array, axis=0)),
+                'min': self._serialize_value(np.min(window_array, axis=0)),
+                'max': self._serialize_value(np.max(window_array, axis=0)),
+                'avg_distance': float(np.mean(self.current_distances)),
+                'max_distance': float(np.max(self.current_distances))
+            }
+        else:
+            # Simple statistics for current window
+            window_list = list(self.current_window)
+            distances_list = list(self.current_distances)
+            stats = {
+                'avg_distance': sum(distances_list) / len(distances_list),
+                'max_distance': max(distances_list)
+            }
+            
+        return stats
+    
+    def _initialize_reference_from_window(self) -> None:
+        """Update reference statistics from the current window (for adaptation)."""
+        if not self.current_window or len(self.current_window) < self.window_size // 2:
+            logger.warning("Not enough samples in current window to update reference")
+            return
+        
+        # Save old reference samples
+        old_reference = self.reference_samples
+        
+        # Use current window as new reference
+        self.reference_samples = list(self.current_window)
+        
+        # Re-initialize reference statistics
+        self._initialize_reference()
+        
+        logger.info(
+            f"Updated reference statistics with {len(self.reference_samples)} samples from current window"
+        )
+    
+    def get_state(self) -> Dict[str, Any]:
+        """Get the current state of the detector as a serializable dictionary.
+        
+        Returns:
+            State dictionary
+        """
+        state_dict = {
+            'window_size': self.window_size,
+            'threshold': self.threshold,
+            'reference_size': self.reference_size,
+            'max_features': self.max_features,
+            'sampling_rate': self.sampling_rate,
+            'use_numpy': self.use_numpy,
+            'distance_metric': self.distance_metric,
+            'n_samples': self.n_samples,
+            'selected_features': self._serialize_value(self.selected_features),
+            'reference_mean': self._serialize_value(self.reference_mean),
+            'reference_std': self._serialize_value(self.reference_std),
+            'reference_min': self._serialize_value(self.reference_min),
+            'reference_max': self._serialize_value(self.reference_max),
+            'ewma_value': self.ewma_value,
+            'ucl': self.ucl,
+            'lcl': self.lcl,
+            'training_mode': self.training_mode,
+            'drift_detected': self.drift_detected,
+            'drift_point_index': self.drift_point_index,
+            'last_update_time': self.last_update_time
+        }
+        
+        # Don't store full reference samples - too large
+        # Just store the count
+        state_dict['reference_sample_count'] = len(self.reference_samples)
+        
+        # Store recent history (not full history)
+        recent_length = min(100, len(self.ewma_history))
+        state_dict['recent_ewma_history'] = self.ewma_history[-recent_length:] if self.ewma_history else []
+        state_dict['recent_distance_history'] = self.distance_history[-recent_length:] if self.distance_history else []
+        
+        return state_dict
+    
+    def set_state(self, state: Dict[str, Any]) -> None:
+        """Restore the detector state from a dictionary.
+        
+        Args:
+            state: Previously saved state dictionary.
+            Note: Reference samples are not restored, only the statistics.
+        """
+        self.window_size = state.get('window_size', self.window_size)
+        self.threshold = state.get('threshold', self.threshold)
+        self.reference_size = state.get('reference_size', self.reference_size)
+        self.max_features = state.get('max_features', self.max_features)
+        self.sampling_rate = state.get('sampling_rate', self.sampling_rate)
+        self.use_numpy = state.get('use_numpy', self.use_numpy)
+        self.distance_metric = state.get('distance_metric', self.distance_metric)
+        
+        self.n_samples = state.get('n_samples', 0)
+        self.selected_features = state.get('selected_features')
+        self.reference_mean = state.get('reference_mean')
+        self.reference_std = state.get('reference_std')
+        self.reference_min = state.get('reference_min')
+        self.reference_max = state.get('reference_max')
+        
+        self.ewma_value = state.get('ewma_value')
+        self.ucl = state.get('ucl')
+        self.lcl = state.get('lcl')
+        
+        # Restore histories if available
+        self.ewma_history = state.get('recent_ewma_history', []).copy()
+        self.distance_history = state.get('recent_distance_history', []).copy()
+        
+        # Clear current window and distances
+        self.current_window = deque(maxlen=self.window_size)
+        self.current_distances = deque(maxlen=self.window_size)
+        
+        # Restore state flags
+        self.training_mode = state.get('training_mode', True)
+        self.drift_detected = state.get('drift_detected', False)
+        self.drift_point_index = state.get('drift_point_index')
+        self.last_update_time = state.get('last_update_time', time.time())
+        
+        # Reference samples are not restored to save memory
+        # This means the detector can perform detection but not retrain reference
+        # from scratch without new samples
+        self.reference_samples = []

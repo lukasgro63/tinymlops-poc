@@ -15,6 +15,25 @@ from tinylcm.core.base import AdaptiveComponent
 from tinylcm.utils.logging import setup_logger
 from tinylcm.utils.file_utils import ensure_directory_exists
 
+# Optional imports for quarantine and heuristic support
+try:
+    from tinylcm.core.quarantine.buffer import QuarantineBuffer
+    QUARANTINE_AVAILABLE = True
+except ImportError:
+    QUARANTINE_AVAILABLE = False
+
+try:
+    from tinylcm.core.heuristics.adapter import HeuristicAdapter
+    HEURISTICS_AVAILABLE = True
+except ImportError:
+    HEURISTICS_AVAILABLE = False
+
+try:
+    from tinylcm.core.drift_detection.base import DriftDetector, AutonomousDriftDetector
+    AUTONOMOUS_DETECTORS_AVAILABLE = True
+except ImportError:
+    AUTONOMOUS_DETECTORS_AVAILABLE = False
+
 logger = setup_logger(__name__)
 
 
@@ -78,7 +97,10 @@ class StateManager:
         samples: Optional[List[Dict[str, Any]]] = None,
         metadata: Optional[Dict[str, Any]] = None,
         state_id: Optional[str] = None,
-        callback: Optional[Callable[[str], None]] = None
+        callback: Optional[Callable[[str], None]] = None,
+        quarantine_buffer: Optional['QuarantineBuffer'] = None,
+        heuristic_adapter: Optional['HeuristicAdapter'] = None,
+        autonomous_detectors: Optional[List['AutonomousDriftDetector']] = None
     ) -> str:
         """Save the current state of adaptive components (non-blocking).
         
@@ -93,6 +115,9 @@ class StateManager:
             metadata: Optional metadata to include with the state
             state_id: Optional ID for the state, will be generated if not provided
             callback: Optional callback function to call when save is complete
+            quarantine_buffer: Optional quarantine buffer to include in the state
+            heuristic_adapter: Optional heuristic adapter to include in the state
+            autonomous_detectors: Optional list of autonomous drift detectors
             
         Returns:
             ID of the state being saved
@@ -101,6 +126,39 @@ class StateManager:
         if state_id is None:
             state_id = f"state_{int(time.time())}_{str(uuid.uuid4())[:8]}"
         
+        # Get states from extensions
+        quarantine_state = {}
+        if QUARANTINE_AVAILABLE and quarantine_buffer is not None:
+            try:
+                quarantine_state = quarantine_buffer.get_statistics()
+            except Exception as e:
+                logger.warning(f"Error getting quarantine state: {str(e)}")
+        
+        heuristic_state = {}
+        if HEURISTICS_AVAILABLE and heuristic_adapter is not None:
+            try:
+                heuristic_state = heuristic_adapter.get_statistics()
+            except Exception as e:
+                logger.warning(f"Error getting heuristic state: {str(e)}")
+        
+        # Get autonomous detector states
+        detector_states = {}
+        if AUTONOMOUS_DETECTORS_AVAILABLE and autonomous_detectors:
+            for i, detector in enumerate(autonomous_detectors):
+                try:
+                    detector_name = detector.__class__.__name__
+                    detector_states[detector_name] = detector.get_state()
+                except Exception as e:
+                    logger.warning(f"Error getting state for detector {i}: {str(e)}")
+        
+        # Prepare extended metadata
+        extended_metadata = metadata or {}
+        extended_metadata.update({
+            "has_quarantine_state": bool(quarantine_state),
+            "has_heuristic_state": bool(heuristic_state),
+            "autonomous_detectors": list(detector_states.keys()) if detector_states else []
+        })
+        
         # Create state object
         state = AdaptiveState(
             classifier_state=classifier.get_state(),
@@ -108,8 +166,18 @@ class StateManager:
             extractor_state=extractor.get_state() if extractor is not None else {},
             samples=samples or [],
             creation_timestamp=time.time(),
-            metadata=metadata or {}
+            metadata=extended_metadata
         )
+        
+        # Add extension states to the state object
+        if quarantine_state:
+            state.metadata["quarantine_state"] = quarantine_state
+            
+        if heuristic_state:
+            state.metadata["heuristic_state"] = heuristic_state
+            
+        if detector_states:
+            state.metadata["detector_states"] = detector_states
         
         # Queue the save task
         self.task_queue.put(("save", state, state_id, callback))
@@ -123,7 +191,10 @@ class StateManager:
         state_id: str,
         classifier: AdaptiveComponent,
         handler: AdaptiveComponent,
-        extractor: Optional[AdaptiveComponent] = None
+        extractor: Optional[AdaptiveComponent] = None,
+        quarantine_buffer: Optional['QuarantineBuffer'] = None,
+        heuristic_adapter: Optional['HeuristicAdapter'] = None,
+        autonomous_detectors: Optional[List['AutonomousDriftDetector']] = None
     ) -> Dict[str, Any]:
         """Load a saved state into adaptive components.
         
@@ -135,6 +206,9 @@ class StateManager:
             classifier: Adaptive classifier component to load state into
             handler: Adaptive handler component to load state into
             extractor: Optional feature extractor component to load state into
+            quarantine_buffer: Optional quarantine buffer to restore
+            heuristic_adapter: Optional heuristic adapter to restore
+            autonomous_detectors: Optional list of autonomous drift detectors
             
         Returns:
             Metadata from the loaded state
@@ -159,6 +233,37 @@ class StateManager:
         
         if extractor is not None and state.extractor_state:
             extractor.set_state(state.extractor_state)
+        
+        # Load state into autonomous detectors if available
+        if AUTONOMOUS_DETECTORS_AVAILABLE and autonomous_detectors and "detector_states" in state.metadata:
+            detector_states = state.metadata.get("detector_states", {})
+            for detector in autonomous_detectors:
+                detector_name = detector.__class__.__name__
+                if detector_name in detector_states:
+                    try:
+                        detector.set_state(detector_states[detector_name])
+                        logger.debug(f"Restored state for detector {detector_name}")
+                    except Exception as e:
+                        logger.warning(f"Error restoring state for detector {detector_name}: {str(e)}")
+        
+        # We don't restore full quarantine and heuristic states as they might be
+        # very large and complex. Instead, we just log information about them.
+        if QUARANTINE_AVAILABLE and quarantine_buffer is not None and "quarantine_state" in state.metadata:
+            quarantine_state = state.metadata.get("quarantine_state", {})
+            logger.info(f"Found quarantine state with {quarantine_state.get('total_samples', 0)} samples")
+            
+        if HEURISTICS_AVAILABLE and heuristic_adapter is not None and "heuristic_state" in state.metadata:
+            heuristic_state = state.metadata.get("heuristic_state", {})
+            logger.info(f"Found heuristic state with {heuristic_state.get('total_adaptations', 0)} adaptations")
+            
+            # Update known classes in heuristic adapter
+            if "created_classes" in heuristic_state:
+                created_classes = set(heuristic_state.get("created_classes", []))
+                known_classes = set(heuristic_state.get("known_classes", []))
+                if created_classes or known_classes:
+                    heuristic_adapter.created_classes = created_classes
+                    heuristic_adapter.known_classes = known_classes
+                    logger.debug(f"Restored {len(created_classes)} created classes and {len(known_classes)} known classes")
         
         logger.info(f"Loaded adaptive state from {file_path}")
         

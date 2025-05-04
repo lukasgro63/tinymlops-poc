@@ -14,9 +14,27 @@ from tinylcm.utils.errors import ConnectionError, SyncError
 from tinylcm.utils.logging import setup_logger
 from tinylcm.utils.versioning import calculate_file_hash
 
+# Optional import for quarantine support
+try:
+    from tinylcm.core.quarantine.buffer import QuarantineBuffer
+    QUARANTINE_AVAILABLE = True
+except ImportError:
+    QUARANTINE_AVAILABLE = False
+
 
 class SyncClient:
-    def __init__(self, server_url: str, api_key: str, device_id: str, sync_interface: Optional[SyncInterface] = None, sync_dir: Optional[Union[str, Path]] = None, max_retries: int = 3, connection_timeout: float = 300.0, auto_register: bool = True):
+    def __init__(
+        self, 
+        server_url: str, 
+        api_key: str, 
+        device_id: str, 
+        sync_interface: Optional[SyncInterface] = None, 
+        sync_dir: Optional[Union[str, Path]] = None, 
+        max_retries: int = 3, 
+        connection_timeout: float = 300.0, 
+        auto_register: bool = True,
+        quarantine_buffer: Optional['QuarantineBuffer'] = None
+    ):
         if not self.validate_server_url(server_url):
             raise ValueError(f"Invalid server URL: {server_url}")
         self.logger = setup_logger(f"{__name__}.{self.__class__.__name__}")
@@ -24,19 +42,36 @@ class SyncClient:
         self.api_key = api_key
         self.device_id = device_id
         self.auto_register = auto_register
+        
+        # Set up sync interface
         if sync_interface is None:
             if sync_dir is None:
                 raise ValueError("Either sync_interface or sync_dir must be provided")
             self.sync_interface = SyncInterface(sync_dir=sync_dir)
         else:
             self.sync_interface = sync_interface
+            
+        # Set up quarantine buffer reference
+        self.quarantine_buffer = quarantine_buffer
+        
+        # Set up headers
         self.headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "X-Device-ID": device_id
         }
-        self.connection_manager = ConnectionManager(server_url=server_url, max_retries=max_retries, connection_timeout=connection_timeout, headers=self.headers)
+        
+        # Set up connection manager
+        self.connection_manager = ConnectionManager(
+            server_url=server_url, 
+            max_retries=max_retries, 
+            connection_timeout=connection_timeout, 
+            headers=self.headers
+        )
+        
         self.logger.info(f"Initialized sync client for server: {server_url}")
+        
+        # Auto-register if needed
         if auto_register:
             try:
                 self.register_device()
@@ -240,5 +275,144 @@ class SyncClient:
             "last_connection_time": self.connection_manager.last_connection_time
         }
     
+    def send_quarantine_samples(self, max_samples: int = 50) -> Dict[str, Any]:
+        """Send quarantined samples to the server for validation.
+        
+        Args:
+            max_samples: Maximum number of samples to send in one batch
+            
+        Returns:
+            Dictionary with operation results
+        """
+        if not QUARANTINE_AVAILABLE or self.quarantine_buffer is None:
+            self.logger.warning("Quarantine buffer not available or not configured")
+            return {
+                "success": False,
+                "error": "Quarantine buffer not available",
+                "samples_sent": 0
+            }
+        
+        # Get samples that need to be synced
+        samples_to_sync = self.quarantine_buffer.get_samples_for_sync()
+        
+        # Limit to max_samples
+        if len(samples_to_sync) > max_samples:
+            samples_to_sync = samples_to_sync[:max_samples]
+        
+        if not samples_to_sync:
+            self.logger.info("No quarantined samples to sync")
+            return {
+                "success": True,
+                "samples_sent": 0
+            }
+        
+        self.logger.info(f"Syncing {len(samples_to_sync)} quarantined samples")
+        
+        try:
+            # Send samples to server
+            response = self.connection_manager.execute_request(
+                method="POST",
+                endpoint="samples/validate",
+                json={
+                    "device_id": self.device_id,
+                    "samples": samples_to_sync
+                }
+            )
+            
+            if response.status_code == 200:
+                # Get the sample IDs that were successfully synced
+                response_data = response.json()
+                sample_ids = [sample["sample_id"] for sample in samples_to_sync]
+                
+                # Mark samples as synced
+                self.quarantine_buffer.mark_as_synced(sample_ids)
+                
+                self.logger.info(f"Successfully synced {len(sample_ids)} quarantined samples")
+                return {
+                    "success": True,
+                    "samples_sent": len(sample_ids),
+                    "server_response": response_data
+                }
+            else:
+                error_msg = f"Failed to sync quarantine samples: {response.status_code} - {response.text}"
+                self.logger.error(error_msg)
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "samples_sent": 0
+                }
+        except Exception as e:
+            error_msg = f"Error syncing quarantine samples: {str(e)}"
+            self.logger.error(error_msg)
+            return {
+                "success": False,
+                "error": error_msg,
+                "samples_sent": 0
+            }
+            
+    def get_validation_results(self) -> List[Dict[str, Any]]:
+        """Get validation results for previously sent quarantined samples.
+        
+        Returns:
+            List of validation results from the server
+        """
+        if not QUARANTINE_AVAILABLE or self.quarantine_buffer is None:
+            self.logger.warning("Quarantine buffer not available or not configured")
+            return []
+        
+        try:
+            # Request validation results from server
+            response = self.connection_manager.execute_request(
+                method="GET",
+                endpoint=f"samples/validation-results/{self.device_id}"
+            )
+            
+            if response.status_code == 200:
+                validation_results = response.json().get("results", [])
+                
+                # Process validation results
+                if validation_results:
+                    self.quarantine_buffer.process_validation_results(validation_results)
+                    self.logger.info(f"Processed {len(validation_results)} validation results")
+                
+                return validation_results
+            else:
+                self.logger.error(f"Failed to get validation results: {response.status_code} - {response.text}")
+                return []
+        except Exception as e:
+            self.logger.error(f"Error getting validation results: {str(e)}")
+            return []
+    
+    def sync_quarantine(self) -> Dict[str, Any]:
+        """Synchronize quarantine buffer with the server.
+        
+        This method performs a full synchronization cycle:
+        1. Send pending samples to the server
+        2. Fetch validation results from the server
+        
+        Returns:
+            Dictionary with operation results
+        """
+        if not QUARANTINE_AVAILABLE or self.quarantine_buffer is None:
+            self.logger.warning("Quarantine buffer not available or not configured")
+            return {
+                "success": False,
+                "error": "Quarantine buffer not available"
+            }
+        
+        # Step 1: Send samples
+        send_result = self.send_quarantine_samples()
+        
+        # Step 2: Get validation results
+        validation_results = self.get_validation_results()
+        
+        return {
+            "success": send_result.get("success", False),
+            "samples_sent": send_result.get("samples_sent", 0),
+            "validation_results_received": len(validation_results),
+            "server_error": send_result.get("error")
+        }
+    
     def close(self) -> None:
+        """Close the sync client and release resources."""
         self.logger.info("Closing sync client")

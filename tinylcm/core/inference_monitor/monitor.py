@@ -19,9 +19,9 @@ logger = setup_logger(__name__)
 class InferenceMonitor:
     """Monitors model inference latency and confidence metrics using non-blocking I/O.
     
-    This class collects core inference metrics (latency, confidence) without any anomaly
-    detection logic, as drift and performance changes are now handled by the adaptive
-    components (AdaptationTracker and adaptive handlers).
+    This class collects core inference metrics (latency, confidence) without any drift
+    detection logic, as drift detection is now handled by dedicated components in the
+    drift_detection module.
     
     The class implements a non-blocking interface where logging and I/O operations
     run in a background thread to avoid impacting inference performance, especially
@@ -116,11 +116,12 @@ class InferenceMonitor:
     def track_inference(
         self,
         input_id: str,
-        prediction: str,
+        prediction: Any,
         confidence: Optional[float] = None,
         latency_ms: Optional[float] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        timestamp: Optional[float] = None
+        timestamp: Optional[float] = None,
+        features: Optional[Any] = None
     ) -> Dict[str, Any]:
         """Tracks an inference event with core metrics (non-blocking).
         
@@ -134,6 +135,7 @@ class InferenceMonitor:
             latency_ms: Inference latency in milliseconds
             metadata: Additional data to store with the record
             timestamp: Optional timestamp (defaults to current time)
+            features: Optional feature vector used for prediction
             
         Returns:
             The inference record dictionary
@@ -152,12 +154,23 @@ class InferenceMonitor:
         
         if latency_ms is not None:
             record["latency_ms"] = latency_ms
+            
+        # Don't include features in default record for storage efficiency
+        # But retain them for drift detection if needed
+        if features is not None:
+            record["features"] = features
         
         # Update metrics (this is fast and runs in the current thread)
         self.metrics_collector.add_record(record)
         
+        # Don't include features in stored record to save space
+        # Clone record without features for storage
+        storage_record = record.copy()
+        if "features" in storage_record:
+            del storage_record["features"]
+        
         # Queue the record for writing by the worker thread
-        self._record_queue.put(record)
+        self._record_queue.put(storage_record)
         
         return record
 
@@ -336,6 +349,22 @@ class InferenceMonitor:
         """Reset all collected metrics."""
         self.metrics_collector.reset()
         self.logger.info("Reset inference metrics")
+    
+    def get_latency_percentiles(self) -> Dict[str, float]:
+        """Get latency percentiles.
+        
+        Returns:
+            Dictionary with latency percentiles (p50, p95, p99)
+        """
+        return self.metrics_collector.get_latency_percentiles()
+    
+    def get_throughput(self) -> Optional[float]:
+        """Get estimated throughput in inferences per second.
+        
+        Returns:
+            Throughput or None if no data available
+        """
+        return self.metrics_collector.get_throughput()
     
     def __enter__(self):
         """Enter context manager protocol."""

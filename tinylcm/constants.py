@@ -49,11 +49,15 @@ class AdaptationStrategy(str, Enum):
     PASSIVE = "passive"
     ACTIVE = "active"
     HYBRID = "hybrid"
+    HEURISTIC = "heuristic"
+    EXTERNAL = "external"
     NONE = "none"
 
 ADAPTATION_STRATEGY_PASSIVE: Final[str] = AdaptationStrategy.PASSIVE.value
 ADAPTATION_STRATEGY_ACTIVE: Final[str] = AdaptationStrategy.ACTIVE.value
 ADAPTATION_STRATEGY_HYBRID: Final[str] = AdaptationStrategy.HYBRID.value
+ADAPTATION_STRATEGY_HEURISTIC: Final[str] = AdaptationStrategy.HEURISTIC.value
+ADAPTATION_STRATEGY_EXTERNAL: Final[str] = AdaptationStrategy.EXTERNAL.value
 
 class FileFormat(str, Enum):
     JSON = "json"
@@ -80,6 +84,8 @@ DEFAULT_SYNC_DIR: Final[str] = f"{DEFAULT_BASE_DIR}/sync"
 DEFAULT_LOG_DIR: Final[str] = f"{DEFAULT_BASE_DIR}/logs"
 DEFAULT_ADAPTIVE_STATES_DIR: Final[str] = f"{DEFAULT_BASE_DIR}/adaptive_states"
 DEFAULT_ADAPTATION_LOGS_DIR: Final[str] = f"{DEFAULT_BASE_DIR}/adaptation_logs"
+DEFAULT_QUARANTINE_DIR: Final[str] = f"{DEFAULT_BASE_DIR}/quarantine"
+DEFAULT_HEURISTIC_DIR: Final[str] = f"{DEFAULT_BASE_DIR}/heuristic_logs"
 # Legacy paths maintained for compatibility with existing data
 DEFAULT_MODELS_DIR: Final[str] = f"{DEFAULT_BASE_DIR}/models"  # Now use ADAPTIVE_STATES_DIR
 DEFAULT_TRAINING_DIR: Final[str] = f"{DEFAULT_BASE_DIR}/training_runs"  # Now use ADAPTATION_LOGS_DIR
@@ -136,6 +142,56 @@ DEFAULT_CONFIG: Final[Dict[str, Dict[str, Any]]] = {
         "log_interval": 20,
         "export_format": "json"
     },
+    "quarantine": {
+        "storage_dir": DEFAULT_QUARANTINE_DIR,
+        "max_size": 1000,
+        "auto_persist": True,
+        "persist_interval": 10,
+        "quarantine_strategy": "HIGH_UNCERTAINTY",
+        "confidence_threshold": 0.6,
+        "outlier_threshold": 3.0
+    },
+    "heuristic": {
+        "storage_dir": DEFAULT_HEURISTIC_DIR,
+        "strategy": "HYBRID",
+        "min_cluster_size": 5,
+        "min_samples_for_adaptation": 10,
+        "confidence_threshold": 0.7,
+        "distance_threshold": 0.8,
+        "max_new_classes": 3,
+        "clustering_method": "SIMPLE_DISTANCE",
+        "adaptation_cooldown": 100,
+        "enable_rollback": True
+    },
+    "drift_detection": {
+        "ewma_confidence": {
+            "enabled": True,
+            "lambda_param": 0.1,
+            "threshold_factor": 3.0,
+            "drift_window": 5,
+            "training_size": 30
+        },
+        "page_hinkley_confidence": {
+            "enabled": False,
+            "delta": 0.05,
+            "lambda_param": 10.0,
+            "alpha": 0.9999
+        },
+        "distribution": {
+            "enabled": True,
+            "window_size": 50,
+            "threshold": 0.25,
+            "method": "block"
+        },
+        "feature": {
+            "enabled": True,
+            "window_size": 100,
+            "threshold": 3.0,
+            "reference_size": 50,
+            "max_features": 50,
+            "distance_metric": "euclidean"
+        }
+    },
     "adaptive": {
         "default_strategy": "hybrid",
         "max_training_samples": 100,
@@ -152,7 +208,15 @@ DEFAULT_CONFIG: Final[Dict[str, Dict[str, Any]]] = {
         "enable_condensing": False,
         "condensing_method": "class_balanced",
         "use_numpy": True,
-        "baseline_accuracy": 0.9
+        "baseline_accuracy": 0.9,
+        # New configuration for autonomous components
+        "enable_autonomous_detection": True,
+        "enable_quarantine": True,
+        "enable_heuristic_adaptation": False,
+        "external_validation": False,
+        "quarantine_check_interval": 50,
+        "heuristic_confidence_threshold": 0.7,
+        "validation_timeout_seconds": 86400  # 24 hours
     },
     # Resource-constrained configuration for Pi Zero
     "adaptive_pi_zero": {
@@ -171,7 +235,14 @@ DEFAULT_CONFIG: Final[Dict[str, Dict[str, Any]]] = {
         "enable_condensing": True,
         "condensing_method": "class_balanced",
         "use_numpy": False,
-        "baseline_accuracy": 0.8
+        "baseline_accuracy": 0.8,
+        # Lightweight autonomous settings for Pi Zero
+        "enable_autonomous_detection": True,
+        "enable_quarantine": True,
+        "enable_heuristic_adaptation": True,  # For true edge autonomy
+        "external_validation": False,
+        "quarantine_check_interval": 100,
+        "heuristic_confidence_threshold": 0.8
     },
     # Legacy configurations (kept for backward compatibility)
     "legacy": {
