@@ -11,6 +11,17 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Ensure TinyLCM is in the Python path
+script_dir = Path(__file__).parent.absolute()
+base_dir = script_dir.parent
+if str(base_dir) not in sys.path:
+    sys.path.append(str(base_dir))
+
+# Try to add tinylcm to Python path if it exists
+tinylcm_dir = base_dir / "tinylcm"
+if tinylcm_dir.exists() and str(tinylcm_dir) not in sys.path:
+    sys.path.append(str(tinylcm_dir))
+
 def list_scenarios():
     """List all available scenarios."""
     scenario_dir = Path(__file__).parent / "scenarios"
@@ -20,7 +31,9 @@ def list_scenarios():
 
 def run_scenario(scenario, headless=False, config=None):
     """Run a specific scenario."""
-    script_path = Path(__file__).parent / "scenarios" / f"main_{scenario}.py"
+    script_dir = Path(__file__).parent.absolute()
+    base_dir = script_dir.parent
+    script_path = script_dir / "scenarios" / f"main_{scenario}.py"
     
     if not script_path.exists():
         print(f"Error: Scenario '{scenario}' not found.")
@@ -47,8 +60,25 @@ def run_scenario(scenario, headless=False, config=None):
     # Make script executable if needed
     script_path.chmod(script_path.stat().st_mode | 0o111)
     
+    # Set up environment with correct PYTHONPATH
+    env = os.environ.copy()
+    python_path = env.get("PYTHONPATH", "")
+    
+    # Add base directory and tinylcm directory to PYTHONPATH
+    paths_to_add = [str(base_dir)]
+    if (base_dir / "tinylcm").exists():
+        paths_to_add.append(str(base_dir / "tinylcm"))
+    
+    # Create or extend PYTHONPATH
+    if python_path:
+        env["PYTHONPATH"] = os.pathsep.join([python_path] + paths_to_add)
+    else:
+        env["PYTHONPATH"] = os.pathsep.join(paths_to_add)
+    
+    print(f"Set PYTHONPATH to: {env['PYTHONPATH']}")
+    
     try:
-        process = subprocess.run(cmd)
+        process = subprocess.run(cmd, env=env)
         return process.returncode
     except KeyboardInterrupt:
         print("Scenario interrupted by user.")

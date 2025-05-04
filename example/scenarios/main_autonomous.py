@@ -31,10 +31,30 @@ from threading import Event, Thread
 
 import cv2
 import numpy as np
-import tinylcm
 
 # Add parent directory to path so we can import common modules
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
+
+# Add base directory to path (for tinylcm)
+base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if base_dir not in sys.path:
+    sys.path.append(base_dir)
+
+# Try to find tinylcm directory
+tinylcm_dir = os.path.join(base_dir, "tinylcm")
+if os.path.exists(tinylcm_dir) and tinylcm_dir not in sys.path:
+    sys.path.append(tinylcm_dir)
+
+# Now try to import tinylcm
+try:
+    import tinylcm
+except ImportError:
+    print("Error: Could not import tinylcm module.")
+    print(f"Current Python path: {sys.path}")
+    print("Please ensure tinylcm is installed or in the Python path.")
+    sys.exit(1)
 
 from camera_handler import CameraHandler
 from device_id_manager import DeviceIDManager
