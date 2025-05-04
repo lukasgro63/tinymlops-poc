@@ -108,42 +108,44 @@ rm -rf "$TEMP_REPO"
 echo -e "${GREEN}✓ Files copied to appropriate directories${NC}"
 
 # 6. Create Python virtual environment if requested
-echo -e "\n${YELLOW}[6/9] Setting up Python environment...${NC}"
-read -p "Do you want to create a Python virtual environment? (recommended) (y/n) " CREATE_VENV
+echo -e "\n${YELLOW}[6/9] Python-Umgebung einrichten...${NC}"
+read -p "Möchten Sie ein Python virtuelles Environment erstellen? (nicht empfohlen) (y/N) " CREATE_VENV
 if [[ "$CREATE_VENV" =~ ^[Yy]$ ]]; then
-    echo -e "${YELLOW}Creating virtual environment...${NC}"
-    python3 -m venv "$BASE_DIR/venv"
+    echo -e "${YELLOW}Erstelle virtuelles Environment mit Zugriff auf System-Packages...${NC}"
+    # Wichtig: --system-site-packages erlaubt die Nutzung der systemeigenen Paketversionen für numpy, opencv etc.
+    python3 -m venv "$BASE_DIR/venv" --system-site-packages
     
-    # Create activation script
+    # Erstellle das Aktivierungsskript
     cat > "$BASE_DIR/activate_venv.sh" << 'EOF'
 #!/bin/bash
-# Activate the virtual environment
+# Aktiviere das virtuelle Environment
 source "$(dirname "$0")/venv/bin/activate"
-echo "Virtual environment activated. Run 'deactivate' to exit."
+echo "Virtuelles Environment aktiviert. 'deactivate' ausführen zum Beenden."
 EOF
     chmod +x "$BASE_DIR/activate_venv.sh"
     
-    # Source the virtual environment
+    # Aktiviere das virtuelle Environment
     source "$BASE_DIR/venv/bin/activate"
-    echo -e "${GREEN}✓ Virtual environment created and activated${NC}"
+    echo -e "${GREEN}✓ Virtuelles Environment erstellt und aktiviert${NC}"
     
-    # Install Python packages in venv
-    echo -e "${YELLOW}Installing Python packages...${NC}"
+    # Installiere Python-Pakete im venv, nutze aber systemeigene Pakete wo möglich
+    echo -e "${YELLOW}Installiere Python-Pakete...${NC}"
     pip install --upgrade pip
-    pip install numpy tflite-runtime requests psutil pyyaml
-    # Install TinyLCM as editable package
+    pip install tflite-runtime requests psutil pyyaml
+    # Installiere TinyLCM als editierbare Installation
     cd "$BASE_DIR/tinylcm"
     pip install -e .
     cd "$BASE_DIR"
 else
-    echo -e "${YELLOW}Installing Python packages system-wide...${NC}"
-    pip3 install numpy tflite-runtime requests psutil pyyaml --break-system-packages
-    # Install TinyLCM as editable package
+    echo -e "${YELLOW}Installiere Python-Pakete system-weit...${NC}"
+    # Für Raspberry Pi ist --break-system-packages erforderlich
+    pip3 install tflite-runtime requests psutil pyyaml --break-system-packages
+    # Installiere TinyLCM als editierbare Installation
     cd "$BASE_DIR/tinylcm"
     pip3 install -e . --break-system-packages
     cd "$BASE_DIR"
 fi
-echo -e "${GREEN}✓ Python environment setup complete${NC}"
+echo -e "${GREEN}✓ Python-Umgebung eingerichtet${NC}"
 
 # 7. Configure TinySphere connection
 echo -e "\n${YELLOW}[7/9] Configuring TinySphere connection...${NC}"
