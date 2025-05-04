@@ -62,6 +62,10 @@ data/
 # TinyLCM specific
 tinylcm_data/
 **/models/*
+# Allow model and label files in example/models
+!example/models/
+!example/models/*.tflite
+!example/models/*.txt
 !examples/*/models/*.md
 rover_data_*/
 

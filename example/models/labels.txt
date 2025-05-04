@@ -1,0 +1,10 @@
+background
+stone
+pebble
+rock
+granite
+marble
+slate
+quartz
+limestone
+sandstone
