@@ -5,9 +5,10 @@ import uuid
 from collections import deque
 
 from tinylcm.core.data_structures import FeatureSample, AdaptationEvent, AdaptiveState
-from tinylcm.core.base import AdaptiveComponent, AdaptiveClassifier, AdaptiveHandler
+from tinylcm.core.base import AdaptiveComponent, AdaptiveClassifier
 from tinylcm.core.feature_extractors.base import BaseFeatureExtractor, NullFeatureExtractor
 from tinylcm.core.handlers.hybrid import HybridHandler
+from tinylcm.core.handlers import AdaptiveHandler
 from tinylcm.core.classifiers.knn import LightweightKNN
 from tinylcm.core.state_manager import StateManager
 from tinylcm.core.adaptation_tracker import AdaptationTracker

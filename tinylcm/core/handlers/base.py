@@ -7,6 +7,7 @@ import copy
 
 from tinylcm.core.data_structures import FeatureSample, AdaptationEvent
 from tinylcm.core.classifiers.base import BaseAdaptiveClassifier
+from tinylcm.core.base import AdaptiveClassifier
 from tinylcm.core.drift_detection.cusum import AccuracyCUSUM
 from tinylcm.utils.logging import setup_logger
 

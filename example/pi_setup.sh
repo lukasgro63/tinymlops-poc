@@ -36,10 +36,14 @@ mkdir -p src/tinylcm_data/models
 mkdir -p src/tinylcm_data/data_logs
 mkdir -p src/tinylcm_data/inference_logs
 
-# Create symbolic link for launch script
-if [ -f "$BASE_DIR/src/launch.sh" ]; then
-  echo -e "${YELLOW}Creating symbolic link for launch script...${NC}"
-  ln -sf "$BASE_DIR/src/launch.sh" "$BASE_DIR/launch.sh"
+# Create symbolic link for launch script and make it executable
+echo -e "${YELLOW}Creating symbolic link for launch script...${NC}"
+chmod +x "$BASE_DIR/src/launch.sh" || true
+ln -sf "$BASE_DIR/src/launch.sh" "$BASE_DIR/launch.sh"
+if [ -f "$BASE_DIR/launch.sh" ]; then
+  echo -e "${GREEN}Symbolic link created successfully!${NC}"
+else
+  echo -e "${RED}Failed to create symbolic link${NC}"
 fi
 
 # Setup virtual environment if requested
