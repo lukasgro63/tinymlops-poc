@@ -1,14 +1,60 @@
-# TinyMLOps Stone Detector Example
+# TinyMLOps Stone Detector Examples
 
-This example demonstrates using TinyLCM for ML lifecycle management on a Raspberry Pi Zero 2W. The application detects stones using a TensorFlow Lite model, tracks inference metrics, logs detection data, and synchronizes with TinySphere.
+This directory contains example applications that demonstrate using TinyLCM for ML lifecycle management on resource-constrained devices like Raspberry Pi. The examples showcase different approaches to drift detection and adaptation.
 
-## Quick Setup (One-Line Installation)
+## Example Structure
+
+The examples are organized into different scenarios, each showcasing different features and capabilities of TinyLCM:
+
+- **Common components** (`camera_handler.py`, `sync_client.py`, etc.) are shared across all scenarios
+- **Scenario-specific implementations** (`scenarios/main_*.py`) demonstrate different adaptation and drift detection strategies
+- **Configuration files** (`scenarios/config_*.json`) provide specific settings for each scenario
+
+## Available Scenarios
+
+### Original Stone Detector
+
+**File:** `main.py`  
+**Config:** `config.json`
+
+The original stone detector example with basic TinyLCM integration.
+
+### Autonomous Proxy-Based Drift Detection
+
+**File:** `scenarios/main_autonomous.py`  
+**Config:** `scenarios/config_autonomous.json`
+
+This scenario demonstrates a fully autonomous adaptation system that:
+- Uses proxy metrics (confidence, distribution, features) to detect drift without ground truth labels
+- Quarantines samples that exhibit drift characteristics
+- Applies heuristic adaptation techniques to update the model without requiring external validation
+- Syncs with a central server for monitoring and tracking
+
+Key features:
+- Label-free drift detection
+- Edge autonomy (no central server requirements for adaptation)
+- Multiple proxy metrics for robust drift detection
+- Adaptive heuristic strategies based on clustering and confidence patterns
+
+## Running the Examples
+
+Use the `run_example.py` script to run different scenarios:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/lukasgro63/tinymlops-poc/main/example/setup_simple.sh | bash
+# List all available scenarios
+python run_example.py list
+
+# Run the autonomous scenario (default)
+python run_example.py run autonomous
+
+# Run any scenario with a custom config
+python run_example.py run autonomous --config path/to/custom_config.json
+
+# Run in headless mode (no GUI)
+python run_example.py run autonomous --headless
 ```
 
-Oder noch einfacher mit dem Ein-Zeilen-Installationsskript:
+## Quick Setup (One-Line Installation)
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/lukasgro63/tinymlops-poc/main/example/one_line_install.sh | bash
@@ -30,6 +76,7 @@ This command will download and run the setup script that will:
 - Adaptive inference pipeline with streamlined metrics collection
 - Non-blocking, asynchronous processing for responsive performance
 - Headless operation support for embedded deployments
+- Multiple drift detection and adaptation strategies
 
 ## Requirements
 
@@ -99,12 +146,12 @@ If you prefer a step-by-step setup, follow these instructions:
    chmod +x ~/tinymlops/launch.sh
    ```
 
-7. Review and modify config.json as needed:
+7. Make the run_example.py script executable:
    ```bash
-   nano ~/tinymlops/src/config.json
+   chmod +x ~/tinymlops/src/run_example.py
    ```
 
-## Running the Application
+## Running the Original Application
 
 ### Headless Mode (Recommended for deployment)
 
@@ -174,12 +221,14 @@ The application regularly synchronizes data with TinySphere, including:
 - Detected stone images and metadata
 - System metrics (CPU, memory usage)
 - Model status and performance data
+- Quarantined samples (if using autonomous drift detection)
 
-## Directory Structure
+## Updated Directory Structure
 
 ```
 example/
-     main.py                # Main application
+     main.py                # Original stone detector application
+     run_example.py         # Script to run different example scenarios
      camera_handler.py      # Camera handling with picamera2
      stone_detector.py      # TFLite inference
      sync_client.py         # TinySphere communication
@@ -193,6 +242,9 @@ example/
      models/                # TFLite models
        └── model.tflite     # Pre-included demo model
        └── labels.txt       # Pre-included labels file
+     scenarios/             # Different example scenarios
+       └── main_autonomous.py  # Autonomous proxy-based drift detection
+       └── config_autonomous.json # Configuration for autonomous mode
      tinylcm_data/          # TinyLCM data storage
      data/                  # Detection results
 ```
@@ -201,14 +253,16 @@ example/
 
 - The application implements non-blocking I/O to prevent performance bottlenecks
 - Inference runs in a dedicated thread pool
-- Adaptive pipeline replaces anomaly detection with lightweight adaptive inference
+- Different adaptation strategies (label-based, autonomous proxy-based) for different use cases
 - Data synchronization happens on a configurable interval
+- Background threads for quarantine processing and heuristic adaptation to prevent blocking main execution
 
 ## Troubleshooting
 
 - **Camera not working**: Ensure picamera2 is installed (`apt-get install python3-picamera2`)
 - **TinySphere connection fails**: Check network settings and server URL in config.json
 - **Model not found**: Ensure the models directory contains model.tflite and labels.txt
+- **Drift detection not working**: Check that the necessary TinyLCM components are properly initialized
 
 ## License
 

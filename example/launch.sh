@@ -4,6 +4,7 @@
 # Default to headless mode for Raspberry Pi environment
 HEADLESS=""
 CONFIG="config.json"
+SCENARIO=""
 
 # Check if running on Raspberry Pi and default to headless mode
 if [ -f /proc/device-tree/model ] && grep -q "Raspberry Pi" /proc/device-tree/model; then
@@ -26,9 +27,13 @@ while [[ $# -gt 0 ]]; do
             CONFIG="$2"
             shift 2
             ;;
+        --scenario)
+            SCENARIO="$2"
+            shift 2
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--gui|--headless] [--config CONFIG_PATH]"
+            echo "Usage: $0 [--gui|--headless] [--config CONFIG_PATH] [--scenario SCENARIO_NAME]"
             exit 1
             ;;
     esac
@@ -102,5 +107,17 @@ if [ -f "$SCRIPT_DIR/test_tinysphere_connection.py" ]; then
 fi
 
 # Launch the application
-echo "Starting Stone Detector application $HEADLESS with config $CONFIG"
-python3 main.py --config "$CONFIG" $HEADLESS
+if [ -z "$SCENARIO" ]; then
+    # Running the default application
+    echo "Starting Stone Detector application $HEADLESS with config $CONFIG"
+    python3 main.py --config "$CONFIG" $HEADLESS
+else
+    # Running a specific scenario using run_example.py
+    echo "Starting $SCENARIO scenario $HEADLESS with config $CONFIG"
+    if [ -f "$SCRIPT_DIR/run_example.py" ]; then
+        python3 run_example.py run "$SCENARIO" --config "$CONFIG" $HEADLESS
+    else
+        echo "Error: run_example.py not found in $SCRIPT_DIR"
+        exit 1
+    fi
+fi
