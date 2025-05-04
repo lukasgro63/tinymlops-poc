@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -181,7 +182,10 @@ class AutonomousStoneDetectorApp:
             "tinylcm_data/data_logs",
             "tinylcm_data/inference_logs",
             "tinylcm_data/quarantine",
-            "tinylcm_data/heuristic_logs"
+            "tinylcm_data/heuristic_logs",
+            "tinylcm_data/sync",
+            "tinylcm_data/sync/packages",
+            "tinylcm_data/sync/history"
         ]
         for directory in directories:
             os.makedirs(directory, exist_ok=True)
@@ -342,7 +346,7 @@ class AutonomousStoneDetectorApp:
             logger.info("Adaptive Pipeline initialized with autonomous components")
             
             # Initialize SyncInterface for data synchronization
-            from tinylcm.interfaces.storage import SyncInterface
+            from tinylcm.client.sync_interface import SyncInterface
             
             self.sync_interface = SyncInterface(
                 sync_dir="tinylcm_data/sync"
@@ -355,14 +359,18 @@ class AutonomousStoneDetectorApp:
             sys.exit(1)
         
         # Initialize SyncClient
+        self.sync_client = None
         try:
-            self.sync_client = SyncClient(
-                server_url=self.config["tinysphere"]["server_url"],
-                api_key=self.config["tinysphere"]["api_key"],
-                device_id=self.config["tinysphere"]["device_id"],
-                sync_interface=self.sync_interface
-            )
-            logger.info("SyncClient initialized successfully")
+            if hasattr(self, 'sync_interface') and self.sync_interface is not None:
+                self.sync_client = SyncClient(
+                    server_url=self.config["tinysphere"]["server_url"],
+                    api_key=self.config["tinysphere"]["api_key"],
+                    device_id=self.config["tinysphere"]["device_id"],
+                    sync_interface=self.sync_interface
+                )
+                logger.info("SyncClient initialized successfully")
+            else:
+                logger.warning("SyncInterface not available, skipping SyncClient initialization")
         except Exception as e:
             logger.error(f"Failed to initialize SyncClient: {e}")
             self.sync_client = None
@@ -548,14 +556,40 @@ class AutonomousStoneDetectorApp:
                         
                         # Sync quarantine data if available
                         if self.quarantine_buffer:
-                            # Synchronize quarantined samples
-                            quarantine_samples = self.quarantine_buffer.get_samples_for_sync()
-                            if quarantine_samples:
-                                self.sync_interface.add_quarantine_samples(
-                                    package_id=package_id,
-                                    samples=quarantine_samples
-                                )
-                                logger.info(f"Added {len(quarantine_samples)} quarantined samples to sync package")
+                            try:
+                                # Synchronize quarantined samples
+                                quarantine_samples = self.quarantine_buffer.get_samples_for_sync()
+                                if quarantine_samples:
+                                    # Create a temporary JSON file with the quarantine samples
+                                    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
+                                        tmp_path = tmp.name
+                                        json.dump(quarantine_samples, tmp)
+                                    
+                                    # Add the temporary file to the package
+                                    self.sync_interface.add_file_to_package(
+                                        package_id=package_id,
+                                        file_path=tmp_path,
+                                        file_type="quarantine_samples",
+                                        metadata={"count": len(quarantine_samples)}
+                                    )
+                                    
+                                    # Remove the temporary file
+                                    os.unlink(tmp_path)
+                                    
+                                    # Mark samples as synced
+                                    sample_ids = []
+                                    for sample in quarantine_samples:
+                                        if isinstance(sample, dict) and "sample_id" in sample:
+                                            sample_ids.append(sample["sample_id"])
+                                        elif hasattr(sample, "sample_id"):
+                                            sample_ids.append(sample.sample_id)
+                                    
+                                    if sample_ids:
+                                        self.quarantine_buffer.mark_as_synced(sample_ids)
+                                    
+                                    logger.info(f"Added {len(quarantine_samples)} quarantined samples to sync package")
+                            except Exception as e:
+                                logger.error(f"Failed to sync quarantine samples: {e}")
                         
                         # Finalize package
                         self.sync_interface.finalize_package(package_id)
