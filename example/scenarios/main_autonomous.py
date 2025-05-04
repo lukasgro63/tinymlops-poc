@@ -251,8 +251,14 @@ class AutonomousStoneDetectorApp:
             try:
                 from tinylcm.core.quarantine.buffer import QuarantineBuffer, QuarantineStrategy
                 
+                # Use default quarantine directory if not specified
+                quarantine_dir = self.config["tinylcm"].get("quarantine_dir", "tinylcm_data/quarantine")
+                
+                # Ensure quarantine directory exists
+                os.makedirs(quarantine_dir, exist_ok=True)
+                
                 self.quarantine_buffer = QuarantineBuffer(
-                    storage_dir=self.config["tinylcm"]["quarantine_dir"],
+                    storage_dir=quarantine_dir,
                     max_size=1000,
                     auto_persist=True,
                     quarantine_strategy=QuarantineStrategy.ALL_DRIFT_SAMPLES
@@ -271,13 +277,19 @@ class AutonomousStoneDetectorApp:
             try:
                 from tinylcm.core.heuristics.adapter import HeuristicAdapter, HeuristicStrategy
                 
+                # Use default heuristic directory if not specified
+                heuristic_dir = self.config["tinylcm"].get("heuristic_dir", "tinylcm_data/heuristic_logs")
+                
+                # Ensure heuristic directory exists
+                os.makedirs(heuristic_dir, exist_ok=True)
+                
                 self.heuristic_adapter = HeuristicAdapter(
                     quarantine_buffer=self.quarantine_buffer,
                     strategy=HeuristicStrategy.HYBRID,
                     min_cluster_size=5,
                     min_samples_for_adaptation=10,
                     confidence_threshold=self.config["tinylcm"].get("heuristic_confidence_threshold", 0.7),
-                    log_dir=self.config["tinylcm"]["heuristic_dir"],
+                    log_dir=heuristic_dir,
                     max_new_classes=3
                 )
                 logger.debug("Heuristic adapter initialized")
@@ -367,9 +379,35 @@ class AutonomousStoneDetectorApp:
             from tinylcm.core.drift_detection.distribution import PredictionDistributionMonitor
             from tinylcm.core.drift_detection.features import FeatureMonitor
             
+            # Default configuration if none provided
+            default_drift_config = {
+                "ewma_confidence": {
+                    "enabled": True,
+                    "lambda_param": 0.1,
+                    "threshold_factor": 3.0,
+                    "drift_window": 5,
+                    "training_size": 30
+                },
+                "distribution": {
+                    "enabled": True,
+                    "window_size": 50,
+                    "threshold": 0.25,
+                    "method": "block"
+                },
+                "feature": {
+                    "enabled": True,
+                    "window_size": 100,
+                    "threshold": 3.0,
+                    "reference_size": 50,
+                    "max_features": 50,
+                    "distance_metric": "euclidean"
+                }
+            }
+            
             # Add EWMA Confidence Monitor if enabled
-            if drift_config.get("ewma_confidence", {}).get("enabled", True):
-                ewma_config = drift_config.get("ewma_confidence", {})
+            ewma_enabled = drift_config.get("ewma_confidence", default_drift_config["ewma_confidence"]).get("enabled", True)
+            if ewma_enabled:
+                ewma_config = drift_config.get("ewma_confidence", default_drift_config["ewma_confidence"])
                 ewma_detector = EWMAConfidenceMonitor(
                     lambda_param=ewma_config.get("lambda_param", 0.1),
                     threshold_factor=ewma_config.get("threshold_factor", 3.0),
@@ -381,8 +419,9 @@ class AutonomousStoneDetectorApp:
                 logger.debug("EWMA Confidence Monitor initialized")
             
             # Add Distribution Monitor if enabled
-            if drift_config.get("distribution", {}).get("enabled", True):
-                dist_config = drift_config.get("distribution", {})
+            dist_enabled = drift_config.get("distribution", default_drift_config["distribution"]).get("enabled", True)
+            if dist_enabled:
+                dist_config = drift_config.get("distribution", default_drift_config["distribution"])
                 dist_detector = PredictionDistributionMonitor(
                     window_size=dist_config.get("window_size", 50),
                     threshold=dist_config.get("threshold", 0.25),
@@ -393,8 +432,9 @@ class AutonomousStoneDetectorApp:
                 logger.debug("Prediction Distribution Monitor initialized")
             
             # Add Feature Monitor if enabled
-            if drift_config.get("feature", {}).get("enabled", True):
-                feature_config = drift_config.get("feature", {})
+            feature_enabled = drift_config.get("feature", default_drift_config["feature"]).get("enabled", True)
+            if feature_enabled:
+                feature_config = drift_config.get("feature", default_drift_config["feature"])
                 feature_detector = FeatureMonitor(
                     window_size=feature_config.get("window_size", 100),
                     threshold=feature_config.get("threshold", 3.0),
