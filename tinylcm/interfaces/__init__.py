@@ -6,7 +6,6 @@ from tinylcm.interfaces.storage import (
     StreamingStorageBackend
 )
 from tinylcm.interfaces.monitoring import (
-    AnomalyDetector,
     MetricsProvider,
     MetricsConsumer,
     DataStreamProcessor
@@ -20,7 +19,6 @@ __all__ = [
     "StreamingStorageBackend",
     
     # Monitoring interfaces
-    "AnomalyDetector",
     "MetricsProvider",
     "MetricsConsumer",
     "DataStreamProcessor",

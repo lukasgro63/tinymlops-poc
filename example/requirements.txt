@@ -1,0 +1,10 @@
+
+numpy>=1.20.0
+opencv-python>=4.5.0
+tflite-runtime>=2.11.0
+requests>=2.25.0
+python-dateutil>=2.8.2
+# For Raspberry Pi camera support
+# Note: picamera2 should be installed via apt on Raspberry Pi OS Bookworm
+# sudo apt-get install -y python3-picamera2
+# For development environments, this will be skipped

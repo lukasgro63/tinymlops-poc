@@ -75,4 +75,12 @@ frontend/build/
 frontend/dist/
 
 # MacOS
+<<<<<<< Updated upstream
 .DS_Store
+=======
+.DS_Store
+
+# Others
+CLAUDE.md
+**/.claude/settings.local.json
+>>>>>>> Stashed changes

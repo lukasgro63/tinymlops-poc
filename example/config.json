@@ -1,0 +1,30 @@
+{
+    "camera": {
+        "resolution": [640, 480],
+        "framerate": 10,
+        "rotation": 0
+    },
+    "model": {
+        "path": "models/model.tflite",
+        "labels": "models/labels.txt",
+        "threshold": 0.5
+    },
+    "tinylcm": {
+        "model_dir": "tinylcm_data/models",
+        "data_dir": "tinylcm_data/data_logs",
+        "inference_dir": "tinylcm_data/inference_logs",
+        "sync_interval_seconds": 300
+    },
+    "tinysphere": {
+        "server_url": "http://192.168.0.66:8000",
+        "api_key": "test_key",
+        "device_id": "pi-zero-stone-detector"
+    },
+    "application": {
+        "detection_interval": 1,
+        "save_detected_stones": true,
+        "data_dir": "data",
+        "log_level": "INFO",
+        "headless": true
+    }
+}

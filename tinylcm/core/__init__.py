@@ -1,59 +1,73 @@
-"""
-Core components for the TinyLCM library.
+"""Core components for the TinyLCM library with adaptive learning capabilities.
 
-This module provides the main functional components of TinyLCM:
-- ModelManager: For model versioning and lifecycle management
-- DataLogger: For logging and organizing input/output data
-- TrainingTracker: For tracking training runs and experiments
-- InferenceMonitor: For monitoring inference performance
-- DriftDetector: For detecting data and prediction drift
+This module provides the main functional components of TinyLCM with a focus on adaptive ML:
+- AdaptivePipeline: Integration of feature extraction, classification, and adaptation
+- StateManager: For managing and persisting adaptive model states
+- AdaptationTracker: For tracking adaptation events and model changes
+
+The adaptive learning architecture replaces the previous ModelManager, TrainingTracker, 
+and DriftDetector components with a more integrated approach to online learning.
 """
 
-from tinylcm.core.model_manager import ModelManager
+# Main pipeline and management components
+from tinylcm.core.pipeline import AdaptivePipeline
+from tinylcm.core.state_manager import StateManager
+from tinylcm.core.adaptation_tracker import AdaptationTracker
+from tinylcm.core.data_structures import FeatureSample
+
+# Feature extraction components
+from tinylcm.core.feature_extractors import FeatureExtractor, TFLiteFeatureExtractor
+
+# Classification components
+from tinylcm.core.classifiers import AdaptiveClassifier, LightweightKNN
+
+# Adaptation strategy handlers
+from tinylcm.core.handlers import (
+    AdaptiveHandler,
+    PassiveHandler,
+    ActiveHandler,
+    HybridHandler
+)
+
+# Drift detection components
+from tinylcm.core.drift_detection import AccuracyCUSUM, CUSUMState
+
+# Retain DataLogger for backward compatibility and new feature logging
 from tinylcm.core.data_logger import DataLogger
-from tinylcm.core.training_tracker import TrainingTracker
+
+# Retain InferenceMonitor for basic inference monitoring
 from tinylcm.core.inference_monitor import (
     InferenceMonitor,
-    InferenceMetricsCollector,
-    AnomalyDetector,
-    ThresholdAnomalyDetector,
-    StatisticalAnomalyDetector,
-    CompositeAnomalyDetector,
-    anomaly_detector_registry
-)
-from tinylcm.core.drift_detector import (
-    DriftDetector,
-    DistributionDriftDetector,
-    FeatureStatisticsDriftDetector,
-    ConfidenceDriftDetector,
-    PredictionFrequencyDriftDetector,
-    CompositeDriftDetector,
-    drift_detector_registry
+    InferenceMetricsCollector
 )
 
 __all__ = [
-    # Model management
-    "ModelManager",
-    "DataLogger",
-    "TrainingTracker",
+    # Core adaptive components
+    "AdaptivePipeline",
+    "StateManager",
+    "AdaptationTracker",
+    "FeatureSample",
     
-    # Inference monitoring
-    "InferenceMonitor",
-    "InferenceMetricsCollector",
+    # Feature extraction
+    "FeatureExtractor",
+    "TFLiteFeatureExtractor",
     
-    # Anomaly detection
-    "AnomalyDetector",
-    "ThresholdAnomalyDetector",
-    "StatisticalAnomalyDetector",
-    "CompositeAnomalyDetector",
-    "anomaly_detector_registry",
+    # Classification
+    "AdaptiveClassifier",
+    "LightweightKNN",
+    
+    # Adaptation handlers
+    "AdaptiveHandler",
+    "PassiveHandler",
+    "ActiveHandler",
+    "HybridHandler",
     
     # Drift detection
-    "DriftDetector",
-    "DistributionDriftDetector",
-    "FeatureStatisticsDriftDetector",
-    "ConfidenceDriftDetector", 
-    "PredictionFrequencyDriftDetector",
-    "CompositeDriftDetector",
-    "drift_detector_registry",
+    "AccuracyCUSUM",
+    "CUSUMState",
+    
+    # Retained for backward compatibility
+    "DataLogger",
+    "InferenceMonitor",
+    "InferenceMetricsCollector",
 ]

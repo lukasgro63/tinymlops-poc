@@ -154,29 +154,96 @@ class SyncInterface:
         self.logger.debug(f"Added {count} files from directory {directory_path} to package {package_id}")
         return count
     
-    def create_package_from_components(self, device_id: str, model_manager=None, inference_monitor=None, data_logger=None, training_tracker=None, compression: Optional[str] = None) -> str:
-        if not any([model_manager, inference_monitor, data_logger, training_tracker]):
+    def create_package_from_components(self, device_id: str, 
+                             adaptive_pipeline=None, state_manager=None, 
+                             adaptation_tracker=None, inference_monitor=None, 
+                             data_logger=None, compression: Optional[str] = None) -> str:
+        """
+        Create a package from various TinyLCM components.
+        
+        Args:
+            device_id: Unique identifier for the device
+            adaptive_pipeline: Optional AdaptivePipeline instance
+            state_manager: Optional StateManager instance
+            adaptation_tracker: Optional AdaptationTracker instance
+            inference_monitor: Optional InferenceMonitor instance
+            data_logger: Optional DataLogger instance
+            compression: Compression type to use ("gzip", "zip", or None)
+            
+        Returns:
+            ID of the created package
+        """
+        if not any([adaptive_pipeline, state_manager, adaptation_tracker, inference_monitor, data_logger]):
             raise SyncError("At least one component must be provided")
-        package_id = self.create_package(device_id=device_id, package_type="components", description="Package with component data", compression=compression)
-        if model_manager:
+            
+        package_id = self.create_package(device_id=device_id, package_type="components", 
+                                      description="Package with component data", 
+                                      compression=compression)
+        
+        # Handle adaptive components
+        if adaptive_pipeline:
             try:
-                model_path = model_manager.load_model()
-                try:
-                    model_meta = model_manager.get_active_model_metadata()
-                    if hasattr(model_meta, "items"):
-                        safe_meta = {}
-                        for key, value in model_meta.items():
-                            if isinstance(value, (str, int, float, bool, list, dict)) or value is None:
-                                safe_meta[key] = value
-                    else:
-                        safe_meta = {"note": "Model metadata extraction limited"}
-                except Exception as meta_err:
-                    self.logger.warning(f"Error extracting model metadata: {meta_err}")
-                    safe_meta = {}
-                self.add_file_to_package(package_id=package_id, file_path=model_path, file_type="model", metadata=safe_meta)
-                self.logger.debug(f"Added model from ModelManager to package {package_id}")
+                # Save the current state if a state manager is provided
+                if state_manager:
+                    state_id = adaptive_pipeline.save_state()
+                    state_files = list(Path(state_manager.storage_dir).glob(f"{state_id}.*"))
+                    for state_file in state_files:
+                        self.add_file_to_package(
+                            package_id=package_id, 
+                            file_path=state_file, 
+                            file_type="adaptive_state",
+                            metadata={"state_id": state_id}
+                        )
+                    self.logger.debug(f"Added adaptive state from AdaptivePipeline to package {package_id}")
+                # If no state manager, try to serialize the pipeline stats directly
+                else:
+                    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
+                        tmp_path = tmp.name
+                        stats = adaptive_pipeline.get_statistics()
+                        json.dump(stats, tmp)
+                    self.add_file_to_package(
+                        package_id=package_id, 
+                        file_path=tmp_path, 
+                        file_type="adaptive_stats"
+                    )
+                    os.unlink(tmp_path)
+                    self.logger.debug(f"Added adaptive stats to package {package_id}")
             except Exception as e:
-                self.logger.warning(f"Failed to add model data to package: {e}")
+                self.logger.warning(f"Failed to add adaptive pipeline data to package: {e}")
+                
+        # Handle adaptation tracker
+        if adaptation_tracker:
+            try:
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    export_dir = os.path.join(temp_dir, "adaptation")
+                    # Export to MLflow format if possible
+                    if hasattr(adaptation_tracker, "export_to_mlflow"):
+                        adaptation_tracker.export_to_mlflow(export_dir)
+                        self.add_directory_to_package(
+                            package_id=package_id,
+                            directory_path=export_dir,
+                            recursive=True,
+                            file_type="adaptation_logs"
+                        )
+                    # Otherwise try to get events and metrics directly
+                    else:
+                        events = adaptation_tracker.get_events()
+                        metrics = adaptation_tracker.get_metrics()
+                        with open(os.path.join(temp_dir, "events.json"), "w") as f:
+                            json.dump([e.to_dict() if hasattr(e, "to_dict") else e for e in events], f)
+                        with open(os.path.join(temp_dir, "metrics.json"), "w") as f:
+                            json.dump(metrics, f)
+                        self.add_directory_to_package(
+                            package_id=package_id,
+                            directory_path=temp_dir,
+                            recursive=False,
+                            file_type="adaptation_data"
+                        )
+                    self.logger.debug(f"Added adaptation data to package {package_id}")
+            except Exception as e:
+                self.logger.warning(f"Failed to add adaptation data to package: {e}")
+        
+        # Handle inference monitor (unchanged)
         if inference_monitor:
             try:
                 metrics_path = inference_monitor.export_metrics(format="json")
@@ -184,6 +251,8 @@ class SyncInterface:
                 self.logger.debug(f"Added metrics from InferenceMonitor to package {package_id}")
             except Exception as e:
                 self.logger.warning(f"Failed to add metrics data to package: {e}")
+        
+        # Handle data logger (unchanged)
         if data_logger:
             try:
                 log_path = data_logger.export_to_csv()
@@ -191,18 +260,7 @@ class SyncInterface:
                 self.logger.debug(f"Added data log from DataLogger to package {package_id}")
             except Exception as e:
                 self.logger.warning(f"Failed to add data log to package: {e}")
-        if training_tracker:
-            try:
-                runs = training_tracker.list_runs()
-                if runs:
-                    with tempfile.TemporaryDirectory() as temp_dir:
-                        most_recent_run = runs[0]
-                        export_dir = os.path.join(temp_dir, "runs")
-                        training_tracker.export_to_mlflow_format(most_recent_run["run_id"], export_dir)
-                        self.add_directory_to_package(package_id=package_id, directory_path=export_dir, recursive=True, file_type="training_run")
-                        self.logger.debug(f"Added training run from TrainingTracker to package {package_id}")
-            except Exception as e:
-                self.logger.warning(f"Failed to add training data to package: {e}")
+                
         return package_id
     
     def finalize_package(self, package_id: str) -> str:

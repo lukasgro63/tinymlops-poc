@@ -1,10 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
-class AnomalyDetector(ABC):
-    @abstractmethod
-    def check_for_anomalies(self, record: Dict[str, Any], context: Dict[str, Any]) -> Tuple[bool, List[str]]:
-        pass
+# AnomalyDetector class has been removed as it's no longer needed.
+# Anomaly detection is now handled by the adaptive components.
 
 class MetricsProvider(ABC):
     @abstractmethod
@@ -26,6 +24,15 @@ class DataStreamProcessor(ABC):
         pass
 
 class DriftDetector(ABC):
+    """
+    DEPRECATED: This interface is deprecated. Please use the new adaptive handlers instead.
+    
+    For drift detection, use one of:
+    - tinylcm.core.handlers.ActiveHandler
+    - tinylcm.core.handlers.HybridHandler 
+    
+    These handlers integrate drift detection with accuracy-based CUSUM monitoring.
+    """
     @abstractmethod
     def create_reference_distribution(self, data: Dict[str, Any]) -> None:
         pass
@@ -40,4 +47,18 @@ class DriftDetector(ABC):
     
     @abstractmethod
     def reset(self) -> None:
+        pass
+        
+        
+class AdaptiveComponent(ABC):
+    """Interface for components that can participate in adaptive learning."""
+    
+    @abstractmethod
+    def get_state(self) -> Dict[str, Any]:
+        """Get the serializable state of the component."""
+        pass
+    
+    @abstractmethod
+    def set_state(self, state: Dict[str, Any]) -> None:
+        """Restore the component state from the provided state dictionary."""
         pass
