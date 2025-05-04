@@ -189,112 +189,158 @@ class AutonomousStoneDetectorApp:
 
     def initialize_tinylcm(self):
         """Initialize TinyLCM components with autonomous drift detection"""
-        # Initialize feature extractor
-        self.feature_extractor = tinylcm.TFLiteFeatureExtractor(
-            model_path=self.config["model"]["path"]
-        )
-        
-        # Initialize classifier
-        self.classifier = tinylcm.LightweightKNN(
-            k=3,
-            distance_metric="euclidean",
-            max_samples=100,
-            use_numpy=True,
-            weight_by_distance=False
-        )
-        
-        # Initialize State Manager
-        self.state_manager = tinylcm.StateManager(
-            storage_dir=self.config["tinylcm"]["model_dir"]
-        )
-        
-        # Initialize Adaptation Tracker
-        self.adaptation_tracker = tinylcm.AdaptationTracker(
-            log_dir=self.config["tinylcm"]["model_dir"],
-            auto_create_dir=True,
-            export_format="json"
-        )
-        
-        # Initialize DataLogger for data collection
-        self.data_logger = tinylcm.DataLogger(
-            storage_dir=self.config["tinylcm"]["data_dir"]
-        )
-        
-        # Initialize InferenceMonitor for basic metrics
-        self.inference_monitor = tinylcm.InferenceMonitor(
-            storage_dir=self.config["tinylcm"]["inference_dir"]
-        )
+        try:
+            # Import core components
+            from tinylcm.core.feature_extractors.tflite import TFLiteFeatureExtractor
+            from tinylcm.core.classifiers.knn import LightweightKNN
+            from tinylcm.core.state_manager import StateManager
+            from tinylcm.core.adaptation_tracker import AdaptationTracker
+            from tinylcm.core.data_logger.logger import DataLogger
+            from tinylcm.core.inference_monitor.monitor import InferenceMonitor
+            from tinylcm.core.handlers.hybrid import HybridHandler
+            
+            # Initialize feature extractor
+            self.feature_extractor = TFLiteFeatureExtractor(
+                model_path=self.config["model"]["path"]
+            )
+            
+            # Initialize classifier
+            self.classifier = LightweightKNN(
+                k=3,
+                distance_metric="euclidean",
+                max_samples=100,
+                use_numpy=True,
+                weight_by_distance=False
+            )
+            
+            # Initialize State Manager
+            self.state_manager = StateManager(
+                storage_dir=self.config["tinylcm"]["model_dir"]
+            )
+            
+            # Initialize Adaptation Tracker
+            self.adaptation_tracker = AdaptationTracker(
+                log_dir=self.config["tinylcm"]["model_dir"],
+                auto_create_dir=True,
+                export_format="json"
+            )
+            
+            # Initialize DataLogger for data collection
+            self.data_logger = DataLogger(
+                storage_dir=self.config["tinylcm"]["data_dir"]
+            )
+            
+            # Initialize InferenceMonitor for basic metrics
+            self.inference_monitor = InferenceMonitor(
+                storage_dir=self.config["tinylcm"]["inference_dir"]
+            )
+            
+        except ImportError as e:
+            logger.error(f"Failed to import core TinyLCM components: {str(e)}")
+            print(f"Error: Could not initialize TinyLCM core components: {str(e)}")
+            print("Please ensure tinylcm is properly installed with all required components.")
+            sys.exit(1)
         
         # Set up autonomous drift detectors
         drift_config = self.config["tinylcm"].get("drift_detection", {})
         self.autonomous_monitors = self._setup_autonomous_detectors(drift_config)
         
         # Set up quarantine buffer if enabled
+        self.quarantine_buffer = None
         if self.config["tinylcm"].get("enable_quarantine", True):
-            self.quarantine_buffer = tinylcm.QuarantineBuffer(
-                storage_dir=self.config["tinylcm"]["quarantine_dir"],
-                max_size=1000,
-                auto_persist=True,
-                quarantine_strategy=tinylcm.QuarantineStrategy.ALL_DRIFT_SAMPLES
-            )
-        else:
-            self.quarantine_buffer = None
+            try:
+                from tinylcm.core.quarantine.buffer import QuarantineBuffer, QuarantineStrategy
+                
+                self.quarantine_buffer = QuarantineBuffer(
+                    storage_dir=self.config["tinylcm"]["quarantine_dir"],
+                    max_size=1000,
+                    auto_persist=True,
+                    quarantine_strategy=QuarantineStrategy.ALL_DRIFT_SAMPLES
+                )
+                logger.debug("Quarantine buffer initialized")
+            except ImportError as e:
+                logger.error(f"Failed to import quarantine buffer: {str(e)}")
+                logger.warning("Quarantine buffer will be disabled")
+                print(f"Error importing quarantine buffer: {str(e)}")
+                print("Please ensure tinylcm and its quarantine modules are properly installed.")
         
         # Set up heuristic adapter if enabled
+        self.heuristic_adapter = None
         if (self.config["tinylcm"].get("enable_heuristic_adaptation", False) and 
             self.quarantine_buffer is not None):
-            self.heuristic_adapter = tinylcm.HeuristicAdapter(
-                quarantine_buffer=self.quarantine_buffer,
-                strategy=tinylcm.HeuristicStrategy.HYBRID,
-                min_cluster_size=5,
-                min_samples_for_adaptation=10,
-                confidence_threshold=self.config["tinylcm"].get("heuristic_confidence_threshold", 0.7),
-                log_dir=self.config["tinylcm"]["heuristic_dir"],
-                max_new_classes=3
-            )
-        else:
-            self.heuristic_adapter = None
+            try:
+                from tinylcm.core.heuristics.adapter import HeuristicAdapter, HeuristicStrategy
+                
+                self.heuristic_adapter = HeuristicAdapter(
+                    quarantine_buffer=self.quarantine_buffer,
+                    strategy=HeuristicStrategy.HYBRID,
+                    min_cluster_size=5,
+                    min_samples_for_adaptation=10,
+                    confidence_threshold=self.config["tinylcm"].get("heuristic_confidence_threshold", 0.7),
+                    log_dir=self.config["tinylcm"]["heuristic_dir"],
+                    max_new_classes=3
+                )
+                logger.debug("Heuristic adapter initialized")
+            except ImportError as e:
+                logger.error(f"Failed to import heuristic adapter: {str(e)}")
+                logger.warning("Heuristic adaptation will be disabled")
+                print(f"Error importing heuristic adapter: {str(e)}")
+                print("Please ensure tinylcm and its heuristic modules are properly installed.")
         
         # Initialize Hybrid Handler with classifier
-        self.hybrid_handler = tinylcm.HybridHandler(
-            classifier=self.classifier,
-            max_samples=100,
-            batch_size=30,
-            baseline_accuracy=0.9,
-            cusum_threshold=5.0,
-            cusum_delta=0.25,
-            enable_condensing=False,
-            use_numpy=True
-        )
-        
-        # Initialize Adaptive Pipeline with all components
-        self.adaptive_pipeline = tinylcm.AdaptivePipeline(
-            feature_extractor=self.feature_extractor,
-            classifier=self.classifier,
-            handler=self.hybrid_handler,
-            state_manager=self.state_manager,
-            adaptation_tracker=self.adaptation_tracker,
-            data_logger=self.data_logger,
-            config={
-                "enable_autonomous_detection": self.config["tinylcm"].get("enable_autonomous_detection", True),
-                "enable_quarantine": self.config["tinylcm"].get("enable_quarantine", True),
-                "enable_heuristic_adaptation": self.config["tinylcm"].get("enable_heuristic_adaptation", False),
-                "external_validation": self.config["tinylcm"].get("external_validation", False),
-                "quarantine_check_interval": self.config["tinylcm"].get("quarantine_check_interval", 50),
-                "heuristic_confidence_threshold": self.config["tinylcm"].get("heuristic_confidence_threshold", 0.7)
-            },
-            autonomous_monitors=self.autonomous_monitors,
-            quarantine_buffer=self.quarantine_buffer,
-            heuristic_adapter=self.heuristic_adapter
-        )
-        
-        # Register drift detection callback
-        self.adaptive_pipeline.register_drift_callback(self._on_drift_detected)
-        
-        # Initialize SyncInterface for data synchronization
-        self.sync_interface = tinylcm.SyncInterface(
-            sync_dir="tinylcm_data/sync"
-        )
+        try:
+            # Already imported in the try block above
+            self.hybrid_handler = HybridHandler(
+                classifier=self.classifier,
+                max_samples=100,
+                batch_size=30,
+                baseline_accuracy=0.9,
+                cusum_threshold=5.0,
+                cusum_delta=0.25,
+                enable_condensing=False,
+                use_numpy=True
+            )
+            
+            # Initialize Adaptive Pipeline with all components
+            from tinylcm.core.pipeline import AdaptivePipeline
+            
+            self.adaptive_pipeline = AdaptivePipeline(
+                feature_extractor=self.feature_extractor,
+                classifier=self.classifier,
+                handler=self.hybrid_handler,
+                state_manager=self.state_manager,
+                adaptation_tracker=self.adaptation_tracker,
+                data_logger=self.data_logger,
+                config={
+                    "enable_autonomous_detection": self.config["tinylcm"].get("enable_autonomous_detection", True),
+                    "enable_quarantine": self.config["tinylcm"].get("enable_quarantine", True),
+                    "enable_heuristic_adaptation": self.config["tinylcm"].get("enable_heuristic_adaptation", False),
+                    "external_validation": self.config["tinylcm"].get("external_validation", False),
+                    "quarantine_check_interval": self.config["tinylcm"].get("quarantine_check_interval", 50),
+                    "heuristic_confidence_threshold": self.config["tinylcm"].get("heuristic_confidence_threshold", 0.7)
+                },
+                autonomous_monitors=self.autonomous_monitors,
+                quarantine_buffer=self.quarantine_buffer,
+                heuristic_adapter=self.heuristic_adapter
+            )
+            
+            # Register drift detection callback
+            self.adaptive_pipeline.register_drift_callback(self._on_drift_detected)
+            
+            logger.info("Adaptive Pipeline initialized with autonomous components")
+            
+            # Initialize SyncInterface for data synchronization
+            from tinylcm.interfaces.storage import SyncInterface
+            
+            self.sync_interface = SyncInterface(
+                sync_dir="tinylcm_data/sync"
+            )
+            
+        except ImportError as e:
+            logger.error(f"Failed to import required components: {str(e)}")
+            print(f"Error: Could not initialize components: {str(e)}")
+            print("This likely means some components of the enhanced system are not available.")
+            sys.exit(1)
         
         # Initialize SyncClient
         try:
@@ -315,44 +361,56 @@ class AutonomousStoneDetectorApp:
         """Set up autonomous drift detectors based on configuration"""
         detectors = []
         
-        # Add EWMA Confidence Monitor if enabled
-        if drift_config.get("ewma_confidence", {}).get("enabled", True):
-            ewma_config = drift_config.get("ewma_confidence", {})
-            ewma_detector = tinylcm.EWMAConfidenceMonitor(
-                lambda_param=ewma_config.get("lambda_param", 0.1),
-                threshold_factor=ewma_config.get("threshold_factor", 3.0),
-                drift_window=ewma_config.get("drift_window", 5),
-                training_size=ewma_config.get("training_size", 30)
-            )
-            ewma_detector.register_callback(self._on_confidence_drift)
-            detectors.append(ewma_detector)
-            logger.debug("EWMA Confidence Monitor initialized")
+        try:
+            # Try to import the autonomous drift detector modules
+            from tinylcm.core.drift_detection.confidence import EWMAConfidenceMonitor, PageHinkleyConfidenceMonitor
+            from tinylcm.core.drift_detection.distribution import PredictionDistributionMonitor
+            from tinylcm.core.drift_detection.features import FeatureMonitor
+            
+            # Add EWMA Confidence Monitor if enabled
+            if drift_config.get("ewma_confidence", {}).get("enabled", True):
+                ewma_config = drift_config.get("ewma_confidence", {})
+                ewma_detector = EWMAConfidenceMonitor(
+                    lambda_param=ewma_config.get("lambda_param", 0.1),
+                    threshold_factor=ewma_config.get("threshold_factor", 3.0),
+                    drift_window=ewma_config.get("drift_window", 5),
+                    training_size=ewma_config.get("training_size", 30)
+                )
+                ewma_detector.register_callback(self._on_confidence_drift)
+                detectors.append(ewma_detector)
+                logger.debug("EWMA Confidence Monitor initialized")
+            
+            # Add Distribution Monitor if enabled
+            if drift_config.get("distribution", {}).get("enabled", True):
+                dist_config = drift_config.get("distribution", {})
+                dist_detector = PredictionDistributionMonitor(
+                    window_size=dist_config.get("window_size", 50),
+                    threshold=dist_config.get("threshold", 0.25),
+                    method=dist_config.get("method", "block")
+                )
+                dist_detector.register_callback(self._on_distribution_drift)
+                detectors.append(dist_detector)
+                logger.debug("Prediction Distribution Monitor initialized")
+            
+            # Add Feature Monitor if enabled
+            if drift_config.get("feature", {}).get("enabled", True):
+                feature_config = drift_config.get("feature", {})
+                feature_detector = FeatureMonitor(
+                    window_size=feature_config.get("window_size", 100),
+                    threshold=feature_config.get("threshold", 3.0),
+                    reference_size=feature_config.get("reference_size", 50),
+                    max_features=feature_config.get("max_features", 50),
+                    distance_metric=feature_config.get("distance_metric", "euclidean")
+                )
+                feature_detector.register_callback(self._on_feature_drift)
+                detectors.append(feature_detector)
+                logger.debug("Feature Monitor initialized")
         
-        # Add Distribution Monitor if enabled
-        if drift_config.get("distribution", {}).get("enabled", True):
-            dist_config = drift_config.get("distribution", {})
-            dist_detector = tinylcm.PredictionDistributionMonitor(
-                window_size=dist_config.get("window_size", 50),
-                threshold=dist_config.get("threshold", 0.25),
-                method=dist_config.get("method", "block")
-            )
-            dist_detector.register_callback(self._on_distribution_drift)
-            detectors.append(dist_detector)
-            logger.debug("Prediction Distribution Monitor initialized")
-        
-        # Add Feature Monitor if enabled
-        if drift_config.get("feature", {}).get("enabled", True):
-            feature_config = drift_config.get("feature", {})
-            feature_detector = tinylcm.FeatureMonitor(
-                window_size=feature_config.get("window_size", 100),
-                threshold=feature_config.get("threshold", 3.0),
-                reference_size=feature_config.get("reference_size", 50),
-                max_features=feature_config.get("max_features", 50),
-                distance_metric=feature_config.get("distance_metric", "euclidean")
-            )
-            feature_detector.register_callback(self._on_feature_drift)
-            detectors.append(feature_detector)
-            logger.debug("Feature Monitor initialized")
+        except ImportError as e:
+            logger.error(f"Failed to import autonomous drift detectors: {str(e)}")
+            logger.warning("Autonomous drift detection will be disabled")
+            print(f"Error importing drift detectors: {str(e)}")
+            print("Please ensure tinylcm and its autonomous drift detection modules are properly installed.")
         
         logger.info(f"Set up {len(detectors)} autonomous drift detectors")
         return detectors
