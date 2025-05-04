@@ -16,7 +16,7 @@ from tinylcm.core.adaptation_tracker import AdaptationTracker
 from tinylcm.core.data_structures import FeatureSample
 
 # Feature extraction components
-from tinylcm.core.feature_extractors import FeatureExtractor, TFLiteFeatureExtractor
+from tinylcm.core.feature_extractors import BaseFeatureExtractor, NullFeatureExtractor, PreprocessingFeatureExtractor, TFLiteFeatureExtractor
 
 # Classification components
 from tinylcm.core.classifiers import AdaptiveClassifier, LightweightKNN
@@ -49,7 +49,9 @@ __all__ = [
     "FeatureSample",
     
     # Feature extraction
-    "FeatureExtractor",
+    "BaseFeatureExtractor",
+    "NullFeatureExtractor",
+    "PreprocessingFeatureExtractor",
     "TFLiteFeatureExtractor",
     
     # Classification

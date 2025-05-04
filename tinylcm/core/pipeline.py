@@ -5,8 +5,8 @@ import uuid
 from collections import deque
 
 from tinylcm.core.data_structures import FeatureSample, AdaptationEvent, AdaptiveState
-from tinylcm.core.base import AdaptiveComponent, FeatureExtractor, AdaptiveClassifier, AdaptiveHandler
-from tinylcm.core.feature_extractors.base import NullFeatureExtractor
+from tinylcm.core.base import AdaptiveComponent, AdaptiveClassifier, AdaptiveHandler
+from tinylcm.core.feature_extractors.base import BaseFeatureExtractor, NullFeatureExtractor
 from tinylcm.core.handlers.hybrid import HybridHandler
 from tinylcm.core.classifiers.knn import LightweightKNN
 from tinylcm.core.state_manager import StateManager
@@ -28,7 +28,7 @@ class AdaptivePipeline:
     
     def __init__(
         self,
-        feature_extractor: Optional[FeatureExtractor] = None,
+        feature_extractor: Optional[BaseFeatureExtractor] = None,
         classifier: Optional[AdaptiveClassifier] = None,
         handler: Optional[AdaptiveHandler] = None,
         state_manager: Optional[StateManager] = None,
