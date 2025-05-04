@@ -90,9 +90,10 @@ cp -r example/* "$BASE_DIR/src/"
 chmod +x "$BASE_DIR/src/launch.sh"
 chmod +x "$BASE_DIR/src/"*.py 2>/dev/null || true
 
-# Symbolischer Link für launch.sh
+# Symbolischer Link für launch.sh - Wichtig: Mit absolutem Pfad
 ln -sf "$BASE_DIR/src/launch.sh" "$BASE_DIR/launch.sh"
 chmod +x "$BASE_DIR/launch.sh"
+chmod +x "$BASE_DIR/src/launch.sh"
 
 # Temporäres Verzeichnis entfernen
 cd "$HOME"

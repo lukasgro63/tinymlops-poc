@@ -153,9 +153,13 @@ class AsyncStoneDetectorApp:
             model_path=self.config["model"]["path"]
         )
         
+        # LightweightKNN with correct parameters
         classifier = tinylcm.LightweightKNN(
             k=3,
-            distance_threshold=0.5
+            distance_metric="euclidean",
+            max_samples=100,
+            use_numpy=True,
+            weight_by_distance=False
         )
         
         # Initialize State Manager (replaces ModelManager)
@@ -168,14 +172,26 @@ class AsyncStoneDetectorApp:
             storage_dir=self.config["tinylcm"]["model_dir"]
         )
         
+        # Initialize Hybrid Handler with classifier
+        hybrid_handler = tinylcm.HybridHandler(
+            classifier=classifier,
+            max_samples=100,
+            batch_size=30,
+            baseline_accuracy=0.9,
+            cusum_threshold=5.0,
+            cusum_delta=0.25,
+            enable_condensing=False,
+            use_numpy=True
+        )
+        
         # Initialize Adaptive Pipeline with Hybrid Handler
         self.adaptive_pipeline = tinylcm.AdaptivePipeline(
             feature_extractor=feature_extractor,
-            classifier=classifier,
-            handler=tinylcm.HybridHandler(),
+            handler=hybrid_handler,
             state_manager=self.state_manager,
             adaptation_tracker=self.adaptation_tracker,
-            auto_save=True
+            data_logger=None,  # We'll set this up separately
+            config={"auto_save": True}  # Use config dict instead of auto_save parameter
         )
         
         # Initialize DataLogger for data collection

@@ -59,14 +59,31 @@ fi
 # Add TinyLCM directory to PYTHONPATH
 export PYTHONPATH="${PYTHONPATH}:$BASE_DIR"
 
-# Check for config file existence
+# Ensure CONFIG is an absolute path or relative to SCRIPT_DIR
+if [[ "$CONFIG" != /* ]]; then  # If not an absolute path
+    if [ -f "$SCRIPT_DIR/$CONFIG" ]; then
+        # Config exists in script directory
+        CONFIG="$SCRIPT_DIR/$CONFIG"
+    elif [ -f "$BASE_DIR/$CONFIG" ]; then
+        # Config exists in base directory
+        CONFIG="$BASE_DIR/$CONFIG"
+    else
+        echo "Error: Config file $CONFIG not found in $SCRIPT_DIR or $BASE_DIR"
+        exit 1
+    fi
+fi
+
+# Double check that config file exists
 if [ ! -f "$CONFIG" ]; then
     echo "Error: Config file $CONFIG not found"
     exit 1
 fi
 
+# Change to script directory for proper paths
+cd "$SCRIPT_DIR"
+
 # Check TinySphere connection if available
-if [ -f "test_tinysphere_connection.py" ]; then
+if [ -f "$SCRIPT_DIR/test_tinysphere_connection.py" ]; then
     echo "Testing TinySphere connection..."
     if python3 test_tinysphere_connection.py | grep -q "✅ Server is online"; then
         echo "TinySphere connection successful!"
