@@ -85,7 +85,10 @@ cd "$SCRIPT_DIR"
 # Check TinySphere connection if available
 if [ -f "$SCRIPT_DIR/test_tinysphere_connection.py" ]; then
     echo "Testing TinySphere connection..."
-    if python3 test_tinysphere_connection.py | grep -q "✅ Server is online"; then
+    CONNECTION_RESULT=$(python3 test_tinysphere_connection.py)
+    echo "$CONNECTION_RESULT"
+    
+    if echo "$CONNECTION_RESULT" | grep -q "✅"; then
         echo "TinySphere connection successful!"
     else
         echo "Warning: TinySphere connection might not be working correctly"

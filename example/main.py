@@ -169,7 +169,9 @@ class AsyncStoneDetectorApp:
         
         # Initialize Adaptation Tracker
         self.adaptation_tracker = tinylcm.AdaptationTracker(
-            storage_dir=self.config["tinylcm"]["model_dir"]
+            log_dir=self.config["tinylcm"]["model_dir"],  # Parameter is log_dir, not storage_dir
+            auto_create_dir=True,
+            export_format="json"
         )
         
         # Initialize Hybrid Handler with classifier
