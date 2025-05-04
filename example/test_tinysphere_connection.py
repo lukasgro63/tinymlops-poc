@@ -25,17 +25,19 @@ def load_config(config_path="config.json"):
         logger.error(f"❌ Failed to load config: {e}")
         return None
 
-def test_connection(server_url, api_key=None, timeout=5):
+def test_connection(server_url, api_key=None, device_id=None, timeout=5):
     """Test connection to TinySphere server"""
     try:
         # Prepare headers
         headers = {}
         if api_key:
-            headers["X-API-Key"] = api_key
+            headers["Authorization"] = f"Bearer {api_key}"
+            if device_id:
+                headers["X-Device-ID"] = device_id
         
-        # Make a simple GET request to the health endpoint
-        health_url = f"{server_url}/api/health"
-        response = requests.get(health_url, headers=headers, timeout=timeout)
+        # Make a simple GET request to the status endpoint
+        status_url = f"{server_url}/api/status"
+        response = requests.get(status_url, headers=headers, timeout=timeout)
         
         # Check response
         if response.status_code == 200:
@@ -60,13 +62,14 @@ def main():
     # Extract TinySphere settings
     server_url = config.get("tinysphere", {}).get("server_url")
     api_key = config.get("tinysphere", {}).get("api_key")
+    device_id = config.get("tinysphere", {}).get("device_id")
     
     if not server_url:
         logger.error("❌ Server URL not found in configuration")
         return 1
     
     # Test connection
-    success, message = test_connection(server_url, api_key)
+    success, message = test_connection(server_url, api_key, device_id)
     logger.info(message)
     
     return 0 if success else 1

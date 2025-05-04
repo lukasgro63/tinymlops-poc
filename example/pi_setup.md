@@ -4,7 +4,7 @@ This guide helps you set up TinyMLOps on a Raspberry Pi Zero 2W with Picamera v2
 
 ## Prerequisites
 
-- Raspberry Pi Zero 2W
+- Raspberry Pi Zero 2W (or better)
 - Picamera v2
 - MicroSD card (8GB or larger)
 - Raspberry Pi OS Lite (32-bit) Bookworm
@@ -41,19 +41,54 @@ sudo raspi-config
 sudo reboot
 ```
 
-### 4. Create Project Structure
+### 4. Setup Project Using Automated Script
+
+We've created a setup script that will automate the installation process for you:
 
 ```bash
-# Create main directory
-mkdir -p ~/tinymlops
-cd ~/tinymlops
+# Clone the repository (only the example directory)
+git clone --filter=blob:none --sparse https://github.com/lukasgro63/tinymlops-poc.git temp_repo
+cd temp_repo
+git sparse-checkout set example
+cp example/pi_setup.sh ~
+cd ~
+rm -rf temp_repo
 
-# Create subdirectories
-mkdir -p tinylcm
-mkdir -p src
+# Make script executable
+chmod +x ~/pi_setup.sh
+
+# Run the setup script
+~/pi_setup.sh
 ```
 
-### 5. Install Dependencies
+The setup script will:
+- Create the proper directory structure
+- Create virtual environment (optional)
+- Install dependencies
+- Set up directories for models and data
+
+### 5. Clone Repository and Install TinyLCM
+
+```bash
+cd ~/tinymlops
+
+# Clone only needed directories
+git clone --filter=blob:none --sparse https://github.com/lukasgro63/tinymlops-poc.git temp_repo
+cd temp_repo
+git sparse-checkout set tinylcm example
+
+# Move directories to correct locations
+cp -r tinylcm/* ../tinylcm/
+cp -r example/* ../src/
+cd ..
+rm -rf temp_repo
+
+# Install TinyLCM as a library
+cd ~/tinymlops/tinylcm
+pip3 install -e . --break-system-packages
+```
+
+### 6. Install Dependencies
 
 ```bash
 # Update system
@@ -64,39 +99,40 @@ sudo apt install -y python3-picamera2 python3-libcamera
 sudo apt install -y python3-opencv
 sudo apt install -y git
 
-# Install Python packages
+# Install Python packages if not using a virtual environment
 pip3 install numpy==1.23.5 tflite-runtime requests psutil --break-system-packages
 ```
 
-### 6. Clone Repository (Sparse Checkout)
+### 7. Configure TinySphere Connection
+
+Edit the configuration file to set up TinySphere connection:
+
+```bash
+cd ~/tinymlops/src
+nano config.json
+```
+
+Update the TinySphere section:
+```json
+"tinysphere": {
+    "server_url": "http://your-server-ip:8000",
+    "api_key": "your-api-key",
+    "device_id": "pi-zero-unique-id"
+}
+```
+
+### 8. Test TinySphere Connection
+
+```bash
+cd ~/tinymlops/src
+python3 test_tinysphere_connection.py
+```
+
+### 9. Run the Application
 
 ```bash
 cd ~/tinymlops
-
-# Clone only needed directories
-git clone --filter=blob:none --sparse https://github.com/lukasgro63/tinymlops-poc.git temp_repo
-cd temp_repo
-git sparse-checkout set tinylcm examples
-
-# Move directories to correct locations
-cp -r tinylcm/* ../tinylcm/
-cp -r examples/* ../src/
-cd ..
-rm -rf temp_repo
-```
-
-### 7. Install TinyLCM as Library
-
-```bash
-cd ~/tinymlops/tinylcm
-pip3 install -e . --break-system-packages
-```
-
-### 8. Verify Installation
-
-```python
-cd ~/tinymlops/src
-python3 -c "import tinylcm; import cv2; import picamera2; import tflite_runtime.interpreter as tflite; print('All packages imported successfully!')"
+./launch.sh
 ```
 
 ## Project Structure

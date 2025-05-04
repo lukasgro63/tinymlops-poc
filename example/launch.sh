@@ -34,20 +34,30 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Determine script's location and base directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
+
+# If running from a symlink (like in our new structure)
+if [[ -L "${BASH_SOURCE[0]}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "$(readlink "${BASH_SOURCE[0]}")")" && pwd)"
+    BASE_DIR="$(dirname "$SCRIPT_DIR")"
+fi
+
 # Activate virtual environment if it exists
-if [ -d "venv" ]; then
+if [ -d "$BASE_DIR/venv" ]; then
     echo "Activating virtual environment..."
-    source venv/bin/activate
+    source "$BASE_DIR/venv/bin/activate"
 fi
 
 # Check if TinyLCM is available
-if [ ! -d "../tinylcm" ]; then
-    echo "Warning: TinyLCM directory not found at ../tinylcm"
-    echo "Make sure TinyLCM is installed in the parent directory"
+if [ ! -d "$BASE_DIR/tinylcm" ]; then
+    echo "Warning: TinyLCM directory not found at $BASE_DIR/tinylcm"
+    echo "Make sure TinyLCM is installed in the correct directory"
 fi
 
-# Add parent directory to PYTHONPATH so we can import tinylcm
-export PYTHONPATH="${PYTHONPATH}:$(dirname $(pwd))"
+# Add TinyLCM directory to PYTHONPATH
+export PYTHONPATH="${PYTHONPATH}:$BASE_DIR"
 
 # Check for config file existence
 if [ ! -f "$CONFIG" ]; then
