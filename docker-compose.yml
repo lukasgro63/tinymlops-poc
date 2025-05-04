@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL database for TinySphere
   postgres:
@@ -46,6 +44,8 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_BROWSER_SECURE_FRAMING: "false"
+      MINIO_BROWSER_REDIRECT_ALLOW_HOSTS: "*"
     volumes:
       - minio-data:/data
     ports:
@@ -60,6 +60,26 @@ services:
       timeout: 5s
       retries: 5
 
+  # MinIO setup service to create buckets
+  minio-setup:
+    image: minio/mc:latest
+    container_name: tinysphere-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc config host add minio http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb minio/mlflow;
+      /usr/bin/mc policy set download minio/mlflow;
+      exit 0;
+      "
+    networks:
+      - tinysphere-network
+
   # MLflow tracking server
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest
@@ -70,7 +90,7 @@ services:
       minio-setup:
         condition: service_completed_successfully
     command: >
-      bash -c "pip install psycopg2-binary && 
+      bash -c "pip install psycopg2-binary boto3 && 
       mlflow server 
       --backend-store-uri postgresql://mlflow:mlflow@mlflow-postgres:5432/mlflow 
       --default-artifact-root s3://mlflow/
@@ -88,7 +108,7 @@ services:
   tinysphere-api:
     build:
       context: .
-      dockerfile: docker/Dockerfile.tinysphere
+      dockerfile: tinysphere/docker/Dockerfile.backend
     container_name: tinysphere-api
     depends_on:
       postgres:
@@ -106,13 +126,30 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_SECURE: "False"
       PYTHONUNBUFFERED: "1"
+      PYTHONPATH: /app/tinylcm:/app  # Wichtig für Imports
     ports:
       - "8000:8000"
     networks:
       - tinysphere-network
     volumes:
-      - ./tinysphere:/app/tinysphere
-      - ./tinylcm:/app/tinylcm
+      - ./tinysphere/api:/app/tinysphere/api
+      - ./tinysphere/db:/app/tinysphere/db
+      - ./tinysphere/importer:/app/tinysphere/importer
+      - ./tinysphere/requirements.txt:/app/requirements.txt
+      - ./tinylcm:/app/tinylcm  # Für Development
+      - ./uploads:/app/uploads
+      
+  tinysphere-frontend:
+    build:
+      context: .
+      dockerfile: tinysphere/docker/Dockerfile.frontend
+    container_name: tinysphere-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - tinysphere-api
+    networks:
+      - tinysphere-network
 
 networks:
   tinysphere-network:
