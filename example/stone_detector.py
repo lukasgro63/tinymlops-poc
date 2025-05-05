@@ -276,6 +276,24 @@ class StoneDetector:
                                     # Add detection
                                     detections.append((int(class_id), float(score), box))
                     
+                    # Special case for (1, 1) output - binary classifier
+                    elif len(output_shape) == 2 and output_shape[1] == 1:
+                        # This is likely a binary classifier with a single score
+                        score = float(output[0][0])
+                        print(f"Binary classifier with score: {score}")
+                        
+                        # Use score directly - often 0.5 is decision boundary but we'll use threshold
+                        if score > self.threshold:
+                            # Make the whole image a detection
+                            h, w = image.shape[:2]
+                            box = (0, 0, w, h)
+                            
+                            # For binary classifier, class is 0 or 1
+                            class_id = 1 if score > 0.5 else 0
+                            
+                            # Add to detections
+                            detections.append((class_id, float(score), box))
+                    
                     # For any other single-output format, try to just use it as is
                     # This works for many simple classification/detection models
                     elif len(output_shape) >= 1:

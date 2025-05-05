@@ -290,6 +290,23 @@ def analyze_detector_outputs(outputs, score_threshold=0.5):
                         if count >= 5:
                             break
             
+            elif len(shape) == 2 and shape[1] == 1:
+                # Special case for binary classification
+                score = float(output_data[0])
+                print("\nBinary classifier with single output")
+                print(f"Score: {score:.6f}")
+                
+                # Interpret the score
+                if 0 <= score <= 1:
+                    prediction = "Positive (class 1)" if score > 0.5 else "Negative (class 0)"
+                    confidence = max(score, 1-score)
+                    print(f"Prediction: {prediction} with confidence {confidence:.2f}")
+                    print(f"This is {'above' if score > score_threshold else 'below'} the threshold {score_threshold}")
+                else:
+                    # Not a standard probability score
+                    print("Score is not in the range [0,1], may need different interpretation")
+                    print("Possible logit output (pre-sigmoid) or custom scoring")
+            
             elif len(shape) == 2 and shape[1] <= 1001:
                 # Likely a classification model
                 print("\nLikely a classification model with output format [batch, classes]")

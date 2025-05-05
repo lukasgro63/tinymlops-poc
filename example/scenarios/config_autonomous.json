@@ -7,7 +7,7 @@
     "model": {
         "path": "models/model.tflite",
         "labels": "models/labels.txt",
-        "threshold": 0.5
+        "threshold": 0.1  /* Lower threshold for binary classifier to detect more samples */
     },
     "tinylcm": {
         "model_dir": "tinylcm_data/models",
