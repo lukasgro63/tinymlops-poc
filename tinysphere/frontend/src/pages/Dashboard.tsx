@@ -167,8 +167,9 @@ const Dashboard: React.FC = () => {
         <Box sx={{ flex: '1 1 220px', minWidth: '220px' }}>
           <StatusCard
             title="Models"
-            value={`${modelsInProduction}/${modelSummaries?.length || 0}`}
-            secondaryLabel="Production/Total"
+            value={modelSummaries?.length || 0}
+            secondaryValue={`${modelsInProduction}`}
+            secondaryLabel="In Production"
             icon={<PsychologyIcon style={{ fontSize: 24, color: '#E5A823' }} />}
             color="#E5A823" // TinyLCM secondary color
           />

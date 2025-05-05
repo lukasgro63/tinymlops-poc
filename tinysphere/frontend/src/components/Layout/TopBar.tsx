@@ -193,6 +193,10 @@ const TopBar: React.FC<TopBarProps> = ({
   };
   
   const handleNotificationsClose = () => {
+    // Mark all notifications as read when the notification menu is closed
+    if (unreadCount > 0) {
+      handleMarkAllAsRead();
+    }
     setNotificationsAnchor(null);
   };
   
