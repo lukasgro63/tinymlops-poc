@@ -568,16 +568,16 @@ class AutonomousStoneDetectorApp:
         """Worker thread for handling sync operations"""
         logger.info("Sync worker thread started")
         
-        # Don't sync immediately - wait for the first interval
+        # Don't sync immediately - wait for a short initial delay
         # This prevents blocking during startup when network might not be available
-        time.sleep(10)  # Short initial delay
+        time.sleep(5)  # Reduced initial delay for faster testing
         
         sync_count = 0
         
         while not self.stop_event.is_set():
             try:
-                # Check if it's time to sync
-                sync_interval = self.config["tinylcm"]["sync_interval_seconds"]
+                # Get sync interval from config, but ensure it's not more than 60 seconds
+                sync_interval = min(self.config["tinylcm"].get("sync_interval_seconds", 60), 60)
                 logger.debug(f"Waiting {sync_interval}s for next sync operation (count: {sync_count})")
                 
                 # Use a loop with shorter sleeps to check stop_event more frequently
