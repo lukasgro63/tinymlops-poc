@@ -133,62 +133,60 @@ const ValidationDialog: React.FC<ValidationDialogProps> = ({
       <DialogTitle>Validate Drift Sample</DialogTitle>
       <DialogContent>
         {sample && (
-          <Box sx={{ pt: 1 }}>
-            <Grid container spacing={2}>
-              <Grid item xs={12}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Sample ID: {sample.sample_id}
-                </Typography>
+          <Box sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>
+                Sample ID: {sample.sample_id}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                Prediction: {sample.prediction || 'None'}
+              </Typography>
+              {sample.confidence && (
                 <Typography variant="body2" color="text.secondary" gutterBottom>
-                  Prediction: {sample.prediction || 'None'}
+                  Confidence: {(sample.confidence * 100).toFixed(2)}%
                 </Typography>
-                {sample.confidence && (
-                  <Typography variant="body2" color="text.secondary" gutterBottom>
-                    Confidence: {(sample.confidence * 100).toFixed(2)}%
-                  </Typography>
-                )}
-              </Grid>
+              )}
+            </Box>
 
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={isValid}
-                      onChange={(e) => setIsValid(e.target.checked)}
-                      color="primary"
-                    />
-                  }
-                  label="This is a valid drift case"
-                />
-              </Grid>
+            <Box>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={isValid}
+                    onChange={(e) => setIsValid(e.target.checked)}
+                    color="primary"
+                  />
+                }
+                label="This is a valid drift case"
+              />
+            </Box>
 
-              <Grid item xs={12}>
-                <TextField
-                  label="True Label"
-                  value={trueLabel}
-                  onChange={(e) => setTrueLabel(e.target.value)}
-                  fullWidth
-                  variant="outlined"
-                  disabled={!isValid}
-                  helperText={isValid ? "Enter the correct label for this sample" : "No label needed for invalid drift"}
-                  size="small"
-                />
-              </Grid>
+            <Box>
+              <TextField
+                label="True Label"
+                value={trueLabel}
+                onChange={(e) => setTrueLabel(e.target.value)}
+                fullWidth
+                variant="outlined"
+                disabled={!isValid}
+                helperText={isValid ? "Enter the correct label for this sample" : "No label needed for invalid drift"}
+                size="small"
+              />
+            </Box>
 
-              <Grid item xs={12}>
-                <TextField
-                  label="Notes"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  fullWidth
-                  variant="outlined"
-                  multiline
-                  rows={3}
-                  placeholder="Add any notes about this validation..."
-                  size="small"
-                />
-              </Grid>
-            </Grid>
+            <Box>
+              <TextField
+                label="Notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                fullWidth
+                variant="outlined"
+                multiline
+                rows={3}
+                placeholder="Add any notes about this validation..."
+                size="small"
+              />
+            </Box>
           </Box>
         )}
       </DialogContent>
@@ -230,9 +228,8 @@ const StatusUpdateDialog: React.FC<{
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>Update Drift Event Status</DialogTitle>
       <DialogContent>
-        <Box sx={{ pt: 1 }}>
-          <Grid container spacing={2}>
-            <Grid item xs={12}>
+        <Box sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Box>
               <FormControl fullWidth size="small">
                 <InputLabel id="status-select-label">Status</InputLabel>
                 <Select
@@ -259,9 +256,9 @@ const StatusUpdateDialog: React.FC<{
                   ))}
                 </Select>
               </FormControl>
-            </Grid>
+            </Box>
 
-            <Grid item xs={12}>
+            <Box>
               <TextField
                 label="Resolution Notes"
                 value={notes}
@@ -273,9 +270,8 @@ const StatusUpdateDialog: React.FC<{
                 placeholder="Add any notes about this status update..."
                 size="small"
               />
-            </Grid>
-          </Grid>
-        </Box>
+            </Box>
+          </Box>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
@@ -506,8 +502,8 @@ const DriftEventPage: React.FC = () => {
       
       {/* Event summary */}
       <Paper sx={{ p: 3, mb: 3 }} elevation={2}>
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={8}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+          <Box sx={{ flex: '1 1 500px', minWidth: '300px' }}>
             <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
               <DriftTypeIcon type={event.drift_type} />
               <Typography variant="h6" component="h2">
@@ -522,17 +518,17 @@ const DriftEventPage: React.FC = () => {
               />
             </Stack>
             
-            <Grid container spacing={2}>
-              <Grid item xs={6} md={4}>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+              <Box sx={{ flex: '1 1 150px', minWidth: '120px' }}>
                 <Typography variant="body2" color="text.secondary">
                   Event ID
                 </Typography>
                 <Typography variant="body1" sx={{ fontFamily: 'monospace' }}>
                   {event.event_id}
                 </Typography>
-              </Grid>
+              </Box>
               
-              <Grid item xs={6} md={4}>
+              <Box sx={{ flex: '1 1 150px', minWidth: '120px' }}>
                 <Typography variant="body2" color="text.secondary">
                   Device ID
                 </Typography>
@@ -541,47 +537,47 @@ const DriftEventPage: React.FC = () => {
                     {event.device_id}
                   </Link>
                 </Typography>
-              </Grid>
+              </Box>
               
-              <Grid item xs={6} md={4}>
+              <Box sx={{ flex: '1 1 150px', minWidth: '120px' }}>
                 <Typography variant="body2" color="text.secondary">
                   Model ID
                 </Typography>
                 <Typography variant="body1">
                   {event.model_id || 'N/A'}
                 </Typography>
-              </Grid>
+              </Box>
               
-              <Grid item xs={6} md={4}>
+              <Box sx={{ flex: '1 1 150px', minWidth: '120px' }}>
                 <Typography variant="body2" color="text.secondary">
                   Detector
                 </Typography>
                 <Typography variant="body1">
                   {event.detector_name || 'Unknown'}
                 </Typography>
-              </Grid>
+              </Box>
               
-              <Grid item xs={6} md={4}>
+              <Box sx={{ flex: '1 1 150px', minWidth: '120px' }}>
                 <Typography variant="body2" color="text.secondary">
                   Drift Score
                 </Typography>
                 <Typography variant="body1">
                   {event.drift_score !== undefined ? event.drift_score.toFixed(4) : 'N/A'}
                 </Typography>
-              </Grid>
+              </Box>
               
-              <Grid item xs={6} md={4}>
+              <Box sx={{ flex: '1 1 150px', minWidth: '120px' }}>
                 <Typography variant="body2" color="text.secondary">
                   Detected At
                 </Typography>
                 <Typography variant="body1">
                   {event.timestamp && format(parseISO(event.timestamp), 'MMM d, yyyy HH:mm:ss')}
                 </Typography>
-              </Grid>
-            </Grid>
-          </Grid>
+              </Box>
+            </Box>
+          </Box>
           
-          <Grid item xs={12} md={4}>
+          <Box sx={{ flex: '1 1 300px', minWidth: '250px' }}>
             <Paper sx={{ p: 2, bgcolor: '#f5f5f5' }} variant="outlined">
               <Typography variant="subtitle2" gutterBottom>
                 Event Statistics
@@ -639,8 +635,8 @@ const DriftEventPage: React.FC = () => {
                 </Typography>
               )}
             </Paper>
-          </Grid>
-        </Grid>
+          </Box>
+        </Box>
       </Paper>
       
       {/* Samples table */}

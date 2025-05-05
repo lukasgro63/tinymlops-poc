@@ -196,11 +196,9 @@ const DriftPage: React.FC = () => {
       </Box>
       
       {/* Statistics dashboard */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12}>
-          <DriftStatisticsCard title="Drift Detection Overview" days={30} />
-        </Grid>
-      </Grid>
+      <Box sx={{ mb: 3 }}>
+        <DriftStatisticsCard title="Drift Detection Overview" days={30} />
+      </Box>
       
       {/* Events list */}
       <Paper sx={{ mb: 3, p: 2 }} elevation={2}>
@@ -228,8 +226,8 @@ const DriftPage: React.FC = () => {
         {/* Filters */}
         {filtersVisible && (
           <Box sx={{ mb: 3 }}>
-            <Grid container spacing={2} alignItems="center">
-              <Grid item xs={12} sm={6} md={2}>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+              <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
                 <TextField
                   label="Device ID"
                   value={filters.deviceId}
@@ -237,9 +235,9 @@ const DriftPage: React.FC = () => {
                   fullWidth
                   size="small"
                 />
-              </Grid>
+              </Box>
               
-              <Grid item xs={12} sm={6} md={2}>
+              <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
                 <FormControl fullWidth size="small">
                   <InputLabel id="drift-type-select-label">Drift Type</InputLabel>
                   <Select
@@ -256,9 +254,9 @@ const DriftPage: React.FC = () => {
                     <MenuItem value="custom">Custom</MenuItem>
                   </Select>
                 </FormControl>
-              </Grid>
+              </Box>
               
-              <Grid item xs={12} sm={6} md={2}>
+              <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
                 <FormControl fullWidth size="small">
                   <InputLabel id="status-select-label">Status</InputLabel>
                   <Select
@@ -275,9 +273,9 @@ const DriftPage: React.FC = () => {
                     <MenuItem value="ignored">Ignored</MenuItem>
                   </Select>
                 </FormControl>
-              </Grid>
+              </Box>
               
-              <Grid item xs={12} sm={6} md={2}>
+              <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
                 <TextField
                   label="Start Date"
                   type="date"
@@ -287,9 +285,9 @@ const DriftPage: React.FC = () => {
                   size="small"
                   InputLabelProps={{ shrink: true }}
                 />
-              </Grid>
+              </Box>
               
-              <Grid item xs={12} sm={6} md={2}>
+              <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
                 <TextField
                   label="End Date"
                   type="date"
@@ -299,9 +297,9 @@ const DriftPage: React.FC = () => {
                   size="small"
                   InputLabelProps={{ shrink: true }}
                 />
-              </Grid>
+              </Box>
               
-              <Grid item xs={12} sm={6} md={2}>
+              <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
                 <Button 
                   variant="outlined" 
                   onClick={resetFilters}
@@ -309,8 +307,8 @@ const DriftPage: React.FC = () => {
                 >
                   Reset Filters
                 </Button>
-              </Grid>
-            </Grid>
+              </Box>
+            </Box>
             
             <Divider sx={{ mt: 2 }} />
           </Box>
