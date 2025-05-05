@@ -617,11 +617,35 @@ class AutonomousStoneDetectorApp:
         """Process a frame asynchronously with autonomous drift detection"""
         start_time = time.time()
         
-        # Extract features
-        features = self.feature_extractor.extract_features(frame)
-        
         # Detect stones in the frame (runs in executor)
         detections = await self.detector.detect_async(frame)
+        
+        # Extract features based on configuration
+        if self.config["tinylcm"].get("use_detection_scores_as_features", False):
+            # Use detection scores as features (more efficient for embedded devices)
+            # This avoids using TensorFlow directly for feature extraction
+            if detections:
+                # Create a feature vector from confidence scores
+                confidence_scores = [conf for _, conf, _ in detections]
+                # Pad with zeros if less than expected features
+                while len(confidence_scores) < 5:  # Pad to expected feature size
+                    confidence_scores.append(0.0)
+                # Convert to numpy array
+                features = np.array(confidence_scores)
+            else:
+                # If no detections, create a zero vector
+                features = np.zeros(5)  # Default feature size
+        else:
+            # Use the traditional TFLite feature extractor
+            try:
+                features = self.feature_extractor.extract_features(frame)
+            except Exception as e:
+                logger.error(f"Feature extraction error: {e}")
+                # Fallback to simple features
+                if detections:
+                    features = np.array([conf for _, conf, _ in detections])
+                else:
+                    features = np.zeros(5)
         
         # Calculate inference time
         inference_time_ms = (time.time() - start_time) * 1000

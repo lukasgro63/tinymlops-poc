@@ -8,6 +8,22 @@ from tinylcm.utils.logging import setup_logger
 
 logger = setup_logger(__name__)
 
+# Try to import tflite_runtime first (for embedded devices)
+try:
+    import tflite_runtime.interpreter as tflite
+    USING_TFLITE_RUNTIME = True
+    logger.info("Using tflite_runtime for TFLiteFeatureExtractor")
+except ImportError:
+    # Fall back to tensorflow.lite if tflite_runtime not available
+    try:
+        import tensorflow as tf
+        USING_TFLITE_RUNTIME = False
+        logger.info("Using tensorflow.lite for TFLiteFeatureExtractor")
+    except ImportError:
+        # Define a flag but don't raise an error yet - we'll do that when the class is instantiated
+        USING_TFLITE_RUNTIME = None
+        logger.warning("Neither tflite_runtime nor tensorflow could be imported. TFLiteFeatureExtractor will not work until one of them is installed.")
+
 
 class TFLiteFeatureExtractor(BaseFeatureExtractor):
     """Feature extractor that uses a TFLite model to extract features.
@@ -55,29 +71,45 @@ class TFLiteFeatureExtractor(BaseFeatureExtractor):
     def _ensure_interpreter_loaded(self) -> None:
         """Ensure the TFLite interpreter is loaded."""
         if self._interpreter is None:
-            try:
-                # Import here to make TFLite optional
-                import tensorflow as tf
+            if USING_TFLITE_RUNTIME is None:
+                raise ImportError(
+                    "TensorFlow Lite is required for TFLiteFeatureExtractor. "
+                    "Install it with 'pip install tflite-runtime' (recommended for embedded devices) "
+                    "or 'pip install tensorflow' (for development environments)."
+                )
                 
-                # Load the TFLite model and allocate tensors
-                self._interpreter = tf.lite.Interpreter(model_path=self.model_path)
+            try:
+                # Initialize the interpreter based on which library we have
+                if USING_TFLITE_RUNTIME:
+                    # Using tflite_runtime (lightweight for embedded devices)
+                    self._interpreter = tflite.Interpreter(model_path=self.model_path)
+                else:
+                    # Using full tensorflow (heavier but more feature-rich)
+                    self._interpreter = tf.lite.Interpreter(model_path=self.model_path)
+                
+                # Allocate tensors
                 self._interpreter.allocate_tensors()
                 
                 # Get input and output details
                 self._input_details = self._interpreter.get_input_details()
                 self._output_details = self._interpreter.get_output_details()
                 
-                # Set up for feature extraction
+                # Set up for feature extraction - here's the key part for using output as features
                 if self.output_tensor_index is None:
-                    # Get the tensor details for the feature layer
+                    # Default to using the specified feature layer index
                     self.output_tensor_index = self.feature_layer_index
                 
+                # Check tensor indices
+                if isinstance(self.output_tensor_index, int):
+                    if abs(self.output_tensor_index) >= len(self._output_details):
+                        logger.warning(
+                            f"Feature layer index {self.output_tensor_index} is out of range. "
+                            f"Model has {len(self._output_details)} output tensors. "
+                            f"Using the last output tensor."
+                        )
+                        self.output_tensor_index = -1
+                
                 logger.debug(f"TFLite interpreter loaded: {self.model_path}")
-            except ImportError:
-                raise ImportError(
-                    "TensorFlow Lite is required for TFLiteFeatureExtractor. "
-                    "Install it with 'pip install tensorflow-lite' or 'pip install tensorflow'."
-                )
             except Exception as e:
                 logger.error(f"Failed to load TFLite model: {str(e)}")
                 raise
