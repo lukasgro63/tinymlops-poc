@@ -606,7 +606,9 @@ class AutonomousStoneDetectorApp:
                             state_manager=self.state_manager,
                             adaptation_tracker=self.adaptation_tracker,
                             inference_monitor=self.inference_monitor,
-                            data_logger=self.data_logger
+                            data_logger=self.data_logger,
+                            model_path=self.config["model"]["path"],
+                            model_labels_path=self.config["model"]["labels"]
                         )
                         logger.debug(f"Created package with ID: {package_id}")
                         

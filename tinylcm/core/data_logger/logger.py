@@ -254,6 +254,58 @@ class DataLogger:
             label=label,
             metadata=metadata
         )
+        
+    def log_sample(
+        self,
+        input_data: Any,
+        prediction: Optional[str] = None,
+        confidence: Optional[float] = None,
+        label: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Log a sample (alias for log_data with autodetection of type).
+        
+        This is a convenience method that tries to determine the input type
+        based on the input data, then calls log_data with the appropriate type.
+        
+        Args:
+            input_data: The data to log
+            prediction: Optional model prediction
+            confidence: Optional confidence score
+            label: Optional ground truth label
+            metadata: Additional metadata
+            
+        Returns:
+            Unique entry ID for this logged sample
+        """
+        # Try to determine input type based on data
+        if isinstance(input_data, bytes) and len(input_data) > 0:
+            # Check for common image headers
+            if input_data.startswith(b'\xff\xd8\xff'):  # JPEG
+                input_type = DATA_TYPE_IMAGE
+            elif input_data.startswith(b'\x89PNG\r\n\x1a\n'):  # PNG
+                input_type = DATA_TYPE_IMAGE
+            elif input_data.startswith(b'GIF8'):  # GIF
+                input_type = DATA_TYPE_IMAGE
+            else:
+                # Default to binary data (treat as image)
+                input_type = DATA_TYPE_IMAGE
+        elif isinstance(input_data, dict):
+            input_type = DATA_TYPE_JSON
+        elif isinstance(input_data, (str, list)):
+            input_type = DATA_TYPE_TEXT
+        else:
+            # Default to JSON for other types
+            input_type = DATA_TYPE_JSON
+            
+        return self.log_data(
+            input_data=input_data,
+            input_type=input_type,
+            prediction=prediction,
+            confidence=confidence,
+            label=label,
+            metadata=metadata
+        )
 
     def log_prediction(
         self,

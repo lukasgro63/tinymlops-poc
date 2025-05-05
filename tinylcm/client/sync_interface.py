@@ -245,7 +245,8 @@ class SyncInterface:
     def create_package_from_components(self, device_id: str, 
                              adaptive_pipeline=None, state_manager=None, 
                              adaptation_tracker=None, inference_monitor=None, 
-                             data_logger=None, compression: Optional[str] = None) -> str:
+                             data_logger=None, compression: Optional[str] = None,
+                             model_path: Optional[str] = None, model_labels_path: Optional[str] = None) -> str:
         """
         Create a package from various TinyLCM components.
         
@@ -257,15 +258,17 @@ class SyncInterface:
             inference_monitor: Optional InferenceMonitor instance
             data_logger: Optional DataLogger instance
             compression: Compression type to use ("gzip", "zip", or None)
+            model_path: Optional path to the model file to include
+            model_labels_path: Optional path to the model labels file to include
             
         Returns:
             ID of the created package
         """
-        if not any([adaptive_pipeline, state_manager, adaptation_tracker, inference_monitor, data_logger]):
+        if not any([adaptive_pipeline, state_manager, adaptation_tracker, inference_monitor, data_logger, model_path]):
             raise SyncError("At least one component must be provided")
             
-        package_id = self.create_package(device_id=device_id, package_type="components", 
-                                      description="Package with component data", 
+        package_id = self.create_package(device_id=device_id, package_type="model", 
+                                      description="Package with component data and model", 
                                       compression=compression)
         
         # Handle adaptive components
@@ -414,6 +417,75 @@ class SyncInterface:
                     self.logger.warning(f"Failed to add data log to package: File not available after retries")
             except Exception as e:
                 self.logger.warning(f"Failed to add data log to package: {e}")
+        
+        # Include model file if provided
+        if model_path:
+            try:
+                model_file = Path(model_path)
+                if model_file.exists():
+                    # Create model metadata with timestamp
+                    model_meta_path = None
+                    try:
+                        model_meta = {
+                            "model_format": model_file.suffix.lstrip('.'),
+                            "timestamp": time.time(),
+                            "device_id": device_id,
+                            "params": {
+                                "model_file": model_file.name
+                            },
+                            "metrics": {}  # No metrics available yet
+                        }
+                        
+                        # Create temporary metadata file
+                        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
+                            model_meta_path = tmp.name
+                            json.dump(model_meta, tmp)
+                        
+                        # Add model file
+                        self.add_file_to_package(
+                            package_id=package_id,
+                            file_path=model_path,
+                            file_type="model_file"
+                        )
+                        self.logger.debug(f"Added model file {model_path} to package {package_id}")
+                        
+                        # Add metadata file
+                        if model_meta_path:
+                            self.add_file_to_package(
+                                package_id=package_id,
+                                file_path=model_meta_path,
+                                file_type="model_metadata",
+                                metadata={"model_path": str(model_path)}
+                            )
+                            os.unlink(model_meta_path)
+                            self.logger.debug(f"Added model metadata to package {package_id}")
+                    except Exception as meta_err:
+                        self.logger.warning(f"Failed to create model metadata: {meta_err}")
+                        if model_meta_path and os.path.exists(model_meta_path):
+                            try:
+                                os.unlink(model_meta_path)
+                            except:
+                                pass
+                else:
+                    self.logger.warning(f"Model file not found: {model_path}")
+            except Exception as e:
+                self.logger.warning(f"Failed to add model file to package: {e}")
+        
+        # Include model labels if provided
+        if model_labels_path:
+            try:
+                labels_file = Path(model_labels_path)
+                if labels_file.exists():
+                    self.add_file_to_package(
+                        package_id=package_id,
+                        file_path=model_labels_path,
+                        file_type="model_labels"
+                    )
+                    self.logger.debug(f"Added model labels file {model_labels_path} to package {package_id}")
+                else:
+                    self.logger.warning(f"Model labels file not found: {model_labels_path}")
+            except Exception as e:
+                self.logger.warning(f"Failed to add model labels file to package: {e}")
                 
         return package_id
     
