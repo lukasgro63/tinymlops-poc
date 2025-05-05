@@ -124,35 +124,123 @@ class SyncInterface:
         self.logger.debug(f"Created package: {package_id}")
         return package_id
     
-    def add_file_to_package(self, package_id: str, file_path: Union[str, Path], file_type: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> None:
+    def add_file_to_package(self, package_id: str, file_path: Union[str, Path], file_type: Optional[str] = None, 
+                        metadata: Optional[Dict[str, Any]] = None, wait_for_file: bool = True,
+                        max_retries: int = 5, retry_delay: float = 0.5) -> bool:
+        """Add a file to a package with retry logic.
+        
+        Args:
+            package_id: ID of the package to add the file to
+            file_path: Path to the file to add
+            file_type: Type of the file
+            metadata: Additional metadata
+            wait_for_file: Whether to wait for the file to exist if it doesn't
+            max_retries: Maximum number of retries when waiting for the file
+            retry_delay: Delay between retries in seconds
+            
+        Returns:
+            True if the file was added successfully, False otherwise
+        """
         package = self._get_package(package_id)
-        package.add_file(file_path, file_type, metadata)
+        src_path = Path(file_path)
+        
+        # Wait for the file to exist if requested
+        if wait_for_file and not src_path.exists():
+            self.logger.debug(f"File {file_path} doesn't exist yet, waiting... ({max_retries} retries with {retry_delay}s delay)")
+            for attempt in range(max_retries):
+                time.sleep(retry_delay)
+                if src_path.exists():
+                    self.logger.debug(f"File {file_path} now exists after {attempt+1} retries")
+                    break
+            else:
+                self.logger.warning(f"File {file_path} still doesn't exist after {max_retries} retries")
+                return False
+        
+        try:
+            package.add_file(file_path, file_type, metadata)
+            return True
+        except FileNotFoundError:
+            self.logger.warning(f"File not found: {file_path}")
+            return False
+        except Exception as e:
+            self.logger.warning(f"Error adding file {file_path} to package: {e}")
+            return False
     
-    def add_directory_to_package(self, package_id: str, directory_path: Union[str, Path], recursive: bool = False, file_type: Optional[str] = None) -> int:
+    def add_directory_to_package(self, package_id: str, directory_path: Union[str, Path], 
+                            recursive: bool = False, file_type: Optional[str] = None,
+                            max_retries: int = 3, retry_delay: float = 0.5) -> int:
+        """Add all files from a directory to a package.
+        
+        Args:
+            package_id: ID of the package to add files to
+            directory_path: Path to the directory containing files to add
+            recursive: Whether to recursively add files from subdirectories
+            file_type: Type of the files
+            max_retries: Maximum number of retries if directory isn't accessible
+            retry_delay: Delay between retries in seconds
+            
+        Returns:
+            Number of files successfully added
+            
+        Raises:
+            FileNotFoundError: If the directory doesn't exist after retries
+        """
         package = self._get_package(package_id)
         dir_path = Path(directory_path)
+        
+        # Retry if directory doesn't exist or isn't accessible yet
+        for attempt in range(max_retries):
+            if dir_path.exists() and dir_path.is_dir():
+                break
+            self.logger.debug(f"Directory {directory_path} doesn't exist or is not a directory yet, waiting... (attempt {attempt+1}/{max_retries})")
+            time.sleep(retry_delay)
+        
+        # Final check after retries
         if not dir_path.exists() or not dir_path.is_dir():
+            self.logger.warning(f"Directory not found after {max_retries} retries: {directory_path}")
             raise FileNotFoundError(f"Directory not found: {directory_path}")
+        
         count = 0
-        if recursive:
-            for root, _, files in os.walk(dir_path):
-                for file in files:
-                    file_path = Path(root) / file
-                    try:
-                        package.add_file(file_path, file_type)
-                        count += 1
-                    except Exception as e:
-                        self.logger.warning(f"Failed to add file {file_path}: {e}")
-        else:
-            for file_path in dir_path.iterdir():
-                if file_path.is_file():
-                    try:
-                        package.add_file(file_path, file_type)
-                        count += 1
-                    except Exception as e:
-                        self.logger.warning(f"Failed to add file {file_path}: {e}")
-        self.logger.debug(f"Added {count} files from directory {directory_path} to package {package_id}")
-        return count
+        try:
+            if recursive:
+                for root, _, files in os.walk(dir_path):
+                    for file in files:
+                        file_path = Path(root) / file
+                        try:
+                            # Skip hidden files or system files
+                            if file.startswith('.') or file.startswith('~'):
+                                continue
+                            
+                            package.add_file(file_path, file_type)
+                            count += 1
+                        except Exception as e:
+                            self.logger.warning(f"Failed to add file {file_path}: {e}")
+            else:
+                for file_path in dir_path.iterdir():
+                    if file_path.is_file():
+                        try:
+                            # Skip hidden files
+                            if file_path.name.startswith('.') or file_path.name.startswith('~'):
+                                continue
+                            
+                            package.add_file(file_path, file_type)
+                            count += 1
+                        except Exception as e:
+                            self.logger.warning(f"Failed to add file {file_path}: {e}")
+            
+            self.logger.debug(f"Added {count} files from directory {directory_path} to package {package_id}")
+            
+            # Return early if some files were added
+            if count > 0:
+                return count
+                
+            # Directory was found but no files were added
+            self.logger.warning(f"No files were added from directory: {directory_path}")
+            return 0
+            
+        except Exception as e:
+            self.logger.error(f"Error adding files from directory {directory_path}: {e}")
+            return count  # Return the count of files added before the error
     
     def create_package_from_components(self, device_id: str, 
                              adaptive_pipeline=None, state_manager=None, 
@@ -211,61 +299,167 @@ class SyncInterface:
             except Exception as e:
                 self.logger.warning(f"Failed to add adaptive pipeline data to package: {e}")
                 
-        # Handle adaptation tracker
+        # Handle adaptation tracker with improved directory handling
         if adaptation_tracker:
             try:
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    export_dir = os.path.join(temp_dir, "adaptation")
+                # Create a unique temp directory to avoid collisions
+                unique_id = str(uuid.uuid4())
+                temp_dir = tempfile.mkdtemp(prefix=f"adaptation_{unique_id}_")
+                try:
+                    # Use a unique subdirectory for export to avoid "Directory not empty" errors
+                    export_dir = os.path.join(temp_dir, f"adaptation_{int(time.time())}")
+                    os.makedirs(export_dir, exist_ok=True)
+                    
                     # Export to MLflow format if possible
                     if hasattr(adaptation_tracker, "export_to_mlflow"):
                         adaptation_tracker.export_to_mlflow(export_dir)
-                        self.add_directory_to_package(
-                            package_id=package_id,
-                            directory_path=export_dir,
-                            recursive=True,
-                            file_type="adaptation_logs"
-                        )
+                        # Check if directory has content
+                        if any(os.scandir(export_dir)):
+                            file_count = self.add_directory_to_package(
+                                package_id=package_id,
+                                directory_path=export_dir,
+                                recursive=True,
+                                file_type="adaptation_logs"
+                            )
+                            self.logger.debug(f"Added {file_count} adaptation files to package {package_id}")
+                        else:
+                            self.logger.warning(f"Adaptation export directory is empty: {export_dir}")
                     # Otherwise try to get events and metrics directly
                     else:
+                        events_file = os.path.join(export_dir, "events.json")
+                        metrics_file = os.path.join(export_dir, "metrics.json")
+                        
+                        # Get events and metrics
                         events = adaptation_tracker.get_events()
                         metrics = adaptation_tracker.get_metrics()
-                        with open(os.path.join(temp_dir, "events.json"), "w") as f:
+                        
+                        # Save to files
+                        with open(events_file, "w") as f:
                             json.dump([e.to_dict() if hasattr(e, "to_dict") else e for e in events], f)
-                        with open(os.path.join(temp_dir, "metrics.json"), "w") as f:
+                        with open(metrics_file, "w") as f:
                             json.dump(metrics, f)
-                        self.add_directory_to_package(
-                            package_id=package_id,
-                            directory_path=temp_dir,
-                            recursive=False,
-                            file_type="adaptation_data"
+                        
+                        # Add individual files rather than directory
+                        success1 = self.add_file_to_package(
+                            package_id=package_id, 
+                            file_path=events_file, 
+                            file_type="adaptation_events"
                         )
-                    self.logger.debug(f"Added adaptation data to package {package_id}")
+                        success2 = self.add_file_to_package(
+                            package_id=package_id, 
+                            file_path=metrics_file, 
+                            file_type="adaptation_metrics"
+                        )
+                        
+                        if success1 and success2:
+                            self.logger.debug(f"Added adaptation events and metrics to package {package_id}")
+                        else:
+                            self.logger.warning(f"Failed to add some adaptation files to package {package_id}")
+                finally:
+                    # Clean up temporary directory
+                    try:
+                        shutil.rmtree(temp_dir)
+                    except Exception as cleanup_err:
+                        self.logger.warning(f"Failed to clean up temporary directory: {cleanup_err}")
             except Exception as e:
                 self.logger.warning(f"Failed to add adaptation data to package: {e}")
         
-        # Handle inference monitor (unchanged)
+        # Handle inference monitor with improved file waiting
         if inference_monitor:
             try:
+                # Export metrics and wait for the file to be created
                 metrics_path = inference_monitor.export_metrics(format="json")
-                self.add_file_to_package(package_id=package_id, file_path=metrics_path, file_type="metrics")
-                self.logger.debug(f"Added metrics from InferenceMonitor to package {package_id}")
+                # Check if the export operation is running in a background thread
+                if hasattr(inference_monitor, '_record_queue') and not inference_monitor._record_queue.empty():
+                    self.logger.debug(f"Waiting for inference monitor to complete metrics export to {metrics_path}")
+                    # Wait for the metrics export to complete with timeout
+                    success = self.add_file_to_package(
+                        package_id=package_id, 
+                        file_path=metrics_path, 
+                        file_type="metrics",
+                        wait_for_file=True,
+                        max_retries=10,  # Increased retries for metrics export
+                        retry_delay=0.5
+                    )
+                    if success:
+                        self.logger.debug(f"Successfully added metrics from InferenceMonitor to package {package_id}")
+                    else:
+                        self.logger.warning(f"Failed to add metrics data to package: File not available after retries")
+                else:
+                    # Direct add if not using background thread
+                    success = self.add_file_to_package(package_id=package_id, file_path=metrics_path, file_type="metrics")
+                    if success:
+                        self.logger.debug(f"Added metrics from InferenceMonitor to package {package_id}")
+                    else:
+                        self.logger.warning(f"Failed to add metrics data to package: File not found")
             except Exception as e:
                 self.logger.warning(f"Failed to add metrics data to package: {e}")
         
-        # Handle data logger (unchanged)
+        # Handle data logger with improved file waiting
         if data_logger:
             try:
                 log_path = data_logger.export_to_csv()
-                self.add_file_to_package(package_id=package_id, file_path=log_path, file_type="data_log")
-                self.logger.debug(f"Added data log from DataLogger to package {package_id}")
+                # Add with retry logic
+                success = self.add_file_to_package(
+                    package_id=package_id, 
+                    file_path=log_path, 
+                    file_type="data_log",
+                    wait_for_file=True,
+                    max_retries=10,
+                    retry_delay=0.5
+                )
+                if success:
+                    self.logger.debug(f"Added data log from DataLogger to package {package_id}")
+                else:
+                    self.logger.warning(f"Failed to add data log to package: File not available after retries")
             except Exception as e:
                 self.logger.warning(f"Failed to add data log to package: {e}")
                 
         return package_id
     
     def finalize_package(self, package_id: str) -> str:
+        """Finalize a package and prepare it for sending.
+        
+        Args:
+            package_id: ID of the package to finalize
+            
+        Returns:
+            Path to the finalized package file
+            
+        Raises:
+            SyncError: If the package is empty or cannot be finalized
+        """
         package = self._get_package(package_id)
         timestamp = int(time.time())
+        
+        # Check if the package has any files
+        if not package.files:
+            self.logger.warning(f"Attempting to finalize empty package {package_id}")
+            # Create a minimal dummy file to allow finalization
+            dummy_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json", dir=package.work_dir)
+            dummy_data = {
+                "package_id": package_id,
+                "timestamp": timestamp,
+                "message": "Empty package - created minimal file to allow finalization",
+                "device_id": package.device_id,
+                "warning": "No actual data was included in this package"
+            }
+            with open(dummy_file.name, 'w') as f:
+                json.dump(dummy_data, f)
+            
+            try:
+                package.add_file(
+                    dummy_file.name, 
+                    file_type="empty_package_marker",
+                    metadata={"is_empty_marker": True}
+                )
+                self.logger.info(f"Added minimal marker file to empty package {package_id} to allow finalization")
+            except Exception as e:
+                self.logger.error(f"Failed to add empty package marker: {e}")
+                os.unlink(dummy_file.name)
+                raise SyncError(f"Cannot finalize empty package {package_id} and failed to add marker: {e}")
+        
+        # Now finalize with the normal flow
         output_file = f"{package_id}_{timestamp}"
         if package.compression == "gzip":
             output_file += ".tar.gz"
@@ -274,15 +468,26 @@ class SyncInterface:
         else:
             output_file += ".tar"
         output_path = self.packages_dir / output_file
-        package_path = package.finalize(output_path)
-        metadata_path = self.packages_dir / f"{package_id}.meta.json"
-        save_json(package.get_metadata(), metadata_path)
-        del self.active_packages[package_id]
-        package_dir = self.packages_dir / f"tmp_{package_id}"
-        if package_dir.exists():
-            shutil.rmtree(package_dir)
-        self.logger.info(f"Finalized package {package_id} to {package_path}")
-        return package_path
+        
+        try:
+            package_path = package.finalize(output_path)
+            metadata_path = self.packages_dir / f"{package_id}.meta.json"
+            save_json(package.get_metadata(), metadata_path)
+            del self.active_packages[package_id]
+            package_dir = self.packages_dir / f"tmp_{package_id}"
+            if package_dir.exists():
+                shutil.rmtree(package_dir)
+            self.logger.info(f"Finalized package {package_id} to {package_path}")
+            return package_path
+        except Exception as e:
+            self.logger.error(f"Failed to finalize package {package_id}: {e}")
+            # Clean up if finalization fails
+            try:
+                if output_path.exists():
+                    output_path.unlink()
+            except Exception as cleanup_err:
+                self.logger.warning(f"Error cleaning up failed package file: {cleanup_err}")
+            raise
     
     def list_packages(self, filter_func: Optional[Callable[[Dict[str, Any]], bool]] = None, include_synced: bool = False) -> List[Dict[str, Any]]:
         packages = []

@@ -350,6 +350,48 @@ class InferenceMonitor:
         self.metrics_collector.reset()
         self.logger.info("Reset inference metrics")
     
+    def wait_for_metrics_export(self, timeout: float = 5.0) -> bool:
+        """Wait for all metric export tasks to complete.
+        
+        This method ensures that all queued metric exports have completed
+        before continuing, which is important for synchronization operations.
+        
+        Args:
+            timeout: Maximum time to wait in seconds
+            
+        Returns:
+            True if all exports completed, False if timed out
+        """
+        if not hasattr(self, '_record_queue') or self._record_queue is None:
+            return True
+        
+        # Only wait if there are export tasks in the queue
+        has_export_tasks = False
+        for item in list(self._record_queue.queue):
+            if isinstance(item, dict) and item.get("_export_task"):
+                has_export_tasks = True
+                break
+        
+        if not has_export_tasks:
+            return True
+        
+        # Wait with timeout
+        self.logger.info(f"Waiting for metric exports to complete (timeout: {timeout}s)")
+        try:
+            start_time = time.time()
+            while not self._record_queue.empty() and (time.time() - start_time) < timeout:
+                time.sleep(0.1)
+            
+            if self._record_queue.empty():
+                self.logger.info(f"All metric exports completed")
+                return True
+            else:
+                self.logger.warning(f"Timed out waiting for metric exports to complete")
+                return False
+        except Exception as e:
+            self.logger.error(f"Error waiting for metric exports: {e}")
+            return False
+    
     def get_latency_percentiles(self) -> Dict[str, float]:
         """Get latency percentiles.
         

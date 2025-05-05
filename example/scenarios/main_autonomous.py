@@ -594,6 +594,11 @@ class AutonomousStoneDetectorApp:
                         logger.info(f"Starting sync operation #{sync_count+1}")
                         sync_start_time = time.time()
                         
+                        # Wait for any in-progress metrics exports to complete
+                        if self.inference_monitor:
+                            logger.debug("Waiting for any pending metric exports to complete...")
+                            self.inference_monitor.wait_for_metrics_export(timeout=10.0)
+                            
                         # Create package with component data
                         logger.debug("Creating sync package...")
                         package_id = self.sync_interface.create_package_from_components(
@@ -648,11 +653,22 @@ class AutonomousStoneDetectorApp:
                         
                         # Finalize package
                         logger.debug(f"Finalizing package {package_id}")
-                        self.sync_interface.finalize_package(package_id)
-                        
-                        # Send package with timeout to prevent blocking indefinitely
-                        logger.debug(f"Sending package {package_id} to server")
-                        response = self.sync_client.send_package(package_id)
+                        try:
+                            package_path = self.sync_interface.finalize_package(package_id)
+                            logger.debug(f"Package finalized to: {package_path}")
+                            
+                            # Send package with timeout to prevent blocking indefinitely
+                            logger.debug(f"Sending package {package_id} to server")
+                            response = self.sync_client.send_package(package_id)
+                            
+                            if response and isinstance(response, dict) and response.get('status') == 'success':
+                                logger.info(f"Package {package_id} successfully sent to server")
+                            else:
+                                logger.warning(f"Package sending response: {response}")
+                                
+                        except Exception as finalize_err:
+                            logger.error(f"Error finalizing or sending package: {finalize_err}", exc_info=True)
+                            # Continue with the next sync interval rather than failing completely
                         
                         # Check for validation results if using external validation
                         if self.config["tinylcm"].get("external_validation", False):
