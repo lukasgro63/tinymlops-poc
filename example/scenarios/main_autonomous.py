@@ -206,14 +206,11 @@ class AutonomousStoneDetectorApp:
             from tinylcm.core.inference_monitor.monitor import InferenceMonitor
             from tinylcm.core.handlers.hybrid import HybridHandler
             
-            # Initialize feature extractor with appropriate preprocessors
+            # Initialize feature extractor without preprocessors
+            # We'll handle preprocessing directly in the process_frame_async method
             self.feature_extractor = TFLiteFeatureExtractor(
                 model_path=self.config["model"]["path"],
-                preprocessors=[
-                    # First resize and normalize the image to the correct dimensions
-                    lambda img: resize_and_normalize(img, 
-                        target_size=(224, 224)),  # Adjust target size to match your model's input
-                ]
+                feature_layer_index=-1  # Use the last layer for features
             )
             
             # Initialize classifier
@@ -646,7 +643,14 @@ class AutonomousStoneDetectorApp:
         else:
             # Use the traditional TFLite feature extractor
             try:
-                features = self.feature_extractor.extract_features(frame)
+                # First preprocess the frame - resize and convert to float32
+                preprocessed_frame = resize_and_normalize(frame, target_size=(224, 224))
+                # Then extract features using the preprocessed frame
+                features = self.feature_extractor.extract_features(preprocessed_frame)
+                # Make sure features is 1D
+                if features.ndim > 1 and features.size > 1:
+                    # Flatten to 1D if needed
+                    features = features.flatten()
             except Exception as e:
                 logger.error(f"Feature extraction error: {e}")
                 # Fallback to simple features
@@ -666,6 +670,7 @@ class AutonomousStoneDetectorApp:
             # Process through adaptive pipeline with autonomous monitoring
             result = self.adaptive_pipeline.process(
                 input_data=frame,  # Pass the frame for logging
+                features=features,  # Pass the extracted features
                 timestamp=time.time(),
                 sample_id=f"frame_{frame_id}_{i}",
                 extract_features=False,  # We already extracted features

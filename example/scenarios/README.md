@@ -47,20 +47,28 @@ When running on embedded devices like Raspberry Pi, the full TensorFlow library 
 
 3. **Input Data Type Handling**
 
-   TFLite models often expect input data in a specific format (typically FLOAT32). When passing images from OpenCV (which are usually UINT8), we need to convert them. This is handled by preprocessor functions in the `preprocessors.py` module:
+   TFLite models often expect input data in a specific format (typically FLOAT32). When passing images from OpenCV (which are usually UINT8), we need to convert them. This is handled by preprocessor functions in the `preprocessors.py` module.
+   
+   In our implementation, we handle this preprocessing directly in the `process_frame_async` method rather than in the feature extractor initialization:
 
    ```python
-   # Example usage in main_autonomous.py
-   self.feature_extractor = TFLiteFeatureExtractor(
-       model_path=self.config["model"]["path"],
-       preprocessors=[
-           # Resize and normalize the image
-           lambda img: resize_and_normalize(img, target_size=(224, 224))
-       ]
-   )
+   # First preprocess the frame - resize and convert to float32
+   preprocessed_frame = resize_and_normalize(frame, target_size=(224, 224))
+   
+   # Then extract features using the preprocessed frame
+   features = self.feature_extractor.extract_features(preprocessed_frame)
+   
+   # Make sure features is 1D
+   if features.ndim > 1 and features.size > 1:
+       # Flatten to 1D if needed
+       features = features.flatten()
    ```
 
-   When you see an error like "Got value of type UINT8 but expected type FLOAT32 for input", make sure you're using the proper preprocessing.
+   This approach provides more control over the preprocessing steps and better error handling.
+
+   **Common Errors:**
+   - "Got value of type UINT8 but expected type FLOAT32 for input" - This indicates you need to convert your image to float32.
+   - "The truth value of an array with more than one element is ambiguous" - This happens when a multi-dimensional array is used in a boolean context. Make sure to flatten array features or explicitly check array properties with .any() or .all().
 
 ## Creating New Scenarios
 
