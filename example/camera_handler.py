@@ -61,19 +61,44 @@ class CameraHandler:
             # Start the camera
             self.camera.start()
             
-            # Allow camera to warm up
-            time.sleep(1)
+            # Allow camera to warm up - longer warmup period for reliability
+            logger.info("Waiting for camera to warm up (2 seconds)...")
+            time.sleep(2)
+            
+            # Check if a frame can be captured
+            try:
+                test_frame = self.camera.capture_array()
+                if test_frame is not None:
+                    logger.info(f"Camera test capture successful: {test_frame.shape}")
+                    with self.frame_lock:
+                        self.frame = test_frame.copy()
+                else:
+                    logger.warning("Camera test capture returned None, continuing anyway")
+            except Exception as test_e:
+                logger.error(f"Camera test capture failed: {test_e}")
             
             # Main capture loop
             while self.running:
                 start_time = time.time()
                 
-                # Capture frame
-                frame = self.camera.capture_array()
-                
-                # Update the frame with lock protection
-                with self.frame_lock:
-                    self.frame = frame.copy()
+                try:
+                    # Capture frame
+                    frame = self.camera.capture_array()
+                    
+                    if frame is not None:
+                        # Update the frame with lock protection
+                        with self.frame_lock:
+                            self.frame = frame.copy()
+                    else:
+                        logger.warning("Captured frame is None")
+                        # Brief pause to avoid busy-waiting
+                        time.sleep(0.1)
+                        continue
+                except Exception as capture_e:
+                    logger.error(f"Error capturing frame: {capture_e}")
+                    # Delay before retry to avoid frequent error messages
+                    time.sleep(0.5)
+                    continue
                 
                 # Calculate delay to maintain framerate
                 elapsed = time.time() - start_time
@@ -86,8 +111,11 @@ class CameraHandler:
         finally:
             # Clean up camera
             if self.camera:
-                self.camera.stop()
-                self.camera.close()
+                try:
+                    self.camera.stop()
+                    self.camera.close()
+                except Exception as cleanup_e:
+                    logger.error(f"Error cleaning up camera: {cleanup_e}")
                 self.camera = None
             logger.info("Picamera2 thread stopped")
     

@@ -514,43 +514,83 @@ class AutonomousStoneDetectorApp:
 
     def logging_worker(self):
         """Worker thread for handling TinyLCM logging operations"""
+        logger.info("Logging worker thread started")
+        
         while not self.stop_event.is_set():
             try:
                 # Get logging operation from queue
                 log_item = self.logging_queue.get(timeout=1.0)
                 
                 if log_item is None:  # Shutdown signal
+                    logger.info("Received shutdown signal in logging worker")
                     break
                 
                 operation, data = log_item
+                logger.debug(f"Processing logging operation: {operation}")
                 
-                if operation == "log_image":
-                    self.data_logger.log_image(**data)
-                elif operation == "track_inference":
-                    self.inference_monitor.track_inference(**data)
-                elif operation == "log_metadata":
-                    self.data_logger.log_metadata(**data)
+                try:
+                    if operation == "log_image":
+                        self.data_logger.log_image(**data)
+                    elif operation == "track_inference":
+                        self.inference_monitor.track_inference(**data)
+                    elif operation == "log_metadata":
+                        if not hasattr(self.data_logger, "log_metadata"):
+                            # Use log_data as fallback
+                            logger.warning("DataLogger has no log_metadata method, using log_data instead")
+                            self.data_logger.log_data(
+                                input_data=json.dumps(data.get("data", {})), 
+                                input_type="json",
+                                metadata=data
+                            )
+                        else:
+                            self.data_logger.log_metadata(**data)
+                    else:
+                        logger.warning(f"Unknown logging operation: {operation}")
+                    
+                    logger.debug(f"Successfully completed operation: {operation}")
+                except Exception as inner_e:
+                    logger.error(f"Error processing {operation}: {inner_e}", exc_info=True)
                 
                 self.logging_queue.task_done()
                 
             except Empty:
+                # This is normal, just continue
                 continue
             except Exception as e:
-                logger.error(f"Error in logging worker: {e}")
+                logger.error(f"Error in logging worker: {e}", exc_info=True)
 
     def sync_worker(self):
         """Worker thread for handling sync operations"""
+        logger.info("Sync worker thread started")
+        
+        # Don't sync immediately - wait for the first interval
+        # This prevents blocking during startup when network might not be available
+        time.sleep(10)  # Short initial delay
+        
+        sync_count = 0
+        
         while not self.stop_event.is_set():
             try:
                 # Check if it's time to sync
                 sync_interval = self.config["tinylcm"]["sync_interval_seconds"]
-                time.sleep(sync_interval)
+                logger.debug(f"Waiting {sync_interval}s for next sync operation (count: {sync_count})")
+                
+                # Use a loop with shorter sleeps to check stop_event more frequently
+                for _ in range(int(sync_interval / 2)):
+                    if self.stop_event.is_set():
+                        break
+                    time.sleep(2)
+                
+                if self.stop_event.is_set():
+                    break
                 
                 if self.sync_client:
                     try:
-                        logger.info("Starting sync operation")
+                        logger.info(f"Starting sync operation #{sync_count+1}")
+                        sync_start_time = time.time()
                         
                         # Create package with component data
+                        logger.debug("Creating sync package...")
                         package_id = self.sync_interface.create_package_from_components(
                             device_id=self.config["tinysphere"]["device_id"],
                             state_manager=self.state_manager,
@@ -558,19 +598,23 @@ class AutonomousStoneDetectorApp:
                             inference_monitor=self.inference_monitor,
                             data_logger=self.data_logger
                         )
+                        logger.debug(f"Created package with ID: {package_id}")
                         
                         # Sync quarantine data if available
                         if self.quarantine_buffer:
                             try:
                                 # Synchronize quarantined samples
+                                logger.debug("Getting quarantine samples for sync...")
                                 quarantine_samples = self.quarantine_buffer.get_samples_for_sync()
                                 if quarantine_samples:
+                                    logger.debug(f"Found {len(quarantine_samples)} quarantine samples to sync")
                                     # Create a temporary JSON file with the quarantine samples
                                     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
                                         tmp_path = tmp.name
                                         json.dump(quarantine_samples, tmp)
                                     
                                     # Add the temporary file to the package
+                                    logger.debug(f"Adding quarantine samples to package {package_id}")
                                     self.sync_interface.add_file_to_package(
                                         package_id=package_id,
                                         file_path=tmp_path,
@@ -590,33 +634,39 @@ class AutonomousStoneDetectorApp:
                                             sample_ids.append(sample.sample_id)
                                     
                                     if sample_ids:
+                                        logger.debug(f"Marking {len(sample_ids)} samples as synced")
                                         self.quarantine_buffer.mark_as_synced(sample_ids)
                                     
                                     logger.info(f"Added {len(quarantine_samples)} quarantined samples to sync package")
                             except Exception as e:
-                                logger.error(f"Failed to sync quarantine samples: {e}")
+                                logger.error(f"Failed to sync quarantine samples: {e}", exc_info=True)
                         
                         # Finalize package
+                        logger.debug(f"Finalizing package {package_id}")
                         self.sync_interface.finalize_package(package_id)
                         
-                        # Send package
+                        # Send package with timeout to prevent blocking indefinitely
+                        logger.debug(f"Sending package {package_id} to server")
                         response = self.sync_client.send_package(package_id)
                         
                         # Check for validation results if using external validation
                         if self.config["tinylcm"].get("external_validation", False):
                             validation_results = response.get("validation_results", [])
                             if validation_results:
+                                logger.debug(f"Processing {len(validation_results)} validation results")
                                 # Process validation results
                                 count = self.adaptive_pipeline.process_validation_results(validation_results)
                                 logger.info(f"Processed {count} validation results from server")
                         
-                        logger.info("Sync operation completed successfully")
+                        sync_duration = time.time() - sync_start_time
+                        logger.info(f"Sync operation #{sync_count+1} completed successfully in {sync_duration:.2f}s")
+                        sync_count += 1
                         
                     except Exception as e:
-                        logger.error(f"Failed to sync data: {e}")
+                        logger.error(f"Failed to sync data: {e}", exc_info=True)
             
             except Exception as e:
-                logger.error(f"Error in sync worker: {e}")
+                logger.error(f"Error in sync worker: {e}", exc_info=True)
 
     async def process_frame_async(self, frame, frame_id):
         """Process a frame asynchronously with autonomous drift detection"""
@@ -790,19 +840,51 @@ class AutonomousStoneDetectorApp:
     async def main_loop(self):
         """Main asynchronous processing loop"""
         frame_id = 0
+        consecutive_errors = 0
+        last_stats_time = time.time()
+        
+        logger.info("Starting main processing loop")
         
         while not self.stop_event.is_set():
             try:
                 # Capture frame asynchronously
+                logger.debug(f"Capturing frame {frame_id}")
+                capture_start = time.time()
                 frame = await self.camera.capture_frame_async()
+                capture_time = time.time() - capture_start
                 
                 if frame is None:
-                    logger.warning("Failed to capture frame, retrying...")
-                    await asyncio.sleep(0.1)
+                    logger.warning(f"Failed to capture frame (attempt {consecutive_errors+1}), retrying...")
+                    consecutive_errors += 1
+                    
+                    # If we've failed too many times, try to restart the camera
+                    if consecutive_errors > 10:
+                        logger.error("Too many consecutive frame capture failures, trying to reset camera...")
+                        try:
+                            # Stop and restart camera
+                            await self.camera.stop()
+                            await asyncio.sleep(1)
+                            await self.camera.start()
+                            await asyncio.sleep(2)  # Give it time to initialize
+                            consecutive_errors = 0
+                            logger.info("Camera restarted")
+                        except Exception as reset_e:
+                            logger.error(f"Failed to reset camera: {reset_e}")
+                    
+                    await asyncio.sleep(0.2)  # Slightly longer delay between retries
                     continue
                 
+                # Successfully captured a frame
+                consecutive_errors = 0
+                logger.debug(f"Frame {frame_id} captured in {capture_time*1000:.1f}ms, shape: {frame.shape}")
+                
                 # Process frame asynchronously
+                process_start = time.time()
                 frame_with_detections = await self.process_frame_async(frame, frame_id)
+                process_time = time.time() - process_start
+                
+                # Log successful processing
+                logger.debug(f"Frame {frame_id} processed in {process_time*1000:.1f}ms")
                 frame_id += 1
                 
                 # Display results if not headless
@@ -810,27 +892,51 @@ class AutonomousStoneDetectorApp:
                     cv2.imshow("Autonomous Stone Detector", frame_with_detections)
                     key = cv2.waitKey(1) & 0xFF
                     if key == ord('q'):
+                        logger.info("User pressed 'q', stopping...")
                         self.stop_event.set()
                         break
                 
                 # Periodically output quarantine and adaptation statistics
-                if frame_id % 100 == 0:
-                    stats = self.adaptive_pipeline.get_statistics()
-                    logger.info(
-                        f"Stats: {stats['n_samples_processed']} processed, "
-                        f"{stats['n_samples_quarantined']} quarantined, "
-                        f"{stats['n_autonomous_drift_detected']} drift events, "
-                        f"{stats['n_samples_adapted']} adapted"
-                    )
+                # Check time-based instead of frame-based since frames might be slow
+                current_time = time.time()
+                if current_time - last_stats_time > 30:  # Every 30 seconds
+                    try:
+                        last_stats_time = current_time
+                        stats = self.adaptive_pipeline.get_statistics()
+                        logger.info(
+                            f"Stats after {frame_id} frames: {stats['n_samples_processed']} processed, "
+                            f"{stats['n_samples_quarantined']} quarantined, "
+                            f"{stats['n_autonomous_drift_detected']} drift events, "
+                            f"{stats['n_samples_adapted']} adapted"
+                        )
+                        
+                        # Also log queue sizes to help diagnose backups
+                        logger.info(
+                            f"Queue sizes - inference: {self.inference_queue.qsize()}, "
+                            f"logging: {self.logging_queue.qsize()}, "
+                            f"result: {self.result_queue.qsize()}, "
+                            f"sync: {self.sync_queue.qsize()}"
+                        )
+                    except Exception as stats_e:
+                        logger.error(f"Error getting statistics: {stats_e}")
                 
                 # Wait for the detection interval
-                await asyncio.sleep(self.config["application"]["detection_interval"])
+                detection_interval = self.config["application"]["detection_interval"]
+                logger.debug(f"Waiting {detection_interval}s before next frame")
+                await asyncio.sleep(detection_interval)
             
             except asyncio.CancelledError:
+                logger.info("Main loop cancelled")
                 break
             except Exception as e:
                 logger.error(f"Error in main loop: {e}", exc_info=True)
-                await asyncio.sleep(0.1)
+                consecutive_errors += 1
+                await asyncio.sleep(0.5)  # Longer delay after errors
+                
+                # If we're having persistent errors, try to recover
+                if consecutive_errors > 5:
+                    logger.warning(f"Persistent errors in main loop (count: {consecutive_errors}), trying to recover...")
+                    await asyncio.sleep(2)  # Extra delay for recovery
 
     def start_workers(self):
         """Start all worker threads"""
@@ -908,17 +1014,58 @@ async def main():
     parser = argparse.ArgumentParser(description="Autonomous Stone Detector with TinyLCM")
     parser.add_argument("--config", default="scenarios/config_autonomous.json", help="Path to configuration file")
     parser.add_argument("--headless", action="store_true", help="Run in headless mode without GUI")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    parser.add_argument("--timeout", type=int, default=0, help="Auto-stop after specified seconds (0 for no timeout)")
     args = parser.parse_args()
     
-    # Create and run the application
-    app = AutonomousStoneDetectorApp(config_path=args.config)
+    # Set up logging level
+    if args.debug:
+        logging.getLogger("stone_detector_autonomous").setLevel(logging.DEBUG)
+        logging.getLogger("stone_detector.camera").setLevel(logging.DEBUG)
+        logging.getLogger("tinylcm").setLevel(logging.DEBUG)
     
-    # Set headless mode if specified
-    if args.headless:
-        app.config["headless"] = True
+    logger.info(f"Starting Autonomous Stone Detector with config: {args.config}")
     
-    # Run the application
-    await app.run()
+    try:
+        # Create and run the application
+        app = AutonomousStoneDetectorApp(config_path=args.config)
+        
+        # Set headless mode if specified
+        if args.headless:
+            app.config["headless"] = True
+            logger.info("Running in headless mode")
+        
+        # Set up auto-stop if requested
+        if args.timeout > 0:
+            logger.info(f"Will automatically stop after {args.timeout} seconds")
+            
+            def auto_stop():
+                logger.info(f"Auto-stop timer of {args.timeout}s elapsed, stopping application")
+                app.stop_event.set()
+            
+            # Schedule the auto-stop
+            loop = asyncio.get_event_loop()
+            loop.call_later(args.timeout, auto_stop)
+        
+        # Run the application with timeout watch
+        try:
+            logger.info("Starting application run")
+            await asyncio.wait_for(app.run(), timeout=None)  # No timeout here, we control it separately
+        except asyncio.TimeoutError:
+            logger.error("Application timed out")
+        except KeyboardInterrupt:
+            logger.info("Application interrupted by user")
+        except Exception as e:
+            logger.error(f"Application run failed: {e}", exc_info=True)
+        
+        logger.info("Application run completed")
+    
+    except Exception as e:
+        logger.error(f"Failed to start application: {e}", exc_info=True)
+    
+    finally:
+        # Final cleanup
+        logger.info("Exiting main function")
 
 if __name__ == "__main__":
     asyncio.run(main())
