@@ -226,16 +226,18 @@ class InferenceMonitor:
         metrics["session_id"] = self.session_id
         return metrics
 
-    def export_metrics(self, format: str = "json") -> str:
-        """Export current metrics to a file (non-blocking).
+    def export_metrics(self, format: str = "json", blocking: bool = False) -> str:
+        """Export current metrics to a file.
         
-        This method is non-blocking and delegates the export operation to the worker thread.
+        By default, this method is non-blocking and delegates the export operation to the worker thread.
+        If blocking=True, it will perform the export synchronously.
         
         Args:
             format: Output format ("json" or "csv")
+            blocking: Whether to perform the export synchronously (default: False)
             
         Returns:
-            The expected path where metrics will be saved
+            The path where metrics are saved
         """
         metrics = self.get_current_metrics()
         timestamp = int(time.time())
@@ -251,6 +253,39 @@ class InferenceMonitor:
             
         file_path = self.storage_dir / filename
         
+        # Ensure the parent directory exists
+        ensure_dir(self.storage_dir)
+        
+        # If blocking, export synchronously
+        if blocking:
+            try:
+                # Create empty file first to signal existence
+                with open(file_path, "w") as f:
+                    f.write("")
+                
+                # Then perform actual export
+                if format.lower() == "json":
+                    save_json(metrics, file_path)
+                elif format.lower() == "csv":
+                    flat_metrics = self._flatten_metrics(metrics)
+                    import csv
+                    with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+                        writer = csv.DictWriter(csvfile, fieldnames=flat_metrics.keys())
+                        writer.writeheader()
+                        writer.writerow(flat_metrics)
+                self.logger.info(f"Exported metrics to {file_path}")
+                return str(file_path)
+            except Exception as e:
+                self.logger.error(f"Error in blocking metrics export: {e}")
+                return str(file_path)
+        
+        # For non-blocking, create empty file immediately
+        try:
+            with open(file_path, "w") as f:
+                f.write("")  # Create empty file
+        except Exception as e:
+            self.logger.error(f"Error creating empty metrics file: {e}")
+            
         # Create export task for worker thread
         self._record_queue.put({
             "_export_task": True,

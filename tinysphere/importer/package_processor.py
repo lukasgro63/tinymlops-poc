@@ -63,7 +63,22 @@ class MetricsProcessor(BaseProcessor):
     
     def can_process(self, content_path: Path, metadata: Dict[str, Any]) -> bool:
         """Check if this processor can handle the content."""
-        return metadata.get("package_type") == "metrics"
+        # Entweder ein dediziertes Metrics-Paket oder ein Modellpaket mit Metriken
+        package_type = metadata.get("package_type")
+        
+        # Direkt akzeptieren, wenn es ein metrics-Paket ist
+        if package_type == "metrics":
+            return True
+            
+        # Für model-Pakete: Prüfen ob Metrikdateien vorhanden sind
+        if package_type == "model" or package_type == "components":
+            # Suchen nach Metrikdateien im Paket
+            metrics_files = list(content_path.glob("**/metrics*.json"))
+            if metrics_files:
+                self.logger.info(f"Metrics processor will handle {package_type} package with {len(metrics_files)} metrics files")
+                return True
+                
+        return False
     
     def process(self, content_path: Path, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """Process metrics data."""
@@ -101,7 +116,24 @@ class ModelProcessor(BaseProcessor):
     
     def can_process(self, content_path: Path, metadata: Dict[str, Any]) -> bool:
         """Check if this processor can handle the content."""
-        return metadata.get("package_type") == "models"
+        package_type = metadata.get("package_type")
+        
+        # Direkt akzeptieren für models-Pakete
+        if package_type == "models":
+            return True
+            
+        # Alle model- und components-Pakete akzeptieren
+        if package_type == "model" or package_type == "components":
+            # Nach Modelldateien suchen
+            model_files = []
+            for ext in [".tflite", ".onnx", ".pt", ".pkl"]:
+                model_files.extend(list(content_path.glob(f"**/*{ext}")))
+                
+            if model_files:
+                self.logger.info(f"Model processor will handle {package_type} package with {len(model_files)} model files")
+                return True
+                
+        return False
     
     def process(self, content_path: Path, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """Process model data."""
@@ -149,7 +181,26 @@ class DataLogProcessor(BaseProcessor):
     
     def can_process(self, content_path: Path, metadata: Dict[str, Any]) -> bool:
         """Check if this processor can handle the content."""
-        return metadata.get("package_type") == "data_log"
+        package_type = metadata.get("package_type")
+        
+        # Direkt akzeptieren für data_log-Pakete
+        if package_type == "data_log":
+            return True
+            
+        # Auch model und components Pakete akzeptieren, wenn sie Log-Dateien enthalten
+        if package_type in ["model", "components"]:
+            # Nach Log-Dateien suchen
+            csv_files = list(content_path.glob("**/*.csv"))
+            json_files = list(content_path.glob("**/*.json"))
+            jsonl_files = list(content_path.glob("**/*.jsonl"))
+            
+            # Mindestens eine Log-Datei gefunden
+            if csv_files or json_files or jsonl_files:
+                file_count = len(csv_files) + len(json_files) + len(jsonl_files)
+                self.logger.info(f"DataLog processor will handle {package_type} package with {file_count} log files")
+                return True
+                
+        return False
     
     def process(self, content_path: Path, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """Process data log files."""
@@ -266,18 +317,10 @@ class PackageImporter:
         
         self.logger.info(f"Processing package: {package_id} (type: {package_type})")
         
-        if db is not None:
-            try:
-                self.extract_device_metrics(extract_dir, metadata, db)
-            except Exception as e:
-                self.logger.error(f"Error extracting device metrics: {e}")
-                result["errors"] = result.get("errors", [])
-                result["errors"].append(f"Metrics extraction failed: {str(e)}")
-
         # Extract the package
         extract_dir = self.extract_package(package_path, package_id, device_id)
-        
-        # Base result data
+
+        # Initialize result dictionary early to use in error handling
         result = {
             "package_id": package_id,
             "device_id": device_id,
@@ -286,8 +329,17 @@ class PackageImporter:
             "processed_at": datetime.now().isoformat(),
             "processors_applied": [],
             "file_count": 0,
-            "processed_files": []
+            "processed_files": [],
+            "errors": []
         }
+        
+        # Now that package is extracted, process device metrics
+        if db is not None:
+            try:
+                self.extract_device_metrics(extract_dir, metadata, db)
+            except Exception as e:
+                self.logger.error(f"Error extracting device metrics: {e}")
+                result["errors"].append(f"Metrics extraction failed: {str(e)}")
         
         # Count files
         file_count = 0
@@ -319,7 +371,7 @@ class PackageImporter:
         return result
     
 
-    def extract_device_metrics(self, package_path: str, metadata: Dict[str, Any], db: Session) -> None:
+    def extract_device_metrics(self, extract_dir: Path, metadata: Dict[str, Any], db: Session) -> None:
         """Extract device metrics from uploaded packages."""
         package_id = metadata.get("package_id")
         device_id = metadata.get("device_id")
@@ -337,7 +389,7 @@ class PackageImporter:
         # Process metrics based on package type
         try:
             package_type = metadata.get("package_type", "unknown")
-            extract_dir = self.extract_dir / device_id / package_id
+            # extract_dir is now passed as an argument, no need to build it
             
             if package_type == "metrics":
                 # Extract metrics from a metrics package

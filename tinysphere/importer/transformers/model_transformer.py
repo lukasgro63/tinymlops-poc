@@ -2,10 +2,13 @@ import json
 import logging
 import os
 import shutil
+import hashlib
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import mlflow
+import mlflow.exceptions
+from mlflow.tracking import MlflowClient
 
 from tinysphere.importer.transformers.base import DataTransformer
 
@@ -14,6 +17,7 @@ class ModelTransformer(DataTransformer):
     def __init__(self):
         # Logger initialisieren
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+        self.client = MlflowClient()
     
     def can_transform(self, package_type: str, files: List[Path]) -> bool:
         # Accept either "model" or "components" package types
@@ -100,7 +104,7 @@ class ModelTransformer(DataTransformer):
                 "model_format": model_format
             }
             
-            # Register model in MLflow Model Registry
+            # Register model in MLflow Model Registry with duplicate detection
             try:
                 # Modellname aus device_id und Formatinformationen erstellen
                 model_name = f"{device_id}-{model_format}-model"
@@ -108,13 +112,34 @@ class ModelTransformer(DataTransformer):
                 # Modell-URI für die Registrierung definieren
                 model_uri = f"runs:/{run_id}/{model_file.name}"
                 
-                self.logger.info(f"Registering model in MLflow Model Registry: {model_name} from {model_uri}")
+                # Berechne Hash der Modelldatei zur Duplikaterkennung
+                model_hash = self._calculate_file_hash(str(model_file))
                 
-                # Modell in der Registry registrieren
-                registered_model = mlflow.register_model(
-                    model_uri=model_uri,
-                    name=model_name
-                )
+                # Prüfe, ob dieses Modell bereits existiert (anhand des Hashes)
+                existing_version = self._find_existing_model_version(model_name, model_hash)
+                
+                if existing_version:
+                    self.logger.info(f"Model with hash {model_hash} already exists as {model_name} version {existing_version}. Skipping registration.")
+                    
+                    # Füge existierende Versionsinformationen zum Ergebnis hinzu
+                    registered_model = type('obj', (object,), {
+                        'version': existing_version
+                    })
+                else:
+                    self.logger.info(f"Registering model in MLflow Model Registry: {model_name} from {model_uri}")
+                    
+                    # Modell in der Registry registrieren
+                    registered_model = mlflow.register_model(
+                        model_uri=model_uri,
+                        name=model_name
+                    )
+                    
+                    # Speichere Hash als Beschreibung der Version für zukünftige Vergleiche
+                    self.client.update_model_version(
+                        name=model_name,
+                        version=registered_model.version,
+                        description=f"File hash: {model_hash}"
+                    )
                 
                 # Erweiterte Ergebnisinformationen hinzufügen
                 result.update({
@@ -135,3 +160,66 @@ class ModelTransformer(DataTransformer):
                 })
         
         return result
+        
+    def _calculate_file_hash(self, file_path: str, algorithm: str = "sha256", buffer_size: int = 65536) -> str:
+        """
+        Berechnet den Hash einer Datei mit dem angegebenen Algorithmus.
+        
+        Args:
+            file_path: Pfad zur Datei
+            algorithm: Hash-Algorithmus ('md5', 'sha1', 'sha256')
+            buffer_size: Puffergröße für die Verarbeitung
+            
+        Returns:
+            Hexadezimaler Hash-String
+        """
+        if algorithm == "md5":
+            hash_obj = hashlib.md5()
+        elif algorithm == "sha1":
+            hash_obj = hashlib.sha1()
+        elif algorithm == "sha256":
+            hash_obj = hashlib.sha256()
+        else:
+            raise ValueError(f"Unsupported hash algorithm: {algorithm}")
+            
+        with open(file_path, "rb") as f:
+            while True:
+                data = f.read(buffer_size)
+                if not data:
+                    break
+                hash_obj.update(data)
+                
+        return hash_obj.hexdigest()
+        
+    def _find_existing_model_version(self, model_name: str, model_hash: str) -> Optional[int]:
+        """
+        Sucht nach einer existierenden Modellversion mit demselben Hash.
+        
+        Args:
+            model_name: Name des Modells
+            model_hash: Hash des Modells
+            
+        Returns:
+            Versionsnummer, wenn eine existierende Version gefunden wurde, sonst None
+        """
+        try:
+            # Prüfe, ob das Modell bereits existiert
+            try:
+                versions = self.client.get_latest_versions(model_name)
+            except mlflow.exceptions.MlflowException:
+                # Modell existiert noch nicht
+                return None
+                
+            # Durchsuche alle Versionen nach dem angegebenen Hash
+            for version in versions:
+                description = version.description or ""
+                if f"File hash: {model_hash}" in description:
+                    # Hash gefunden - identisches Modell bereits registriert
+                    return int(version.version)
+                    
+            # Kein passendes Modell gefunden
+            return None
+            
+        except Exception as e:
+            self.logger.warning(f"Error checking for existing model versions: {e}")
+            return None

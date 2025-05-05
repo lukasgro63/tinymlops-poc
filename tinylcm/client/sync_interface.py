@@ -370,45 +370,41 @@ class SyncInterface:
         # Handle inference monitor with improved file waiting
         if inference_monitor:
             try:
-                # Export metrics and wait for the file to be created
-                metrics_path = inference_monitor.export_metrics(format="json")
-                # Check if the export operation is running in a background thread
-                if hasattr(inference_monitor, '_record_queue') and not inference_monitor._record_queue.empty():
-                    self.logger.debug(f"Waiting for inference monitor to complete metrics export to {metrics_path}")
-                    # Wait for the metrics export to complete with timeout
-                    success = self.add_file_to_package(
-                        package_id=package_id, 
-                        file_path=metrics_path, 
-                        file_type="metrics",
-                        wait_for_file=True,
-                        max_retries=10,  # Increased retries for metrics export
-                        retry_delay=0.5
-                    )
-                    if success:
-                        self.logger.debug(f"Successfully added metrics from InferenceMonitor to package {package_id}")
-                    else:
-                        self.logger.warning(f"Failed to add metrics data to package: File not available after retries")
+                # Export metrics in blocking mode to ensure file is created immediately
+                metrics_path = inference_monitor.export_metrics(format="json", blocking=True)
+                self.logger.debug(f"Exported metrics to {metrics_path} in blocking mode")
+                
+                # Add the metrics file to the package
+                success = self.add_file_to_package(
+                    package_id=package_id, 
+                    file_path=metrics_path, 
+                    file_type="metrics",
+                    wait_for_file=True,
+                    max_retries=5,  # Fewer retries needed since we used blocking mode
+                    retry_delay=0.5
+                )
+                
+                if success:
+                    self.logger.debug(f"Successfully added metrics from InferenceMonitor to package {package_id}")
                 else:
-                    # Direct add if not using background thread
-                    success = self.add_file_to_package(package_id=package_id, file_path=metrics_path, file_type="metrics")
-                    if success:
-                        self.logger.debug(f"Added metrics from InferenceMonitor to package {package_id}")
-                    else:
-                        self.logger.warning(f"Failed to add metrics data to package: File not found")
+                    self.logger.warning(f"Failed to add metrics data to package: File not available after retries")
             except Exception as e:
                 self.logger.warning(f"Failed to add metrics data to package: {e}")
         
         # Handle data logger with improved file waiting
         if data_logger:
             try:
-                log_path = data_logger.export_to_csv()
-                # Add with retry logic
+                # Export data log in blocking mode to ensure file is created immediately
+                log_path = data_logger.export_to_csv(blocking=True)
+                self.logger.debug(f"Exported data log to {log_path} in blocking mode")
+                
+                # Add with fewer retries since we used blocking mode
                 success = self.add_file_to_package(
                     package_id=package_id, 
                     file_path=log_path, 
                     file_type="data_log",
                     wait_for_file=True,
-                    max_retries=10,
+                    max_retries=5,
                     retry_delay=0.5
                 )
                 if success:
@@ -418,56 +414,137 @@ class SyncInterface:
             except Exception as e:
                 self.logger.warning(f"Failed to add data log to package: {e}")
         
-        # Include model file if provided
+        # Include model file if provided and only if it has changed
         if model_path:
             try:
+                from tinylcm.utils.versioning import calculate_file_hash
                 model_file = Path(model_path)
                 if model_file.exists():
-                    # Create model metadata with timestamp
-                    model_meta_path = None
-                    try:
-                        model_meta = {
-                            "model_format": model_file.suffix.lstrip('.'),
+                    # Calculate model file hash
+                    model_hash = calculate_file_hash(model_file, algorithm="sha256")
+                    self.logger.debug(f"Calculated hash for model {model_path}: {model_hash}")
+                    
+                    # Check if we have a record of this hash in the sync history
+                    model_hash_file = self.sync_dir / "model_hashes.json"
+                    hash_history = {}
+                    
+                    # Load existing hash history if available
+                    if model_hash_file.exists():
+                        try:
+                            with open(model_hash_file, 'r') as f:
+                                hash_history = json.load(f)
+                        except Exception as e:
+                            self.logger.warning(f"Failed to load model hash history: {e}")
+                    
+                    # Check if model has changed
+                    model_key = f"{device_id}_{model_file.name}"
+                    if model_key in hash_history and hash_history[model_key]["hash"] == model_hash:
+                        self.logger.info(f"Model {model_path} hasn't changed (hash: {model_hash}), skipping inclusion in package")
+                        
+                        # Add a placeholder metadata file with hash info
+                        model_meta_path = None
+                        try:
+                            model_meta = {
+                                "model_format": model_file.suffix.lstrip('.'),
+                                "timestamp": time.time(),
+                                "device_id": device_id,
+                                "model_hash": model_hash,
+                                "params": {
+                                    "model_file": model_file.name
+                                },
+                                "metrics": {},  # No metrics available yet
+                                "unchanged": True  # Flag to indicate model hasn't changed
+                            }
+                            
+                            # Create temporary metadata file
+                            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
+                                model_meta_path = tmp.name
+                                # Import TinyLCMJSONEncoder to handle numpy arrays
+                                from tinylcm.utils.file_utils import TinyLCMJSONEncoder
+                                json.dump(model_meta, tmp, cls=TinyLCMJSONEncoder)
+                            
+                            # Add metadata file only (without the actual model)
+                            if model_meta_path:
+                                self.add_file_to_package(
+                                    package_id=package_id,
+                                    file_path=model_meta_path,
+                                    file_type="model_metadata",
+                                    metadata={"model_path": str(model_path), "model_hash": model_hash}
+                                )
+                                os.unlink(model_meta_path)
+                                self.logger.debug(f"Added model metadata (without model file) to package {package_id}")
+                        except Exception as meta_err:
+                            self.logger.warning(f"Failed to create model metadata: {meta_err}")
+                            if model_meta_path and os.path.exists(model_meta_path):
+                                try:
+                                    os.unlink(model_meta_path)
+                                except:
+                                    pass
+                    else:
+                        # Model has changed or is new, include it in the package
+                        self.logger.info(f"Model {model_path} has changed or is new, including in package")
+                        
+                        # Update hash history
+                        hash_history[model_key] = {
+                            "hash": model_hash,
                             "timestamp": time.time(),
                             "device_id": device_id,
-                            "params": {
-                                "model_file": model_file.name
-                            },
-                            "metrics": {}  # No metrics available yet
+                            "path": str(model_file)
                         }
                         
-                        # Create temporary metadata file
-                        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
-                            model_meta_path = tmp.name
-                            # Import TinyLCMJSONEncoder to handle numpy arrays
-                            from tinylcm.utils.file_utils import TinyLCMJSONEncoder
-                            json.dump(model_meta, tmp, cls=TinyLCMJSONEncoder)
+                        # Save updated hash history
+                        try:
+                            with open(model_hash_file, 'w') as f:
+                                json.dump(hash_history, f, indent=2)
+                        except Exception as e:
+                            self.logger.warning(f"Failed to save model hash history: {e}")
                         
-                        # Add model file
-                        self.add_file_to_package(
-                            package_id=package_id,
-                            file_path=model_path,
-                            file_type="model_file"
-                        )
-                        self.logger.debug(f"Added model file {model_path} to package {package_id}")
-                        
-                        # Add metadata file
-                        if model_meta_path:
+                        # Create model metadata with timestamp and hash
+                        model_meta_path = None
+                        try:
+                            model_meta = {
+                                "model_format": model_file.suffix.lstrip('.'),
+                                "timestamp": time.time(),
+                                "device_id": device_id,
+                                "model_hash": model_hash,
+                                "params": {
+                                    "model_file": model_file.name
+                                },
+                                "metrics": {}  # No metrics available yet
+                            }
+                            
+                            # Create temporary metadata file
+                            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
+                                model_meta_path = tmp.name
+                                # Import TinyLCMJSONEncoder to handle numpy arrays
+                                from tinylcm.utils.file_utils import TinyLCMJSONEncoder
+                                json.dump(model_meta, tmp, cls=TinyLCMJSONEncoder)
+                            
+                            # Add model file
                             self.add_file_to_package(
                                 package_id=package_id,
-                                file_path=model_meta_path,
-                                file_type="model_metadata",
-                                metadata={"model_path": str(model_path)}
+                                file_path=model_path,
+                                file_type="model_file"
                             )
-                            os.unlink(model_meta_path)
-                            self.logger.debug(f"Added model metadata to package {package_id}")
-                    except Exception as meta_err:
-                        self.logger.warning(f"Failed to create model metadata: {meta_err}")
-                        if model_meta_path and os.path.exists(model_meta_path):
-                            try:
+                            self.logger.debug(f"Added model file {model_path} to package {package_id}")
+                            
+                            # Add metadata file
+                            if model_meta_path:
+                                self.add_file_to_package(
+                                    package_id=package_id,
+                                    file_path=model_meta_path,
+                                    file_type="model_metadata",
+                                    metadata={"model_path": str(model_path), "model_hash": model_hash}
+                                )
                                 os.unlink(model_meta_path)
-                            except:
-                                pass
+                                self.logger.debug(f"Added model metadata to package {package_id}")
+                        except Exception as meta_err:
+                            self.logger.warning(f"Failed to create model metadata: {meta_err}")
+                            if model_meta_path and os.path.exists(model_meta_path):
+                                try:
+                                    os.unlink(model_meta_path)
+                                except:
+                                    pass
                 else:
                     self.logger.warning(f"Model file not found: {model_path}")
             except Exception as e:

@@ -504,16 +504,22 @@ class DataLogger:
     def export_to_csv(
         self,
         output_path: Optional[Union[str, Path]] = None,
-        filter_func: Optional[callable] = None
+        filter_func: Optional[callable] = None,
+        blocking: bool = False,
+        timeout: float = 10.0
     ) -> str:
-        """Export entries to CSV (non-blocking).
+        """Export entries to CSV.
         
-        This method is non-blocking. The CSV export will be performed in a 
+        By default, this method is non-blocking and the CSV export will be performed in a 
         background thread. It first ensures any pending metadata is saved.
+        
+        If blocking=True, it will wait for the export to complete before returning.
         
         Args:
             output_path: Optional custom path for the CSV file
             filter_func: Optional function to filter entries
+            blocking: Whether to wait for the export to complete (default: False)
+            timeout: Timeout in seconds when in blocking mode (default: 10.0)
             
         Returns:
             The path where the CSV will be saved
@@ -527,9 +533,35 @@ class DataLogger:
             output_path = self.storage_dir / f"export_{timestamp}.csv"
         else:
             output_path = Path(output_path)
+        
+        # Create parent directory if needed
+        ensure_dir(output_path.parent)
+        
+        # If blocking, export synchronously without using the queue
+        if blocking:
+            try:
+                # Create empty file immediately to signal the file exists
+                with open(output_path, "w") as f:
+                    f.write("")  # Create empty file
+                
+                # Then perform actual export
+                self._export_to_csv_internal(output_path=output_path, filter_func=filter_func)
+                return str(output_path)
+            except Exception as e:
+                print(f"Error in blocking CSV export: {e}")
+                return str(output_path)
             
-        # Queue the export task
+        # Queue the export task for non-blocking operation
         task_id = f"export_{int(time.time())}"
+        
+        # Create empty file immediately to signal the file exists
+        try:
+            with open(output_path, "w") as f:
+                f.write("")  # Create empty file
+        except Exception as e:
+            print(f"Error creating empty CSV file: {e}")
+        
+        # Queue the actual export task
         self._task_queue.put({
             "type": "export_csv",
             "id": task_id,
@@ -539,7 +571,7 @@ class DataLogger:
             }
         })
         
-        # Return the expected path (the actual file will be created asynchronously)
+        # Return the expected path
         return str(output_path)
 
     def close(self) -> None:
