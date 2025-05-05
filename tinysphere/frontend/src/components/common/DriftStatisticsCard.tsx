@@ -4,20 +4,20 @@ import {
   Card, 
   CardContent, 
   Typography, 
-  Grid, 
-  Chip,
-  CircularProgress,
-  LinearProgress
+  Chip
 } from '@mui/material';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { getDriftStatistics } from '../../services/api';
 import { DriftStatistics, DriftStatus } from '../../types/api';
 import SectionCard from './SectionCard';
+import ErrorDisplay from './ErrorDisplay';
 
 interface DriftStatisticsCardProps {
   title?: string;
   deviceId?: string;
   days?: number;
+  parentLoading?: boolean;
+  parentError?: string | null;
 }
 
 // Status color mapping
@@ -42,13 +42,20 @@ const typeColors: Record<string, string> = {
 const DriftStatisticsCard: React.FC<DriftStatisticsCardProps> = ({ 
   title = 'Drift Detection Statistics', 
   deviceId,
-  days = 30
+  days = 30,
+  parentLoading,
+  parentError
 }) => {
   const [statistics, setStatistics] = useState<DriftStatistics | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Skip loading if parent has an error or is loading
+    if (parentLoading || parentError) {
+      return;
+    }
+    
     const fetchStatistics = async () => {
       try {
         setLoading(true);
@@ -64,24 +71,19 @@ const DriftStatisticsCard: React.FC<DriftStatisticsCardProps> = ({
     };
 
     fetchStatistics();
-  }, [deviceId, days]);
+  }, [deviceId, days, parentLoading, parentError]);
 
-  if (loading) {
+
+  // If parent has errors, don't show our own error state
+  if ((loading && !parentLoading) || (error && !parentError)) {
     return (
       <SectionCard title={title}>
-        <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-          <CircularProgress />
-        </Box>
-      </SectionCard>
-    );
-  }
-
-  if (error) {
-    return (
-      <SectionCard title={title}>
-        <Box sx={{ p: 2 }}>
-          <Typography color="error">{error}</Typography>
-        </Box>
+        <ErrorDisplay
+          error={error}
+          loading={loading}
+          onRetry={() => getDriftStatistics(deviceId, days).then(setStatistics).catch(e => setError(e.message))}
+          height="300px"
+        />
       </SectionCard>
     );
   }
@@ -97,14 +99,14 @@ const DriftStatisticsCard: React.FC<DriftStatisticsCardProps> = ({
   }
 
   // Prepare data for status distribution chart
-  const statusData = Object.entries(statistics.status_counts).map(([status, count]) => ({
+  const statusData = Object.entries(statistics.by_status).map(([status, count]) => ({
     name: status.charAt(0).toUpperCase() + status.slice(1),
     count,
     color: statusColors[status as DriftStatus] || '#d0d0d0'
   }));
 
   // Prepare data for type distribution chart
-  const typeData = Object.entries(statistics.type_counts).map(([type, count]) => ({
+  const typeData = Object.entries(statistics.by_type).map(([type, count]) => ({
     name: type.charAt(0).toUpperCase() + type.slice(1),
     count,
     color: typeColors[type] || '#d0d0d0'
@@ -121,7 +123,7 @@ const DriftStatisticsCard: React.FC<DriftStatisticsCardProps> = ({
                 Total Drift Events: {statistics.total_events}
               </Typography>
               <Box>
-                {Object.entries(statistics.status_counts).map(([status, count]) => (
+                {Object.entries(statistics.by_status).map(([status, count]) => (
                   <Chip 
                     key={status}
                     label={`${status.charAt(0).toUpperCase() + status.slice(1)}: ${count}`}
@@ -145,7 +147,7 @@ const DriftStatisticsCard: React.FC<DriftStatisticsCardProps> = ({
             <Box sx={{ width: '100%', height: 200 }}>
               <ResponsiveContainer>
                 <BarChart
-                  data={statistics.time_series}
+                  data={statistics.by_day}
                   margin={{ top: 10, right: 10, left: 0, bottom: 20 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" />

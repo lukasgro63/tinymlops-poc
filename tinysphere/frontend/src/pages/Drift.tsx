@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
-  Grid,
   Paper,
   Table,
   TableHead,
@@ -21,11 +20,11 @@ import {
   TextField,
   IconButton,
   Tooltip,
-  CircularProgress,
   Alert,
   Link,
   Divider
 } from '@mui/material';
+import ErrorDisplay from '../components/common/ErrorDisplay';
 import { 
   FilterList as FilterIcon,
   Refresh as RefreshIcon,
@@ -113,6 +112,10 @@ const DriftPage: React.FC = () => {
   
   const [filtersVisible, setFiltersVisible] = useState(false);
   
+  // Additional state to track statistics loading
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  
   // Load drift events
   useEffect(() => {
     fetchEvents();
@@ -184,20 +187,29 @@ const DriftPage: React.FC = () => {
     navigate(`/drift/${eventId}`);
   };
 
+  // Handle page-level loading and error states
+  if (loading || error) {
+    return (
+      <ErrorDisplay 
+        error={error}
+        loading={loading}
+        onRetry={() => fetchEvents()}
+        height="70vh"
+      />
+    );
+  }
+  
   return (
     <Box sx={{ p: 0 }}>
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h4" component="h1">
-          Drift Management
-        </Typography>
-        <Typography variant="body1" color="text.secondary">
-          Monitor and manage model drift events detected across your edge devices
-        </Typography>
-      </Box>
       
       {/* Statistics dashboard */}
       <Box sx={{ mb: 3 }}>
-        <DriftStatisticsCard title="Drift Detection Overview" days={30} />
+        <DriftStatisticsCard 
+          title="Drift Detection Overview" 
+          days={30}
+          parentLoading={loading}
+          parentError={error}
+        />
       </Box>
       
       {/* Events list */}
@@ -314,130 +326,114 @@ const DriftPage: React.FC = () => {
           </Box>
         )}
         
-        {/* Error state */}
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {error}
-          </Alert>
-        )}
-        
-        {/* Loading state */}
-        {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-            <CircularProgress />
+        {/* Empty state */}
+        {events.length === 0 ? (
+          <Box sx={{ p: 3, textAlign: 'center' }}>
+            <Typography variant="body1" color="text.secondary">
+              No drift events found
+            </Typography>
+            <Button
+              variant="outlined"
+              onClick={resetFilters}
+              sx={{ mt: 2 }}
+            >
+              Reset Filters
+            </Button>
           </Box>
         ) : (
           <>
-            {/* Empty state */}
-            {events.length === 0 ? (
-              <Box sx={{ p: 3, textAlign: 'center' }}>
-                <Typography variant="body1" color="text.secondary">
-                  No drift events found
-                </Typography>
-                <Button
-                  variant="outlined"
-                  onClick={resetFilters}
-                  sx={{ mt: 2 }}
-                >
-                  Reset Filters
-                </Button>
-              </Box>
-            ) : (
-              <>
-                {/* Events table */}
-                <TableContainer>
-                  <Table>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Event ID</TableCell>
-                        <TableCell>Device</TableCell>
-                        <TableCell>Type</TableCell>
-                        <TableCell>Status</TableCell>
-                        <TableCell>Detected At</TableCell>
-                        <TableCell>Samples</TableCell>
-                        <TableCell>Validations</TableCell>
-                        <TableCell align="right">Actions</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {events.map((event) => (
-                        <TableRow 
-                          key={event.event_id}
-                          hover
-                          onClick={() => handleRowClick(event.event_id)}
-                          sx={{ cursor: 'pointer' }}
+            {/* Events table */}
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Event ID</TableCell>
+                    <TableCell>Device</TableCell>
+                    <TableCell>Type</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell>Detected At</TableCell>
+                    <TableCell>Samples</TableCell>
+                    <TableCell>Validations</TableCell>
+                    <TableCell align="right">Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {events.map((event) => (
+                    <TableRow 
+                      key={event.event_id}
+                      hover
+                      onClick={() => handleRowClick(event.event_id)}
+                      sx={{ cursor: 'pointer' }}
+                    >
+                      <TableCell>
+                        <Tooltip title={event.event_id}>
+                          <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+                            {event.event_id.substring(0, 8)}...
+                          </Typography>
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell>
+                        <Link 
+                          href={`/devices/${event.device_id}`}
+                          underline="hover"
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          <TableCell>
-                            <Tooltip title={event.event_id}>
-                              <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                                {event.event_id.substring(0, 8)}...
-                              </Typography>
-                            </Tooltip>
-                          </TableCell>
-                          <TableCell>
-                            <Link 
-                              href={`/devices/${event.device_id}`}
-                              underline="hover"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {event.device_id}
-                            </Link>
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              icon={<DriftTypeIcon type={event.drift_type} />}
-                              label={event.drift_type.charAt(0).toUpperCase() + event.drift_type.slice(1)}
-                              size="small"
-                              variant="outlined"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              icon={<StatusIcon status={event.status} />}
-                              label={event.status.charAt(0).toUpperCase() + event.status.slice(1)}
-                              size="small"
-                              sx={{ 
-                                backgroundColor: `${statusColors[event.status]}20`,
-                                color: statusColors[event.status],
-                                borderColor: statusColors[event.status]
-                              }}
-                              variant="outlined"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            {event.timestamp && format(parseISO(event.timestamp), 'MMM d, yyyy HH:mm')}
-                          </TableCell>
-                          <TableCell>{event.sample_count}</TableCell>
-                          <TableCell>{event.validation_count}</TableCell>
-                          <TableCell align="right">
-                            <IconButton 
-                              size="small" 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleRowClick(event.event_id);
-                              }}
-                            >
-                              <ViewIcon fontSize="small" />
-                            </IconButton>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-                
-                {/* Pagination */}
-                <TablePagination
-                  rowsPerPageOptions={[5, 10, 25, 50]}
-                  component="div"
-                  count={totalCount}
-                  rowsPerPage={rowsPerPage}
-                  page={page}
-                  onPageChange={handleChangePage}
-                  onRowsPerPageChange={handleChangeRowsPerPage}
-                />
-              </>
-            )}
+                          {event.device_id}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          icon={<DriftTypeIcon type={event.drift_type} />}
+                          label={event.drift_type.charAt(0).toUpperCase() + event.drift_type.slice(1)}
+                          size="small"
+                          variant="outlined"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          icon={<StatusIcon status={event.status} />}
+                          label={event.status.charAt(0).toUpperCase() + event.status.slice(1)}
+                          size="small"
+                          sx={{ 
+                            backgroundColor: `${statusColors[event.status]}20`,
+                            color: statusColors[event.status],
+                            borderColor: statusColors[event.status]
+                          }}
+                          variant="outlined"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        {event.timestamp && format(parseISO(event.timestamp), 'MMM d, yyyy HH:mm')}
+                      </TableCell>
+                      <TableCell>{event.sample_count}</TableCell>
+                      <TableCell>{event.validation_count}</TableCell>
+                      <TableCell align="right">
+                        <IconButton 
+                          size="small" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRowClick(event.event_id);
+                          }}
+                        >
+                          <ViewIcon fontSize="small" />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            
+            {/* Pagination */}
+            <TablePagination
+              rowsPerPageOptions={[5, 10, 25, 50]}
+              component="div"
+              count={totalCount}
+              rowsPerPage={rowsPerPage}
+              page={page}
+              onPageChange={handleChangePage}
+              onRowsPerPageChange={handleChangeRowsPerPage}
+            />
           </>
         )}
       </Paper>

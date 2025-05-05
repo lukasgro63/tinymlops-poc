@@ -36,6 +36,7 @@ import {
   FormControl,
   InputLabel
 } from '@mui/material';
+import ErrorDisplay from '../components/common/ErrorDisplay';
 import { 
   WarningAmber as WarningIcon,
   CheckCircle as CheckIcon,
@@ -426,27 +427,32 @@ const DriftEventPage: React.FC = () => {
     }
   };
 
-  if (loading) {
+  // Loading or error state
+  if (loading || error) {
     return (
-      <Box sx={{ p: 3, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <CircularProgress />
-        <Typography sx={{ mt: 2 }}>Loading drift event data...</Typography>
-      </Box>
-    );
-  }
-
-  if (error) {
-    return (
-      <Box sx={{ p: 3 }}>
-        <Alert severity="error">{error}</Alert>
-        <Button 
-          variant="outlined" 
-          onClick={() => navigate('/drift')}
-          sx={{ mt: 2 }}
-        >
-          Back to Drift Events
-        </Button>
-      </Box>
+      <ErrorDisplay 
+        error={error}
+        loading={loading}
+        onRetry={() => {
+          if (eventId) {
+            setLoading(true);
+            setError(null);
+            Promise.all([
+              getDriftEvent(eventId),
+              getDriftSamples(eventId)
+            ]).then(([eventData, samplesData]) => {
+              setEvent(eventData);
+              setSamples(samplesData);
+            }).catch(err => {
+              console.error('Error fetching drift event data:', err);
+              setError('Failed to load drift event data');
+            }).finally(() => {
+              setLoading(false);
+            });
+          }
+        }}
+        height="70vh"
+      />
     );
   }
 

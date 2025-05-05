@@ -63,12 +63,15 @@ export interface DriftValidation {
 
 export interface DriftStatistics {
   total_events: number;
-  status_counts: Record<DriftStatus, number>;
-  type_counts: Record<string, number>;
-  time_series: Array<{
+  total_open: number;
+  total_resolved: number;
+  by_type: Record<string, number>;
+  by_status: Record<DriftStatus, number>;
+  by_day: Array<{
     date: string;
     count: number;
   }>;
+  recent_events: DriftEvent[];
 }
 
 export interface Package {

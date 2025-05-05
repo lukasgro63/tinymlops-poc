@@ -56,6 +56,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, variant }) => {
     { text: 'Devices', icon: <MemoryIcon />, path: '/devices', external: false },
     { text: 'Models', icon: <PsychologyIcon />, path: '/models', external: false },
     { text: 'Drift', icon: <TimelineIcon />, path: '/drift', external: false },
+    
   ];
   
   // Section 2: Applications

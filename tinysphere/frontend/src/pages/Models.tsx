@@ -22,6 +22,7 @@ import {
   Typography
 } from '@mui/material';
 import React, { useEffect, useState } from 'react';
+import ErrorDisplay from '../components/common/ErrorDisplay';
 import ModelComparisonTable from '../components/common/ModelComparisonTable';
 import ModelPerformanceChart from '../components/common/ModelPerformanceChart';
 import SectionCard from '../components/common/SectionCard';
@@ -217,47 +218,21 @@ const Models: React.FC = () => {
     return date.toLocaleString();
   };
   
-  // Loading state
-  if (loading) {
+  // Loading or error state
+  if (loading || error) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
-  
-  // Error state
-  if (error) {
-    return (
-      <Box>
-        <Typography color="error" variant="h6" gutterBottom>
-          Error
-        </Typography>
-        <Typography>{error}</Typography>
-        <Button 
-          variant="contained" 
-          sx={{ mt: 2 }} 
-          onClick={() => window.location.reload()}
-        >
-          Reload
-        </Button>
-      </Box>
+      <ErrorDisplay 
+        error={error}
+        loading={loading}
+        onRetry={() => window.location.reload()}
+        height="70vh"
+      />
     );
   }
   
   return (
     <Box>
-      {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">Machine Learning Models</Typography>
-        <Button 
-          variant="contained" 
-          color="primary"
-          onClick={() => window.open('/mlflow#/models/register', '_blank')}
-        >
-          Register New Model
-        </Button>
-      </Box>
+      {/* No header needed */}
       
       {/* First row: Performance chart and Registry status */}
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, mb: 3 }}>

@@ -3,13 +3,13 @@ import InventoryIcon from '@mui/icons-material/Inventory';
 import MemoryIcon from '@mui/icons-material/Memory';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import PsychologyIcon from '@mui/icons-material/Psychology';
-import RefreshIcon from '@mui/icons-material/Refresh';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
 import StorageIcon from '@mui/icons-material/Storage';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import { Box, Button, CircularProgress, Typography } from '@mui/material';
+import { Box, Typography } from '@mui/material';
 import React, { useEffect, useState } from 'react';
+import ErrorDisplay from '../components/common/ErrorDisplay';
 
 // Components
 import DriftStatisticsCard from '../components/common/DriftStatisticsCard';
@@ -126,35 +126,16 @@ const Dashboard: React.FC = () => {
     }
   };
   
-  // Show loading state if data is loading
-  if (loading && !systemStatus) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
   
-  // Show error state if there was an error
-  if (error && !systemStatus) {
+  // Show loading or error state if applicable
+  if ((loading && !systemStatus) || (error && !systemStatus)) {
     return (
-      <Box sx={{ p: 4, textAlign: 'center' }}>
-        <Typography variant="h6" color="error" gutterBottom>
-          Error Loading Dashboard
-        </Typography>
-        <Typography variant="body1">
-          {error}
-        </Typography>
-        <Box sx={{ mt: 2 }}>
-          <Button 
-            variant="contained"
-            onClick={fetchDashboardData}
-            startIcon={<RefreshIcon />}
-          >
-            Try Again
-          </Button>
-        </Box>
-      </Box>
+      <ErrorDisplay 
+        error={error}
+        loading={loading && !systemStatus}
+        onRetry={fetchDashboardData}
+        height="100vh"
+      />
     );
   }
   

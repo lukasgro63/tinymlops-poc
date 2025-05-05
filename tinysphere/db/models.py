@@ -126,7 +126,7 @@ class DriftEvent(Base):
     
     # Additional data
     description = Column(Text, nullable=True)
-    metadata = Column(JSON, nullable=True)
+    event_metadata = Column(JSON, nullable=True)  # Renamed from 'metadata' which is reserved in SQLAlchemy
     
     # Relationships
     device = relationship("Device", back_populates="drift_events")
@@ -153,7 +153,7 @@ class DriftSample(Base):
     
     # Metadata
     timestamp = Column(DateTime, nullable=True)
-    metadata = Column(JSON, nullable=True)
+    sample_metadata = Column(JSON, nullable=True)  # Renamed from 'metadata' which is reserved in SQLAlchemy
     
     # Relationships
     drift_event = relationship("DriftEvent", back_populates="samples")
@@ -181,7 +181,7 @@ class DriftValidation(Base):
     validation_notes = Column(Text, nullable=True)
     is_acknowledged = Column(Boolean, default=False)  # Whether device has acknowledged this validation
     acknowledged_at = Column(DateTime, nullable=True)
-    metadata = Column(JSON, nullable=True)
+    validation_metadata = Column(JSON, nullable=True)  # Renamed from 'metadata' which is reserved in SQLAlchemy
     
     # Relationships
     drift_event = relationship("DriftEvent", back_populates="validations")

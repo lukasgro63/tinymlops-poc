@@ -126,7 +126,7 @@ class DriftService:
             metrics_before=event_data.get("performance_before"),
             metrics_after=event_data.get("performance_after"),
             description=event_data.get("description"),
-            metadata=event_data.get("metadata", {})
+            event_metadata=event_data.get("metadata", {})
         )
         
         db.add(drift_event)
@@ -192,7 +192,7 @@ class DriftService:
             feature_path=sample_data.get("feature_path"),
             raw_data_path=sample_data.get("raw_data_path"),
             timestamp=timestamp,
-            metadata=sample_data.get("metadata", {})
+            sample_metadata=sample_data.get("metadata", {})
         )
         
         db.add(drift_sample)
@@ -233,7 +233,7 @@ class DriftService:
             true_label=validation_data.get("true_label"),
             validated_by=validation_data.get("validated_by"),
             validation_notes=validation_data.get("notes"),
-            metadata=validation_data.get("metadata", {})
+            validation_metadata=validation_data.get("metadata", {})
         )
         
         db.add(validation)
@@ -447,12 +447,35 @@ class DriftService:
             })
             current_date += timedelta(days=1)
         
+        # Get recent events for preview
+        recent_events = []
+        for event in query.order_by(desc(DriftEvent.timestamp)).limit(5).all():
+            recent_events.append({
+                "event_id": event.event_id,
+                "device_id": event.device_id,
+                "drift_type": event.drift_type.value,
+                "drift_score": event.drift_score,
+                "detector_name": event.detector_name,
+                "model_id": event.model_id,
+                "description": event.description,
+                "status": event.status.value,
+                "timestamp": event.timestamp,
+                "received_at": event.received_at,
+                "resolved_at": event.resolved_at,
+                "resolution_notes": event.resolution_notes,
+                "sample_count": len(event.samples),
+                "validation_count": len(event.validations)
+            })
+
         # Compile final statistics
         stats = {
             'total_events': total_events,
-            'status_counts': status_counts,
-            'type_counts': type_counts,
-            'time_series': time_series
+            'total_open': status_counts.get('pending', 0) + status_counts.get('validated', 0),
+            'total_resolved': status_counts.get('resolved', 0) + status_counts.get('ignored', 0),
+            'by_type': type_counts,
+            'by_status': status_counts,
+            'by_day': time_series,
+            'recent_events': recent_events
         }
         
         return stats
