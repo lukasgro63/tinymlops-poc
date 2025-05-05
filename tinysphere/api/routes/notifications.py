@@ -29,17 +29,43 @@ def get_notifications(
     - **limit**: Maximum number of notifications to return
     - **unread_only**: If true, return only unread notifications
     """
-    notifications = NotificationService.get_notifications(
-        db, skip=skip, limit=limit, unread_only=unread_only
-    )
-    total = NotificationService.get_notifications_count(db)
-    unread = NotificationService.get_notifications_count(db, unread_only=True)
-    
-    return {
-        "items": notifications,
-        "total": total,
-        "unread": unread
-    }
+    try:
+        # Import the datetime formatting function
+        from tinysphere.api.models.base import format_datetime_with_z
+        
+        notifications = NotificationService.get_notifications(
+            db, skip=skip, limit=limit, unread_only=unread_only
+        )
+        
+        # Format datetime fields correctly with Z suffix for UTC
+        for notification in notifications:
+            if notification.created_at:
+                notification.created_at = format_datetime_with_z(notification.created_at)
+            if notification.read_at:
+                notification.read_at = format_datetime_with_z(notification.read_at)
+        
+        total = NotificationService.get_notifications_count(db)
+        unread = NotificationService.get_notifications_count(db, unread_only=True)
+        
+        return {
+            "items": notifications,
+            "total": total,
+            "unread": unread
+        }
+    except Exception as e:
+        # Log the error but continue with normal operation
+        print(f"Error formatting notification dates: {e}")
+        notifications = NotificationService.get_notifications(
+            db, skip=skip, limit=limit, unread_only=unread_only
+        )
+        total = NotificationService.get_notifications_count(db)
+        unread = NotificationService.get_notifications_count(db, unread_only=True)
+        
+        return {
+            "items": notifications,
+            "total": total,
+            "unread": unread
+        }
 
 
 @router.get("/count")
@@ -61,6 +87,18 @@ def get_notification(notification_id: int, db: Session = Depends(get_db)):
     
     if notification is None:
         raise HTTPException(status_code=404, detail="Notification not found")
+    
+    try:
+        # Import the datetime formatting function
+        from tinysphere.api.models.base import format_datetime_with_z
+        
+        # Format datetime fields correctly with Z suffix for UTC
+        if notification.created_at:
+            notification.created_at = format_datetime_with_z(notification.created_at)
+        if notification.read_at:
+            notification.read_at = format_datetime_with_z(notification.read_at)
+    except Exception as e:
+        print(f"Error formatting notification dates: {e}")
     
     return notification
 
@@ -87,6 +125,18 @@ def update_notification(
     
     if updated_notification is None:
         raise HTTPException(status_code=404, detail="Notification not found")
+    
+    try:
+        # Import the datetime formatting function
+        from tinysphere.api.models.base import format_datetime_with_z
+        
+        # Format datetime fields correctly with Z suffix for UTC
+        if updated_notification.created_at:
+            updated_notification.created_at = format_datetime_with_z(updated_notification.created_at)
+        if updated_notification.read_at:
+            updated_notification.read_at = format_datetime_with_z(updated_notification.read_at)
+    except Exception as e:
+        print(f"Error formatting notification dates: {e}")
     
     return updated_notification
 

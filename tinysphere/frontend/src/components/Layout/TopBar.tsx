@@ -53,8 +53,15 @@ const pathMappings: Record<string, string> = {
 
 // Helper to format dates
 const formatDate = (dateString: string): string => {
-  const date = new Date(dateString);
-  return `${date.toLocaleTimeString()} - ${date.toLocaleDateString()}`;
+  try {
+    // Explicitly handle the Z suffix to ensure UTC parsing
+    const dateStr = dateString.endsWith('Z') ? dateString : dateString + 'Z';
+    const date = new Date(dateStr);
+    return `${date.toLocaleTimeString()} - ${date.toLocaleDateString()}`;
+  } catch (e) {
+    console.error("Date parsing error:", e, "for date:", dateString);
+    return dateString || 'Unknown time';
+  }
 };
 
 const TopBar: React.FC<TopBarProps> = ({ 
