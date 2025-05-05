@@ -29,10 +29,44 @@ class MLflowService:
             MetricsTransformer(),
             LogsTransformer()
         ]
+        
+        # Try to initialize MLflow
+        try:
+            import mlflow
+            self.mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+            mlflow.set_tracking_uri(self.mlflow_uri)
+            # Test connection
+            mlflow.search_experiments()
+            self.available = True
+            logger.info(f"MLflow service initialized successfully at {self.mlflow_uri}")
+        except Exception as e:
+            logger.error(f"MLflow initialization error: {e}")
+            logger.error(traceback.format_exc())
+            self.available = False
     
     def process_package(self, db: Session, package_id: str) -> Dict[str, Any]:
         try:
             logger.info(f"Processing package {package_id}")
+            
+            # Check MLflow availability
+            if not hasattr(self, 'available') or not self.available:
+                logger.error("MLflow service is not available")
+                self._update_package_status(
+                    db, 
+                    package_id, 
+                    "error", 
+                    "MLflow service unavailable - package processing unavailable"
+                )
+                PackageService.set_processing_progress(
+                    package_id, 
+                    progress=1.0, 
+                    status="error", 
+                    step="MLflow service unavailable"
+                )
+                return {
+                    "status": "error", 
+                    "message": "MLflow service unavailable - package processing unavailable"
+                }
             
             # Fortschritt initialisieren
             PackageService.set_processing_progress(
