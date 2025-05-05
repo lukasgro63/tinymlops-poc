@@ -168,16 +168,89 @@ class MLflowService:
                 step=f"Analyzing {len(extracted_files)} files"
             )
             
-            # Find all appropriate transformers for the package
+            # Verify and potentially refine the package type based on content
             package_type = package.package_type
             metadata = package.package_metadata or {}
             
-            # Sammle alle passenden Transformer
+            # Double-check package type using content inspection
+            original_type = package_type
+            refined_type = self.package_importer._determine_package_type(extract_path, package_type)
+            
+            # Update package type if refined
+            if refined_type != original_type:
+                logger.info(f"Package type refined from '{original_type}' to '{refined_type}' based on content analysis")
+                package_type = refined_type
+                # Update package type in database
+                self._update_package_type(db, package_id, refined_type)
+            
+            # Handle combined package types (e.g., model_metrics, model_logs)
+            component_types = []
+            if "_" in package_type:
+                component_types = package_type.split("_")
+                logger.info(f"Combined package type detected: {package_type}, components: {component_types}")
+            
+            # Collect all matching transformers
             matching_transformers = []
+            
+            # First, check file-based evidence to force certain transformers to be included
+            # regardless of package type
+            has_model_files = False
+            has_metrics_files = False
+            has_log_files = False
+            
+            # Check for model files
+            model_files = []
+            for ext in [".tflite", ".onnx", ".pt", ".pkl"]:
+                model_files.extend([f for f in extracted_files if str(f).endswith(ext)])
+            if model_files:
+                has_model_files = True
+                logger.info(f"Found {len(model_files)} model files in package")
+            
+            # Check for metrics files
+            metrics_files = [f for f in extracted_files if "metrics" in str(f) and str(f).endswith(".json")]
+            if metrics_files:
+                has_metrics_files = True
+                logger.info(f"Found {len(metrics_files)} metrics files in package")
+            
+            # Check for log files
+            log_files = []
+            for ext in [".csv", ".jsonl"]:
+                log_files.extend([f for f in extracted_files if str(f).endswith(ext)])
+            if log_files:
+                has_log_files = True
+                logger.info(f"Found {len(log_files)} log files in package")
+            
+            # Add transformers based on file evidence and package type
             for transformer in self.transformers:
-                logger.info(f"Checking transformer {transformer.__class__.__name__}")
-                if transformer.can_transform(package_type, extracted_files):
-                    logger.info(f"Found matching transformer: {transformer.__class__.__name__}")
+                transformer_name = transformer.__class__.__name__
+                logger.info(f"Checking transformer {transformer_name}")
+                
+                # Check if transformer directly matches package type
+                direct_match = transformer.can_transform(package_type, extracted_files)
+                
+                # For combined types, check if transformer matches any component type
+                component_match = False
+                if component_types:
+                    for component_type in component_types:
+                        if transformer.can_transform(component_type, extracted_files):
+                            component_match = True
+                            break
+                
+                # Force include based on file evidence
+                force_include = False
+                if "Model" in transformer_name and has_model_files:
+                    force_include = True
+                    logger.info(f"Forcing inclusion of {transformer_name} due to model files")
+                elif "Metrics" in transformer_name and has_metrics_files:
+                    force_include = True
+                    logger.info(f"Forcing inclusion of {transformer_name} due to metrics files")
+                elif "Logs" in transformer_name and has_log_files:
+                    force_include = True
+                    logger.info(f"Forcing inclusion of {transformer_name} due to log files")
+                
+                # Add transformer if it matches package type, component type, or has file evidence
+                if direct_match or component_match or force_include:
+                    logger.info(f"Adding transformer: {transformer_name}")
                     matching_transformers.append(transformer)
             
             if not matching_transformers:
@@ -336,6 +409,18 @@ class MLflowService:
             
             return {"status": "error", "message": str(e)}
     
+    def _update_package_type(self, db: Session, package_id: str, new_type: str):
+        """Update the package type in the database."""
+        try:
+            update_data = {
+                "package_type": new_type
+            }
+            package_update = PackageUpdate(**update_data)
+            PackageService.update_package(db, package_id, package_update)
+            logger.info(f"Updated package type for {package_id} to {new_type}")
+        except Exception as e:
+            logger.error(f"Failed to update package type: {str(e)}")
+            
     def _update_package_status(self, db: Session, package_id: str, status: str, error_message: str = None):
         try:
             update_data = {

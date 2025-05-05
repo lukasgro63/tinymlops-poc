@@ -266,9 +266,35 @@ class SyncInterface:
         """
         if not any([adaptive_pipeline, state_manager, adaptation_tracker, inference_monitor, data_logger, model_path]):
             raise SyncError("At least one component must be provided")
+        
+        # Determine the package type based on content
+        package_type = "components"  # Default to components
+        description = "Package with multiple component data types"
+        
+        # Use a more specific package type if the package only contains one type of data
+        if model_path and not any([inference_monitor, data_logger]):
+            package_type = "model"
+            description = "Model package"
+        elif inference_monitor and not any([model_path, data_logger]):
+            package_type = "metrics"
+            description = "Metrics package"
+        elif data_logger and not any([model_path, inference_monitor]):
+            package_type = "data_log"
+            description = "Data log package"
+        
+        # For combinations of different data types, use the combined type
+        if model_path and inference_monitor and not data_logger:
+            package_type = "model_metrics"
+            description = "Model with metrics package"
+        elif model_path and data_logger and not inference_monitor:
+            package_type = "model_logs"
+            description = "Model with logs package"
+        elif inference_monitor and data_logger and not model_path:
+            package_type = "metrics_logs"
+            description = "Metrics and logs package"
             
-        package_id = self.create_package(device_id=device_id, package_type="model", 
-                                      description="Package with component data and model", 
+        package_id = self.create_package(device_id=device_id, package_type=package_type, 
+                                      description=description, 
                                       compression=compression)
         
         # Handle adaptive components

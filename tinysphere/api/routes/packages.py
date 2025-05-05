@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import traceback
 import threading
@@ -8,6 +9,10 @@ import aiofiles
 from fastapi import (APIRouter, Depends, File, Form,
                      HTTPException, UploadFile)
 from sqlalchemy.orm import Session
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 from tinysphere.api.dependencies.db import get_db
 from tinysphere.api.models.package import (Package, PackageUpdate,
@@ -185,6 +190,34 @@ async def upload_package(
             await buffer.write(content)
         
         file_size = os.path.getsize(file_path)
+        
+        # Pre-inspect package to determine actual type before processing
+        from tinysphere.importer.package_processor import PackageImporter
+        package_importer = PackageImporter(extract_dir="package_extracts")
+        
+        # Extract to temporary directory for inspection
+        try:
+            # Get package type from metadata first
+            package_type = package_data.get("package_type", "unknown")
+            
+            # Extract temporarily to inspect content
+            extract_dir = package_importer.extract_package(
+                package_path=file_path,
+                package_id=package_id,
+                device_id=device_id
+            )
+            
+            # Refine the package type based on actual content
+            refined_type = package_importer._determine_package_type(extract_dir, package_type)
+            
+            # If the type has been refined, update the metadata
+            if refined_type != package_type:
+                logger.info(f"Package type refined from '{package_type}' to '{refined_type}' based on content inspection")
+                package_data["package_type"] = refined_type
+                package_type = refined_type
+        except Exception as e:
+            logger.warning(f"Error during package type inspection: {e}")
+            # Continue with original type from metadata if inspection fails
         
         # Process the package with service
         db_package = PackageService.process_uploaded_package(db, package_data, file_path, file_size)
