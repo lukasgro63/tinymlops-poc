@@ -27,7 +27,8 @@ import {
   RemoveCircleOutline as OutlierIcon,
   QuestionMark as UnknownIcon,
   Psychology as ConfidenceIcon,
-  Lightbulb as CustomIcon
+  Lightbulb as CustomIcon,
+  ReportOutlined as ReportIcon
 } from '@mui/icons-material';
 import { format, parseISO } from 'date-fns';
 import { getDriftEvents } from '../../services/api';
@@ -124,7 +125,10 @@ const RecentDriftEventsTable: React.FC<RecentDriftEventsTableProps> = ({
 
   if (loading) {
     return (
-      <SectionCard title={title}>
+      <SectionCard 
+        title={title}
+        icon={<ReportIcon style={{ fontSize: 20, color: '#00647D' }} />}
+      >
         <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
           <CircularProgress />
         </Box>
@@ -134,7 +138,10 @@ const RecentDriftEventsTable: React.FC<RecentDriftEventsTableProps> = ({
 
   if (error) {
     return (
-      <SectionCard title={title}>
+      <SectionCard 
+        title={title}
+        icon={<ReportIcon style={{ fontSize: 20, color: '#00647D' }} />}
+      >
         <Box sx={{ p: 2 }}>
           <Typography color="error">{error}</Typography>
         </Box>
@@ -144,7 +151,10 @@ const RecentDriftEventsTable: React.FC<RecentDriftEventsTableProps> = ({
 
   if (events.length === 0) {
     return (
-      <SectionCard title={title}>
+      <SectionCard 
+        title={title}
+        icon={<ReportIcon style={{ fontSize: 20, color: '#00647D' }} />}
+      >
         <Box sx={{ p: 2 }}>
           <Typography>No drift events available</Typography>
         </Box>
@@ -153,7 +163,10 @@ const RecentDriftEventsTable: React.FC<RecentDriftEventsTableProps> = ({
   }
 
   return (
-    <SectionCard title={title}>
+    <SectionCard 
+      title={title}
+      icon={<ReportIcon style={{ fontSize: 20, color: '#00647D' }} />}
+    >
       <TableContainer component={Paper} elevation={0}>
         <Table size="small">
           <TableHead>

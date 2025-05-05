@@ -36,7 +36,10 @@ import {
   ViewInAr as FeatureIcon,
   RemoveCircleOutline as OutlierIcon,
   Help as UnknownIcon,
-  VisibilityOutlined as ViewIcon
+  VisibilityOutlined as ViewIcon,
+  TrendingUp as TrendingUpIcon,
+  HistoryEdu as HistoryIcon,
+  AssessmentOutlined as AssessmentIcon
 } from '@mui/icons-material';
 import { format, subDays, parseISO } from 'date-fns';
 import { getDriftEvents } from '../services/api';
@@ -216,9 +219,12 @@ const DriftPage: React.FC = () => {
       <Paper sx={{ mb: 3, p: 2 }} elevation={2}>
         {/* Toolbar */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h6" component="h2">
-            Drift Events
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <HistoryIcon style={{ fontSize: 20, color: '#00647D', marginRight: '8px' }} />
+            <Typography variant="h6" component="h2">
+              Drift Events
+            </Typography>
+          </Box>
           
           <Box>
             <Tooltip title="Toggle Filters">

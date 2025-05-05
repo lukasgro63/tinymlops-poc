@@ -7,6 +7,7 @@ import {
   Chip
 } from '@mui/material';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { AssessmentOutlined as AssessmentIcon } from '@mui/icons-material';
 import { getDriftStatistics } from '../../services/api';
 import { DriftStatistics, DriftStatus } from '../../types/api';
 import SectionCard from './SectionCard';
@@ -77,7 +78,10 @@ const DriftStatisticsCard: React.FC<DriftStatisticsCardProps> = ({
   // If parent has errors, don't show our own error state
   if ((loading && !parentLoading) || (error && !parentError)) {
     return (
-      <SectionCard title={title}>
+      <SectionCard 
+        title={title}
+        icon={<AssessmentIcon style={{ fontSize: 20, color: '#00647D' }} />}
+      >
         <ErrorDisplay
           error={error}
           loading={loading}
@@ -90,7 +94,10 @@ const DriftStatisticsCard: React.FC<DriftStatisticsCardProps> = ({
 
   if (!statistics) {
     return (
-      <SectionCard title={title}>
+      <SectionCard 
+        title={title}
+        icon={<AssessmentIcon style={{ fontSize: 20, color: '#00647D' }} />}
+      >
         <Box sx={{ p: 2 }}>
           <Typography>No drift statistics available</Typography>
         </Box>
@@ -113,7 +120,10 @@ const DriftStatisticsCard: React.FC<DriftStatisticsCardProps> = ({
   }));
 
   return (
-    <SectionCard title={title}>
+    <SectionCard 
+      title={title} 
+      icon={<AssessmentIcon style={{ fontSize: 20, color: '#00647D' }} />}
+    >
       <CardContent>
         <div style={{ display: 'grid', gap: '24px' }}>
           {/* Summary statistics */}
