@@ -111,36 +111,108 @@ class StoneDetector:
         # Adjust according to your model's output format
         
         try:
-            # Get detection boxes
-            boxes = self.interpreter.get_tensor(
-                self.output_details[0]['index'])[0]
-            
-            # Get detection classes
-            classes = self.interpreter.get_tensor(
-                self.output_details[1]['index'])[0]
-            
-            # Get confidence scores
-            scores = self.interpreter.get_tensor(
-                self.output_details[2]['index'])[0]
-            
-            # Filter detections by threshold
-            for i, score in enumerate(scores):
-                if score > self.threshold:
-                    # Convert normalized coordinates to pixel coordinates
-                    y1, x1, y2, x2 = boxes[i]
-                    h, w = image.shape[:2]
-                    box = (
-                        int(x1 * w),  # x
-                        int(y1 * h),  # y
-                        int((x2 - x1) * w),  # width
-                        int((y2 - y1) * h)   # height
-                    )
+            # Check if output_details has enough elements
+            if len(self.output_details) < 3:
+                print(f"Warning: Expected at least 3 output tensors, but got {len(self.output_details)}")
+                # Try to infer the outputs based on shapes
+                if len(self.output_details) == 1:
+                    # Some models have a single output tensor with all information
+                    output = self.interpreter.get_tensor(self.output_details[0]['index'])
                     
-                    # Add detection to list
-                    detections.append((int(classes[i]), float(score), box))
+                    # Try to determine the number of detections
+                    if len(output.shape) >= 2 and output.shape[1] >= 6:
+                        # Assuming output format: [batch, num_detections, 6]
+                        # where 6 = [y1, x1, y2, x2, score, class]
+                        # or [batch, num_detections * 6]
+                        detections_data = output[0]
+                        
+                        # Process each detection
+                        for i in range(len(detections_data)):
+                            # Skip if we're at the end of valid detections
+                            if i >= len(detections_data):
+                                break
+                                
+                            # Check if this is a valid detection
+                            if len(detections_data[i]) >= 6:
+                                y1, x1, y2, x2, score, class_id = detections_data[i][:6]
+                                
+                                if score > self.threshold:
+                                    # Convert to pixel coordinates
+                                    h, w = image.shape[:2]
+                                    box = (
+                                        int(x1 * w),   # x
+                                        int(y1 * h),   # y
+                                        int((x2 - x1) * w),  # width
+                                        int((y2 - y1) * h)   # height
+                                    )
+                                    detections.append((int(class_id), float(score), box))
+                    
+                    return detections  # Return early with what we have
+            
+            # Standard SSD format with separate tensors
+            # Get detection boxes - use safe indexing
+            boxes_tensor = self.interpreter.get_tensor(self.output_details[0]['index'])
+            if len(boxes_tensor) > 0:
+                boxes = boxes_tensor[0]
+            else:
+                print("Warning: Boxes tensor is empty")
+                return detections
+            
+            # Get detection classes - use safe indexing
+            classes_idx = min(1, len(self.output_details)-1)
+            classes_tensor = self.interpreter.get_tensor(self.output_details[classes_idx]['index'])
+            if len(classes_tensor) > 0:
+                classes = classes_tensor[0]
+            else:
+                print("Warning: Classes tensor is empty")
+                return detections
+            
+            # Get confidence scores - use safe indexing
+            scores_idx = min(2, len(self.output_details)-1)
+            scores_tensor = self.interpreter.get_tensor(self.output_details[scores_idx]['index'])
+            if len(scores_tensor) > 0:
+                scores = scores_tensor[0]
+            else:
+                print("Warning: Scores tensor is empty")
+                return detections
+            
+            # Validate lengths match to avoid index errors
+            if len(scores) != len(classes) or len(scores) != len(boxes):
+                print(f"Warning: Inconsistent detection arrays - scores:{len(scores)}, classes:{len(classes)}, boxes:{len(boxes)}")
+                # Use the minimum length to avoid index errors
+                num_detections = min(len(scores), len(classes), len(boxes))
+            else:
+                num_detections = len(scores)
+                
+            # Filter detections by threshold
+            for i in range(num_detections):
+                if i < len(scores) and scores[i] > self.threshold:
+                    # Safely get bbox coordinates
+                    if i < len(boxes) and len(boxes[i]) >= 4:
+                        # Get coordinates with safe indexing
+                        y1, x1, y2, x2 = boxes[i][:4]
+                        
+                        # Ensure image has shape
+                        if hasattr(image, 'shape') and len(image.shape) >= 2:
+                            h, w = image.shape[:2]
+                            box = (
+                                int(x1 * w),  # x
+                                int(y1 * h),  # y
+                                int((x2 - x1) * w),  # width
+                                int((y2 - y1) * h)   # height
+                            )
+                            
+                            # Safely get class
+                            class_id = int(classes[i]) if i < len(classes) else 0
+                            
+                            # Add detection to list
+                            detections.append((class_id, float(scores[i]), box))
         
         except Exception as e:
             print(f"Error processing detections: {e}")
+            # Log more detailed error information
+            import traceback
+            traceback.print_exc()
         
         return detections
     

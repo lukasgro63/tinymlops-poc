@@ -69,6 +69,21 @@ When running on embedded devices like Raspberry Pi, the full TensorFlow library 
    **Common Errors:**
    - "Got value of type UINT8 but expected type FLOAT32 for input" - This indicates you need to convert your image to float32.
    - "The truth value of an array with more than one element is ambiguous" - This happens when a multi-dimensional array is used in a boolean context. Make sure to flatten array features or explicitly check array properties with .any() or .all().
+   - "Error processing detections: list index out of range" - This typically happens when the model outputs don't match expected formats. Use the model_inspector.py tool (see below) to diagnose.
+
+## Troubleshooting Tools
+
+For troubleshooting model-related issues, we provide a model inspector tool:
+
+```bash
+python model_inspector.py --model models/model.tflite --image path/to/test_image.jpg
+```
+
+This tool will:
+1. Load the model and print input/output tensor details
+2. Preprocess the image according to the model's input requirements
+3. Run inference and analyze the outputs
+4. For object detection models, it will parse common output formats and show detected objects
 
 ## Creating New Scenarios
 
