@@ -21,8 +21,11 @@ const RecentActivitiesList: React.FC<RecentActivitiesListProps> = ({ activities 
   // Format date to relative time (without date-fns dependency)
   const formatRelativeTime = (dateString: string) => {
     try {
+      // Explicitly handle the Z suffix to ensure UTC parsing
+      const dateStr = dateString.endsWith('Z') ? dateString : dateString + 'Z';
+      
       // Parse the date string as UTC, then convert to local time
-      const date = new Date(dateString);
+      const date = new Date(dateStr);
       const now = new Date();
       const diffMs = now.getTime() - date.getTime();
       
@@ -42,6 +45,7 @@ const RecentActivitiesList: React.FC<RecentActivitiesListProps> = ({ activities 
         return 'just now';
       }
     } catch (e) {
+      console.error("Date parsing error:", e, "for date:", dateString);
       return 'unknown time';
     }
   };
@@ -49,9 +53,12 @@ const RecentActivitiesList: React.FC<RecentActivitiesListProps> = ({ activities 
   // Format date to absolute time
   const formatAbsoluteTime = (dateString: string) => {
     try {
-      const date = new Date(dateString);
+      // Explicitly handle the Z suffix to ensure UTC parsing
+      const dateStr = dateString.endsWith('Z') ? dateString : dateString + 'Z';
+      const date = new Date(dateStr);
       return date.toLocaleString();
     } catch (e) {
+      console.error("Date parsing error:", e, "for date:", dateString);
       return 'unknown time';
     }
   };

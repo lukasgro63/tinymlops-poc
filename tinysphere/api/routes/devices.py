@@ -14,8 +14,21 @@ router = APIRouter()
 
 @router.get("/", response_model=List[Device])
 def get_devices(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    devices = DeviceService.get_all_devices(db, skip=skip, limit=limit)
-    return devices
+    try:
+        from tinysphere.api.models.base import format_datetime_with_z
+        
+        devices = DeviceService.get_all_devices(db, skip=skip, limit=limit)
+        # Ensure all datetime fields are properly formatted with Z suffix
+        for device in devices:
+            if device.registration_time:
+                device.registration_time = format_datetime_with_z(device.registration_time)
+            if device.last_sync_time:
+                device.last_sync_time = format_datetime_with_z(device.last_sync_time)
+        
+        return devices
+    except Exception as e:
+        print(f"Error formatting device dates: {e}")
+        return DeviceService.get_all_devices(db, skip=skip, limit=limit)
 
 # Zuerst alle spezifischen Routen
 @router.get("/platforms")
@@ -55,6 +68,18 @@ def get_device(device_id: str, db: Session = Depends(get_db)):
     db_device = DeviceService.get_device_by_id(db, device_id=device_id)
     if db_device is None:
         raise HTTPException(status_code=404, detail="Device not found")
+        
+    try:
+        from tinysphere.api.models.base import format_datetime_with_z
+        
+        # Format datetime fields correctly
+        if db_device.registration_time:
+            db_device.registration_time = format_datetime_with_z(db_device.registration_time)
+        if db_device.last_sync_time:
+            db_device.last_sync_time = format_datetime_with_z(db_device.last_sync_time)
+    except Exception as e:
+        print(f"Error formatting device dates: {e}")
+        
     return db_device
 
 @router.post("/register", response_model=DeviceRegistrationResponse)

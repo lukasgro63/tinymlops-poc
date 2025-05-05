@@ -325,8 +325,11 @@ const DevicesPage: React.FC = () => {
     if (!dateString) return 'Never';
     
     try {
+      // Explicitly handle the Z suffix to ensure UTC parsing
+      const dateStr = dateString.endsWith('Z') ? dateString : dateString + 'Z';
+      
       // Parse the date string as UTC, then convert to local time
-      const date = new Date(dateString);
+      const date = new Date(dateStr);
       const now = new Date();
       const diffMs = now.getTime() - date.getTime();
       
@@ -345,6 +348,7 @@ const DevicesPage: React.FC = () => {
         return 'just now';
       }
     } catch (e) {
+      console.error("Date parsing error:", e, "for date:", dateString);
       return 'Unknown';
     }
   };

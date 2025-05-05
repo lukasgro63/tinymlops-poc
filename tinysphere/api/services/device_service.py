@@ -55,6 +55,9 @@ class DeviceService:
     def register_device(db: Session, device_data: Dict[str, Any]) -> Device:
 
         try:
+            # Current time with UTC timezone to ensure consistency
+            current_time = datetime.now(timezone.utc)
+            
             device_id = device_data["device_id"]
             existing_device = DeviceService.get_device_by_id(db, device_id)
             
@@ -69,7 +72,7 @@ class DeviceService:
                     tinylcm_version=device_info.get("tinylcm_version"),
                     is_active=True,
                     device_info=device_info,
-                    last_sync_time=datetime.now(timezone.utc)
+                    last_sync_time=current_time
                 )
                 
                 return DeviceService.update_device(db, device_id, update_data)
@@ -87,7 +90,7 @@ class DeviceService:
                     else:
                         registration_time = datetime.now(timezone.utc)
                 except (ValueError, TypeError):
-                    registration_time = datetime.now(timezone.utc)
+                    registration_time = current_time
                 
                 device_create = DeviceCreate(
                     device_id=device_id,
@@ -113,7 +116,7 @@ class DeviceService:
                 db_device = Device(
                     device_id=device_id,
                     is_active=True,
-                    registration_time=datetime.now(timezone.utc)
+                    registration_time=current_time
                 )
                 db.add(db_device)
                 db.commit()
@@ -128,7 +131,9 @@ class DeviceService:
         if db_device is None:
             return None
         
-        db_device.last_sync_time = datetime.now(timezone.utc)
+        # Use consistent time representation with UTC timezone
+        current_time = datetime.now(timezone.utc)
+        db_device.last_sync_time = current_time
         db.commit()
         db.refresh(db_device)
         return db_device
