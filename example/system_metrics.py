@@ -15,6 +15,13 @@ import time
 from datetime import datetime
 from typing import Dict, Any, Optional
 
+# Import DATA_TYPE constants from tinylcm
+try:
+    from tinylcm.constants import DATA_TYPE_JSON
+except ImportError:
+    # Fallback if import fails
+    DATA_TYPE_JSON = "json"
+
 import psutil
 
 # Try to import Raspberry Pi specific modules
@@ -222,12 +229,10 @@ class SystemMetricsCollector:
             data_logger: TinyLCM DataLogger instance
             metrics: Metrics to log
         """
-        # Convert metrics to string
-        metrics_json = json.dumps(metrics)
-        
-        # Log metrics as text data
-        data_logger.log_text(
-            text_data=metrics_json,
+        # Log metrics as metadata
+        data_logger.log_data(
+            input_data=json.dumps(metrics),
+            input_type=DATA_TYPE_JSON,
             metadata={
                 "type": "system_metrics",
                 "timestamp": metrics["timestamp"],

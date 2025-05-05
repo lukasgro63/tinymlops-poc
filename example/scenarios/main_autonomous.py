@@ -697,7 +697,12 @@ class AutonomousStoneDetectorApp:
             
             # Process through adaptive pipeline with autonomous monitoring
             try:
-                # Keep the features data in metadata but don't pass directly
+                # NOTE: We previously hit an error with AdaptivePipeline.process()
+                # getting unexpected keyword arguments 'prediction' and 'confidence'.
+                # Looking at the method signature in pipeline.py, these aren't direct 
+                # parameters but should go in metadata.
+                
+                # Create metadata dictionary with all detection information
                 metadata = {
                     "inference_time_ms": inference_time_ms,
                     "bbox": bbox,
@@ -708,15 +713,19 @@ class AutonomousStoneDetectorApp:
                     "label": prediction,  # Default label is the current prediction
                 }
                 
-                # Directly pass the scalar confidence value
+                # Check the signature of AdaptivePipeline.process and only pass valid arguments
+                # The AdaptivePipeline.process method accepts: input_data, label, timestamp, sample_id, metadata, extract_features
+                
+                # For autonomous mode, we don't have ground truth labels
+                # We can pass prediction as the label if ground truth is available
+                # In a real autonomous system, we would likely not pass a label here
+                # unless using self-supervision or pseudo-labeling techniques
                 result = self.adaptive_pipeline.process(
                     input_data=frame,  # Pass the frame for logging
-                    # Don't pass features parameter - it's not accepted
-                    prediction=prediction,  # Pass explicit prediction 
-                    confidence=float(confidence),  # Ensure it's a scalar
+                    label=prediction,  # Pass the predicted label - this is used for feature samples
                     timestamp=time.time(),
                     sample_id=f"frame_{frame_id}_{i}",
-                    extract_features=False,  # We'll extract features in the pipeline if needed
+                    extract_features=False,  # We already have features
                     metadata=metadata
                 )
             except Exception as e:

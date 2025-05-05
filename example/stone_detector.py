@@ -119,14 +119,22 @@ class StoneDetector:
         try:
             # Check if output_details has enough elements
             if len(self.output_details) < 3:
-                print(f"Warning: Expected at least 3 output tensors, but got {len(self.output_details)}")
+                # Only print on first detection to avoid log spam
+                if not hasattr(self, '_single_output_warned'):
+                    self._single_output_warned = True
+                    print(f"Warning: Expected at least 3 output tensors, but got {len(self.output_details)}")
+                    print(f"This is normal for binary classification models - will handle appropriately")
+                
                 # Try to infer the outputs based on shapes
                 if len(self.output_details) == 1:
                     # Get the single output tensor
                     output = self.interpreter.get_tensor(self.output_details[0]['index'])
                     output_shape = output.shape
                     
-                    print(f"Single output tensor shape: {output_shape}")
+                    # Only print shape on first detection
+                    if not hasattr(self, '_shape_warned'):
+                        self._shape_warned = True
+                        print(f"Single output tensor shape: {output_shape}")
                     
                     # Handle MobileSSD-like single tensor output format (most common)
                     if len(output_shape) == 3 and output_shape[2] == 4:
@@ -321,8 +329,10 @@ class StoneDetector:
                                 # Add to detections
                                 detections.append((max_score_idx, float(max_score), box))
                     
-                    # Print detection summary
-                    print(f"Processed single output tensor and found {len(detections)} detections above threshold")
+                    # Print detection summary only if stones detected or on first run
+                    if len(detections) > 0 or not hasattr(self, '_processed_first_run'):
+                        self._processed_first_run = True
+                        print(f"Processed single output tensor and found {len(detections)} detections above threshold")
                     
                     return detections  # Return early with what we have
             
