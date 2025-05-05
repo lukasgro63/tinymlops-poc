@@ -439,7 +439,9 @@ class SyncInterface:
                         # Create temporary metadata file
                         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
                             model_meta_path = tmp.name
-                            json.dump(model_meta, tmp)
+                            # Import TinyLCMJSONEncoder to handle numpy arrays
+                            from tinylcm.utils.file_utils import TinyLCMJSONEncoder
+                            json.dump(model_meta, tmp, cls=TinyLCMJSONEncoder)
                         
                         # Add model file
                         self.add_file_to_package(

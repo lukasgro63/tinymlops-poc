@@ -12,7 +12,7 @@ from collections import deque
 
 from tinylcm.core.data_structures import AdaptationEvent
 from tinylcm.utils.logging import setup_logger
-from tinylcm.utils.file_utils import ensure_directory_exists
+from tinylcm.utils.file_utils import ensure_directory_exists, TinyLCMJSONEncoder
 
 logger = setup_logger(__name__)
 
@@ -77,10 +77,10 @@ class AdaptationTracker:
         
         # Initialize log files with empty data
         with open(self.events_file, 'w') as f:
-            json.dump([], f)
+            json.dump([], f, cls=TinyLCMJSONEncoder)
         
         with open(self.metrics_file, 'w') as f:
-            json.dump({}, f)
+            json.dump({}, f, cls=TinyLCMJSONEncoder)
         
         # Set up background worker thread and queue for non-blocking I/O
         self.task_queue = queue.Queue(maxsize=queue_size)
@@ -313,7 +313,7 @@ class AdaptationTracker:
         """Internal method to save session information."""
         try:
             with open(self.session_file, 'w') as f:
-                json.dump(metadata, f, indent=2)
+                json.dump(metadata, f, indent=2, cls=TinyLCMJSONEncoder)
             return True
         except Exception as e:
             logger.error(f"Error saving session info: {str(e)}")
@@ -335,7 +335,7 @@ class AdaptationTracker:
                 # Seek to beginning and write updated events
                 f.seek(0)
                 f.truncate()
-                json.dump(events, f, indent=2)
+                json.dump(events, f, indent=2, cls=TinyLCMJSONEncoder)
             
             return True
         except Exception as e:
@@ -362,7 +362,7 @@ class AdaptationTracker:
                 # Seek to beginning and write updated metrics
                 f.seek(0)
                 f.truncate()
-                json.dump(all_metrics, f, indent=2)
+                json.dump(all_metrics, f, indent=2, cls=TinyLCMJSONEncoder)
             
             return True
         except Exception as e:
@@ -431,7 +431,7 @@ class AdaptationTracker:
         # Copy events file
         with open(os.path.join(artifacts_dir, "adaptation_events.json"), 'w') as f:
             events_list = [event.to_dict() if hasattr(event, "to_dict") else event for event in self.events]
-            json.dump(events_list, f, indent=2)
+            json.dump(events_list, f, indent=2, cls=TinyLCMJSONEncoder)
         
         logger.info(f"Exported adaptation logs to MLflow format: {run_dir}")
         

@@ -9,6 +9,26 @@ from typing import Generator, Iterable
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Check if numpy is available for handling ndarray serialization
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+
+# Custom JSON encoder that handles numpy arrays
+class TinyLCMJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if NUMPY_AVAILABLE and isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if NUMPY_AVAILABLE and isinstance(obj, np.integer):
+            return int(obj)
+        if NUMPY_AVAILABLE and isinstance(obj, np.floating):
+            return float(obj)
+        if NUMPY_AVAILABLE and isinstance(obj, np.bool_):
+            return bool(obj)
+        return super().default(obj)
+
 PathLike = Union[str, Path]
 T = TypeVar('T')
 
@@ -92,9 +112,9 @@ def save_json(data: Dict[str, Any], file_path: PathLike, pretty: bool = True) ->
     try:
         with path_obj.open('w', encoding='utf-8') as f:
             if pretty:
-                json.dump(data, f, indent=2, sort_keys=True, ensure_ascii=False)
+                json.dump(data, f, indent=2, sort_keys=True, ensure_ascii=False, cls=TinyLCMJSONEncoder)
             else:
-                json.dump(data, f, ensure_ascii=False)
+                json.dump(data, f, ensure_ascii=False, cls=TinyLCMJSONEncoder)
         logger.debug(f"Successfully saved JSON to: {path_obj}")
     except TypeError as e:
         logger.error(f"Data for {path_obj} is not JSON serializable: {e}", exc_info=True)

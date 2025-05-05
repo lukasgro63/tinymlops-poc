@@ -581,7 +581,9 @@ class DataLogger:
             except Exception:
                 pass
             with open(summary_path, "w", encoding='utf-8') as f:
-                json.dump(summary, f, indent=2)
+                # Import and use TinyLCMJSONEncoder to handle numpy arrays
+                from tinylcm.utils.file_utils import TinyLCMJSONEncoder
+                json.dump(summary, f, indent=2, cls=TinyLCMJSONEncoder)
         except Exception as e:
             print(f"Warning: Error creating logger summary: {str(e)}")
         
