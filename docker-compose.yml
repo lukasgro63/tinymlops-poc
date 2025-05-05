@@ -44,8 +44,19 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+      # Allow iframe embedding
       MINIO_BROWSER_SECURE_FRAMING: "false"
       MINIO_BROWSER_REDIRECT_ALLOW_HOSTS: "*"
+      MINIO_BROWSER: "on"
+      # CORS settings
+      MINIO_CORS_ALLOW_ORIGIN: "*"
+      MINIO_CORS_ALLOW_METHODS: "GET,PUT,POST,DELETE,OPTIONS"
+      MINIO_CORS_ALLOW_HEADERS: "Accept,Authorization,Content-Type,Content-Length,X-Amz-Date,X-Amz-Content-SHA256,X-Amz-Security-Token,X-Requested-With"
+      MINIO_CORS_EXPOSE_HEADERS: "ETag,X-Amz-Meta-*"
+      # Security headers customization
+      MINIO_BROWSER_CONTENT_SECURITY_POLICY: "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: http: https:; frame-ancestors 'self' *;"
+      MINIO_BROWSER_STRICT_TRANSPORT_SECURITY: "max-age=31536000;"
+      MINIO_BROWSER_X_FRAME_OPTIONS: "ALLOWALL"
     volumes:
       - minio-data:/data
     ports:

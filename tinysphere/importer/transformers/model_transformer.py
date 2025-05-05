@@ -140,12 +140,38 @@ class ModelTransformer(DataTransformer):
                         version=registered_model.version,
                         description=f"File hash: {model_hash}"
                     )
+                    
+                    # Handle model version stages
+                    # First, get all versions of this model
+                    try:
+                        all_versions = self.client.get_latest_versions(model_name)
+                        
+                        # Set previous Production versions to Archived
+                        for version in all_versions:
+                            if version.current_stage == "Production":
+                                self.client.transition_model_version_stage(
+                                    name=model_name,
+                                    version=version.version,
+                                    stage="Archived"
+                                )
+                                self.logger.info(f"Moved previous Production model {model_name} version {version.version} to Archived stage")
+                    except Exception as stage_e:
+                        self.logger.warning(f"Error handling previous model versions: {str(stage_e)}")
+                    
+                    # Set new version to Production stage automatically as it came from a device
+                    self.client.transition_model_version_stage(
+                        name=model_name,
+                        version=registered_model.version,
+                        stage="Production"
+                    )
+                    self.logger.info(f"Set model {model_name} version {registered_model.version} to Production stage")
                 
                 # Erweiterte Ergebnisinformationen hinzufügen
                 result.update({
                     "message": "Model imported and registered successfully",
                     "registered_model_name": model_name,
-                    "registered_model_version": registered_model.version
+                    "registered_model_version": registered_model.version,
+                    "stage": "Production"
                 })
                 
                 self.logger.info(f"Model registered successfully as {model_name} version {registered_model.version}")

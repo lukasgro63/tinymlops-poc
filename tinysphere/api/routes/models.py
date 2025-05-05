@@ -18,6 +18,10 @@ class ModelVersion(BaseModel):
     stage: str
     source: Optional[str] = None
     run_id: Optional[str] = None
+    creation_timestamp: Optional[int] = None
+    last_updated_timestamp: Optional[int] = None
+    description: Optional[str] = None
+    is_production: bool = False
 
 @router.get("/", response_model=List[str])
 def list_models(db: Session = Depends(get_db)):
@@ -43,7 +47,11 @@ def get_model_versions(model_name: str, db: Session = Depends(get_db)):
                 version=version.version,
                 stage=version.current_stage,
                 source=version.source,
-                run_id=version.run_id
+                run_id=version.run_id,
+                creation_timestamp=version.creation_timestamp,
+                last_updated_timestamp=version.last_updated_timestamp,
+                description=version.description,
+                is_production=(version.current_stage == "Production")
             ))
         
         return result
@@ -77,7 +85,11 @@ def transition_model_version(
             version=version_obj.version,
             stage=version_obj.current_stage,
             source=version_obj.source,
-            run_id=version_obj.run_id
+            run_id=version_obj.run_id,
+            creation_timestamp=version_obj.creation_timestamp,
+            last_updated_timestamp=version_obj.last_updated_timestamp,
+            description=version_obj.description,
+            is_production=(version_obj.current_stage == "Production")
         )
     except mlflow.exceptions.MlflowException as e:
         raise HTTPException(status_code=404, detail=f"Model or version not found: {str(e)}")
