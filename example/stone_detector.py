@@ -72,15 +72,21 @@ class StoneDetector:
         input_shape = self.input_details[0]['shape']
         height, width = input_shape[1], input_shape[2]
         
+        # Standardize to match the original code exactly
+        target_size = (160, 160)  # Set this to match the original code
+        
         # Resize image
-        resized = cv2.resize(image, (width, height))
+        resized = cv2.resize(image, target_size, interpolation=cv2.INTER_AREA)
+        
+        # Convert RGBA to RGB if needed (4 channels to 3)
+        if len(resized.shape) > 2 and resized.shape[2] == 4:
+            resized = cv2.cvtColor(resized, cv2.COLOR_RGBA2RGB)
         
         # Convert to floating point and normalize
         normalized = resized.astype(np.float32) / 255.0
         
         # Expand dimensions if needed (batch dimension)
-        if len(input_shape) == 4:
-            normalized = np.expand_dims(normalized, axis=0)
+        normalized = np.expand_dims(normalized, axis=0)
         
         return normalized
     
@@ -278,21 +284,23 @@ class StoneDetector:
                     
                     # Special case for (1, 1) output - binary classifier
                     elif len(output_shape) == 2 and output_shape[1] == 1:
-                        # This is likely a binary classifier with a single score
+                        # This is a binary classifier with a single score, exactly like in your original code
                         score = float(output[0][0])
                         print(f"Binary classifier with score: {score}")
                         
-                        # Use score directly - often 0.5 is decision boundary but we'll use threshold
+                        # In the original code, the raw score was used directly
+                        # And we detected stones when score >= threshold
                         if score > self.threshold:
                             # Make the whole image a detection
                             h, w = image.shape[:2]
                             box = (0, 0, w, h)
                             
-                            # For binary classifier, class is 0 or 1
-                            class_id = 1 if score > 0.5 else 0
+                            # Match the original code behavior - value is used directly as confidence
+                            class_id = 0  # In original code, class ID wasn't used, just the score
                             
-                            # Add to detections
+                            # Add to detections with raw score as in original
                             detections.append((class_id, float(score), box))
+                            print(f"Stone detected with confidence: {score:.2f}")
                     
                     # For any other single-output format, try to just use it as is
                     # This works for many simple classification/detection models

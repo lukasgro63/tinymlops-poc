@@ -696,40 +696,28 @@ class AutonomousStoneDetectorApp:
             prediction = self.detector.labels[class_id]
             
             # Process through adaptive pipeline with autonomous monitoring
-            # Ensure features is a 1D array
-            safe_features = features
-            if isinstance(features, np.ndarray):
-                if features.ndim > 1:
-                    safe_features = features.flatten()
-                
-                # Ensure we have a non-empty feature vector
-                if safe_features.size == 0:
-                    safe_features = np.zeros(5, dtype=np.float32)
-            
-            # Add clear prediction and label
-            prediction_data = {
-                "prediction": prediction,
-                "confidence": float(confidence),  # Ensure it's a scalar
-                "features": safe_features,
-                "label": prediction  # Default label is the current prediction
-            }
-            
             try:
+                # Keep the features data in metadata but don't pass directly
+                metadata = {
+                    "inference_time_ms": inference_time_ms,
+                    "bbox": bbox,
+                    "frame_id": frame_id,
+                    "detection_id": i,
+                    "prediction": prediction,
+                    "confidence": float(confidence),  # Ensure it's a scalar
+                    "label": prediction,  # Default label is the current prediction
+                }
+                
+                # Directly pass the scalar confidence value
                 result = self.adaptive_pipeline.process(
                     input_data=frame,  # Pass the frame for logging
-                    features=safe_features,  # Pass the safe features
-                    prediction=prediction,  # Pass explicit prediction
+                    # Don't pass features parameter - it's not accepted
+                    prediction=prediction,  # Pass explicit prediction 
                     confidence=float(confidence),  # Ensure it's a scalar
                     timestamp=time.time(),
                     sample_id=f"frame_{frame_id}_{i}",
-                    extract_features=False,  # We already extracted features
-                    metadata={
-                        "inference_time_ms": inference_time_ms,
-                        "bbox": bbox,
-                        "frame_id": frame_id,
-                        "detection_id": i,
-                        "prediction_data": prediction_data
-                    }
+                    extract_features=False,  # We'll extract features in the pipeline if needed
+                    metadata=metadata
                 )
             except Exception as e:
                 logger.error(f"Error in adaptive pipeline processing: {e}")

@@ -291,17 +291,35 @@ def analyze_detector_outputs(outputs, score_threshold=0.5):
                             break
             
             elif len(shape) == 2 and shape[1] == 1:
-                # Special case for binary classification
+                # Special case for binary classification - this is the stone detector model format!
                 score = float(output_data[0])
-                print("\nBinary classifier with single output")
-                print(f"Score: {score:.6f}")
+                print("\n=== Stone Detector Binary Classifier ===")
+                print(f"DETECTION SCORE: {score:.6f}")
                 
-                # Interpret the score
+                # Interpret the score - match interpretation of original code
                 if 0 <= score <= 1:
-                    prediction = "Positive (class 1)" if score > 0.5 else "Negative (class 0)"
+                    prediction = "STONE DETECTED!" if score > 0.5 else "No stone detected"
                     confidence = max(score, 1-score)
                     print(f"Prediction: {prediction} with confidence {confidence:.2f}")
-                    print(f"This is {'above' if score > score_threshold else 'below'} the threshold {score_threshold}")
+                    print(f"This is {'above' if score > score_threshold else 'below'} the detection threshold {score_threshold}")
+                    
+                    # Print input preprocess information from original code
+                    print("\n=== Usage Information ===")
+                    print("This model expects:")
+                    print("1. Input shape: [1, 160, 160, 3] (batch, height, width, channels)")
+                    print("2. Pixel values normalized to float32 in range [0.0-1.0]")
+                    print("3. Standard RGB format")
+                    
+                    print("\nPreprocessing code from original app:")
+                    print("""
+def _resize_and_normalize(self, image):
+    resized_image = cv2.resize(image, self.target_size, interpolation=cv2.INTER_AREA)
+    if resized_image.shape[2] == 4:
+        resized_image = cv2.cvtColor(resized_image, cv2.COLOR_RGBA2RGB)
+    normalized_image = resized_image.astype('float32') / 255.0
+    normalized_image = np.expand_dims(normalized_image, axis=0)
+    return normalized_image
+                    """)
                 else:
                     # Not a standard probability score
                     print("Score is not in the range [0,1], may need different interpretation")

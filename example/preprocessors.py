@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 def resize_and_normalize(image, target_size=(160, 160)):
     """
     Resizes and normalizes the image to the target size and scale [0, 1].
+    Matches exactly the preprocessing from the original stone detector app.
     
     Args:
         image: Input image (numpy array)
@@ -24,19 +25,18 @@ def resize_and_normalize(image, target_size=(160, 160)):
         Resized and normalized image as float32 numpy array
     """
     try:
-        # Resize image
+        # Resize image - exactly like the original code
         resized_image = cv2.resize(image, target_size, interpolation=cv2.INTER_AREA)
         
-        # Convert RGBA to RGB if needed
+        # Convert RGBA to RGB if needed - exactly like the original code
         if len(resized_image.shape) > 2 and resized_image.shape[2] == 4:
             resized_image = cv2.cvtColor(resized_image, cv2.COLOR_RGBA2RGB)
         
-        # Convert to float32 and normalize to [0, 1]
+        # Convert to float32 and normalize to [0, 1] - exactly like the original code
         normalized_image = resized_image.astype('float32') / 255.0
         
-        # Expand dimensions for batch (if needed)
-        if len(normalized_image.shape) == 3:
-            normalized_image = np.expand_dims(normalized_image, axis=0)
+        # Expand dimensions for batch - exactly like the original code
+        normalized_image = np.expand_dims(normalized_image, axis=0)
             
         logger.debug(f"Preprocessed image from {image.shape} to {normalized_image.shape}")
         return normalized_image
