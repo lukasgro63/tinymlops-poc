@@ -7,7 +7,7 @@
     "model": {
         "path": "models/model.tflite",
         "labels": "models/labels.txt",
-        "threshold": 0.5  /* Standard threshold as used in the original code */
+        "threshold": 0.5  
     },
     "tinylcm": {
         "model_dir": "tinylcm_data/models",
@@ -22,7 +22,7 @@
         "external_validation": false,
         "quarantine_check_interval": 50,
         "heuristic_confidence_threshold": 0.7,
-        "use_detection_scores_as_features": true,  /* IMPORTANT: Use detection scores as features instead of internal layers - this is more reliable on embedded devices */
+        "use_detection_scores_as_features": true,  
         "drift_detection": {
             "ewma_confidence": {
                 "enabled": true,
