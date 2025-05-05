@@ -18,6 +18,25 @@ class NotificationType(str, PyEnum):
     SUCCESS = "success"
 
 
+class DriftStatus(str, PyEnum):
+    """Status of a drift event"""
+    PENDING = "pending"
+    VALIDATED = "validated"
+    REJECTED = "rejected"
+    RESOLVED = "resolved"
+    IGNORED = "ignored"
+
+
+class DriftType(str, PyEnum):
+    """Types of drift detection"""
+    CONFIDENCE = "confidence"
+    DISTRIBUTION = "distribution"
+    FEATURE = "feature"
+    OUTLIER = "outlier"
+    CUSTOM = "custom"
+    UNKNOWN = "unknown"
+
+
 class Device(Base):
     __tablename__ = "devices"
     
@@ -33,6 +52,8 @@ class Device(Base):
     is_active = Column(Boolean, default=True)
     device_info = Column(JSON, nullable=True)
     metrics = relationship("DeviceMetric", back_populates="device", cascade="all, delete-orphan")
+    drift_events = relationship("DriftEvent", back_populates="device", cascade="all, delete-orphan")
+
 
 class DeviceMetric(Base):
     __tablename__ = "device_metrics"
@@ -44,6 +65,7 @@ class DeviceMetric(Base):
     value = Column(Float)
     
     device = relationship("Device", back_populates="metrics")
+
 
 class Package(Base):
     __tablename__ = "packages"
@@ -77,3 +99,90 @@ class Notification(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     read = Column(Boolean, default=False)  # Ist die Benachrichtigung gelesen worden?
     read_at = Column(DateTime, nullable=True)  # Wann wurde die Benachrichtigung gelesen?
+
+
+class DriftEvent(Base):
+    """Model for tracking drift detection events from edge devices"""
+    __tablename__ = "drift_events"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(String(255), unique=True, index=True, nullable=False)
+    device_id = Column(String(255), ForeignKey("devices.device_id"), nullable=False)
+    model_id = Column(String(255), nullable=True)
+    drift_type = Column(Enum(DriftType), default=DriftType.UNKNOWN, nullable=False)
+    drift_score = Column(Float, nullable=True)
+    detector_name = Column(String(255), nullable=True)
+    
+    # Event metadata
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    received_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    metrics_before = Column(JSON, nullable=True)  # Performance metrics before drift
+    metrics_after = Column(JSON, nullable=True)   # Performance metrics after drift (if adapted)
+    
+    # Event status
+    status = Column(Enum(DriftStatus), default=DriftStatus.PENDING, nullable=False)
+    resolved_at = Column(DateTime, nullable=True)
+    resolution_notes = Column(Text, nullable=True)
+    
+    # Additional data
+    description = Column(Text, nullable=True)
+    event_metadata = Column(JSON, nullable=True)  # Renamed from 'metadata' which is reserved in SQLAlchemy
+    
+    # Relationships
+    device = relationship("Device", back_populates="drift_events")
+    samples = relationship("DriftSample", back_populates="drift_event", cascade="all, delete-orphan")
+    validations = relationship("DriftValidation", back_populates="drift_event", cascade="all, delete-orphan")
+
+
+class DriftSample(Base):
+    """Model for storing individual samples that triggered drift detection"""
+    __tablename__ = "drift_samples"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    sample_id = Column(String(255), unique=True, index=True, nullable=False)
+    drift_event_id = Column(String(255), ForeignKey("drift_events.event_id"), nullable=False)
+    
+    # Sample data
+    prediction = Column(String(255), nullable=True)
+    confidence = Column(Float, nullable=True)
+    drift_score = Column(Float, nullable=True)
+    
+    # File storage info
+    feature_path = Column(String(512), nullable=True)  # Path to feature vector in MinIO
+    raw_data_path = Column(String(512), nullable=True)  # Path to raw input data in MinIO
+    
+    # Metadata
+    timestamp = Column(DateTime, nullable=True)
+    sample_metadata = Column(JSON, nullable=True)  # Renamed from 'metadata' which is reserved in SQLAlchemy
+    
+    # Relationships
+    drift_event = relationship("DriftEvent", back_populates="samples")
+    validations = relationship("DriftValidation", back_populates="drift_sample", cascade="all, delete-orphan")
+
+
+class DriftValidation(Base):
+    """Model for storing human validation of drift samples"""
+    __tablename__ = "drift_validations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    validation_id = Column(String(255), unique=True, index=True, nullable=False)
+    drift_event_id = Column(String(255), ForeignKey("drift_events.event_id"), nullable=False)
+    drift_sample_id = Column(String(255), ForeignKey("drift_samples.sample_id"), nullable=True)
+    
+    # Validation data
+    is_valid_drift = Column(Boolean, nullable=True)  # Is this a valid drift case?
+    true_label = Column(String(255), nullable=True)  # Correct label if provided
+    
+    # User and timestamp
+    validated_by = Column(String(255), nullable=True)
+    validated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    
+    # Comments and metadata
+    validation_notes = Column(Text, nullable=True)
+    is_acknowledged = Column(Boolean, default=False)  # Whether device has acknowledged this validation
+    acknowledged_at = Column(DateTime, nullable=True)
+    validation_metadata = Column(JSON, nullable=True)  # Renamed from 'metadata' which is reserved in SQLAlchemy
+    
+    # Relationships
+    drift_event = relationship("DriftEvent", back_populates="validations")
+    drift_sample = relationship("DriftSample", back_populates="validations")

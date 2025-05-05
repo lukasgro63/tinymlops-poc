@@ -13,6 +13,67 @@ export interface Device {
   device_info?: Record<string, any>;
 }
 
+// Drift management types
+export type DriftType = 'confidence' | 'distribution' | 'feature' | 'outlier' | 'custom' | 'unknown';
+export type DriftStatus = 'pending' | 'validated' | 'rejected' | 'resolved' | 'ignored';
+
+export interface DriftEvent {
+  event_id: string;
+  device_id: string;
+  drift_type: DriftType;
+  drift_score?: number;
+  detector_name?: string;
+  model_id?: string;
+  description?: string;
+  status: DriftStatus;
+  timestamp: string;
+  received_at: string;
+  resolved_at?: string;
+  resolution_notes?: string;
+  sample_count: number;
+  validation_count: number;
+}
+
+export interface DriftSample {
+  sample_id: string;
+  drift_event_id: string;
+  prediction?: string;
+  confidence?: number;
+  drift_score?: number;
+  feature_path?: string;
+  raw_data_path?: string;
+  timestamp?: string;
+  true_label?: string;
+  status: 'pending' | 'validated';
+  metadata?: Record<string, any>;
+}
+
+export interface DriftValidation {
+  validation_id: string;
+  drift_event_id: string;
+  drift_sample_id?: string;
+  is_valid_drift: boolean;
+  true_label?: string;
+  validated_by?: string;
+  validated_at: string;
+  is_acknowledged: boolean;
+  acknowledged_at?: string;
+  notes?: string;
+}
+
+export interface DriftStatistics {
+  total_events: number;
+  total_open: number;
+  total_resolved: number;
+  by_type: Record<string, number>;
+  by_status: Record<DriftStatus, number>;
+  by_day: Array<{
+    date: string;
+    count: number;
+  }>;
+  recent_events: DriftEvent[];
+}
+
 export interface Package {
   id: number;
   package_id: string;

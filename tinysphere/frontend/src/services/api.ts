@@ -5,6 +5,10 @@ import {
   DeviceMetrics,
   DeviceSummary,
   DeviceTrend,
+  DriftEvent,
+  DriftSample,
+  DriftStatistics,
+  DriftValidation,
   Model,
   ModelPerformanceData,
   ModelSummary,
@@ -166,5 +170,93 @@ export const getDeviceConnectivityTrends = async (days: number = 7): Promise<Dev
 // Get top devices by package count
 export const getTopDevices = async (limit: number = 5): Promise<TopDevice[]> => {
   const response = await axios.get<TopDevice[]>(`${API_BASE_URL}/devices/top?limit=${limit}`);
+  return response.data;
+};
+
+// Drift Management
+export const getDriftEvents = async (params?: {
+  skip?: number;
+  limit?: number;
+  device_id?: string;
+  status?: string;
+  drift_type?: string;
+  start_date?: string;
+  end_date?: string;
+}): Promise<DriftEvent[]> => {
+  const queryParams = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) {
+        queryParams.append(key, value.toString());
+      }
+    });
+  }
+  
+  const response = await axios.get<DriftEvent[]>(
+    `${API_BASE_URL}/drift/events?${queryParams.toString()}`
+  );
+  return response.data;
+};
+
+export const getDriftEvent = async (eventId: string): Promise<DriftEvent> => {
+  const response = await axios.get<DriftEvent>(`${API_BASE_URL}/drift/events/${eventId}`);
+  return response.data;
+};
+
+export const getDriftSamples = async (eventId: string): Promise<DriftSample[]> => {
+  const response = await axios.get<DriftSample[]>(
+    `${API_BASE_URL}/drift/events/${eventId}/samples`
+  );
+  return response.data;
+};
+
+export const getDriftSample = async (sampleId: string): Promise<DriftSample> => {
+  const response = await axios.get<DriftSample>(
+    `${API_BASE_URL}/drift/samples/${sampleId}`
+  );
+  return response.data;
+};
+
+export const validateDriftSample = async (
+  sampleId: string, 
+  validation: {
+    is_valid_drift: boolean;
+    true_label?: string;
+    validated_by?: string;
+    notes?: string;
+  }
+): Promise<DriftValidation> => {
+  const response = await axios.post<DriftValidation>(
+    `${API_BASE_URL}/drift/samples/${sampleId}/validate`,
+    validation
+  );
+  return response.data;
+};
+
+export const updateDriftEventStatus = async (
+  eventId: string,
+  status: string,
+  resolution_notes?: string
+): Promise<DriftEvent> => {
+  const response = await axios.patch<DriftEvent>(
+    `${API_BASE_URL}/drift/events/${eventId}/status`,
+    { status, resolution_notes }
+  );
+  return response.data;
+};
+
+export const getDriftStatistics = async (
+  device_id?: string,
+  days: number = 30
+): Promise<DriftStatistics> => {
+  const params = new URLSearchParams();
+  if (device_id) {
+    params.append('device_id', device_id);
+  }
+  params.append('days', days.toString());
+  
+  const response = await axios.get<DriftStatistics>(
+    `${API_BASE_URL}/drift/statistics?${params.toString()}`
+  );
   return response.data;
 };

@@ -75,6 +75,12 @@ services:
       /usr/bin/mc config host add minio http://minio:9000 minioadmin minioadmin;
       /usr/bin/mc mb minio/mlflow;
       /usr/bin/mc policy set download minio/mlflow;
+      /usr/bin/mc mb minio/drift;
+      /usr/bin/mc mb minio/drift-samples;
+      /usr/bin/mc mb minio/drift-features;
+      /usr/bin/mc policy set download minio/drift;
+      /usr/bin/mc policy set download minio/drift-samples;
+      /usr/bin/mc policy set download minio/drift-features;
       exit 0;
       "
     networks:
@@ -82,7 +88,7 @@ services:
 
   # MLflow tracking server
   mlflow:
-    image: ghcr.io/mlflow/mlflow:latest
+    image: ghcr.io/mlflow/mlflow:v2.22.0
     container_name: tinysphere-mlflow
     depends_on:
       mlflow-postgres:
@@ -90,7 +96,7 @@ services:
       minio-setup:
         condition: service_completed_successfully
     command: >
-      bash -c "pip install psycopg2-binary boto3 && 
+      bash -c "pip install psycopg2-binary boto3 alembic && 
       mlflow server 
       --backend-store-uri postgresql://mlflow:mlflow@mlflow-postgres:5432/mlflow 
       --default-artifact-root s3://mlflow/
@@ -113,8 +119,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      mlflow:
-        condition: service_started
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://tinysphere:tinysphere@postgres:5432/tinysphere
       MLFLOW_TRACKING_URI: http://mlflow:5000
@@ -147,7 +152,9 @@ services:
     ports:
       - "3000:80"
     depends_on:
-      - tinysphere-api
+      tinysphere-api:
+        condition: service_started
+    restart: unless-stopped
     networks:
       - tinysphere-network
 

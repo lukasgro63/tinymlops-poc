@@ -34,6 +34,7 @@ import {
   Tooltip,
   Typography
 } from '@mui/material';
+import ErrorDisplay from '../components/common/ErrorDisplay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ConnectivityTrendChart from '../components/common/ConnectivityTrendChart';
 import DeviceDetailsDialog from '../components/common/DeviceDetailsDialog';
@@ -358,44 +359,15 @@ const DevicesPage: React.FC = () => {
     setPage(0);
   };
 
-  // Ladezustand
-  if (loading && devices.length === 0) {
+  // Loading or error state
+  if (loading || error) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, mb: 3 }}>
-          {[1, 2, 3].map(i => (
-            <Box key={i} sx={{ flex: '1 1 300px', minWidth: '300px' }}>
-              <Skeleton variant="rectangular" height={300} />
-            </Box>
-          ))}
-        </Box>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, mb: 3 }}>
-          {[1, 2, 3, 4].map(i => (
-            <Box key={i} sx={{ flex: '1 1 200px', minWidth: '200px' }}>
-              <Skeleton variant="rectangular" height={180} />
-            </Box>
-          ))}
-        </Box>
-        <Skeleton variant="rectangular" height={400} />
-      </Box>
-    );
-  }
-
-  // Fehlerzustand
-  if (error && devices.length === 0) {
-    return (
-      <Box sx={{ p: 4, textAlign: 'center' }}>
-        <Typography variant="h6" color="error">
-          {error}
-        </Typography>
-        <Button 
-          variant="contained" 
-          sx={{ mt: 2 }}
-          onClick={() => fetchDevicesData()}
-        >
-          Try Again
-        </Button>
-      </Box>
+      <ErrorDisplay 
+        error={error}
+        loading={loading}
+        onRetry={() => fetchDevicesData()}
+        height="70vh"
+      />
     );
   }
 
