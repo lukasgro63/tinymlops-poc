@@ -39,7 +39,7 @@ if parent_dir not in sys.path:
     sys.path.append(parent_dir)
     
 # Import preprocessors
-from preprocessors import resize_and_normalize, convert_uint8_to_float32
+from preprocessors import convert_uint8_to_float32, resize_and_normalize
 
 # Add base directory to path (for tinylcm)
 base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -157,7 +157,7 @@ class AutonomousStoneDetectorApp:
                 "inference_dir": "tinylcm_data/inference_logs",
                 "quarantine_dir": "tinylcm_data/quarantine",
                 "heuristic_dir": "tinylcm_data/heuristic_logs",
-                "sync_interval_seconds": 300,
+                "sync_interval_seconds": 60,
                 "enable_autonomous_detection": True,
                 "enable_quarantine": True,
                 "enable_heuristic_adaptation": True,
@@ -198,14 +198,15 @@ class AutonomousStoneDetectorApp:
         """Initialize TinyLCM components with autonomous drift detection"""
         try:
             # Import core components
-            from tinylcm.core.feature_extractors.tflite import TFLiteFeatureExtractor
-            from tinylcm.core.classifiers.knn import LightweightKNN
-            from tinylcm.core.state_manager import StateManager
             from tinylcm.core.adaptation_tracker import AdaptationTracker
+            from tinylcm.core.classifiers.knn import LightweightKNN
             from tinylcm.core.data_logger.logger import DataLogger
-            from tinylcm.core.inference_monitor.monitor import InferenceMonitor
+            from tinylcm.core.feature_extractors.tflite import \
+                TFLiteFeatureExtractor
             from tinylcm.core.handlers.hybrid import HybridHandler
-            
+            from tinylcm.core.inference_monitor.monitor import InferenceMonitor
+            from tinylcm.core.state_manager import StateManager
+
             # Initialize feature extractor without preprocessors
             # We'll handle preprocessing directly in the process_frame_async method
             self.feature_extractor = TFLiteFeatureExtractor(
@@ -258,8 +259,9 @@ class AutonomousStoneDetectorApp:
         self.quarantine_buffer = None
         if self.config["tinylcm"].get("enable_quarantine", True):
             try:
-                from tinylcm.core.quarantine.buffer import QuarantineBuffer, QuarantineStrategy
-                
+                from tinylcm.core.quarantine.buffer import (QuarantineBuffer,
+                                                            QuarantineStrategy)
+
                 # Use default quarantine directory if not specified
                 quarantine_dir = self.config["tinylcm"].get("quarantine_dir", "tinylcm_data/quarantine")
                 
@@ -284,8 +286,9 @@ class AutonomousStoneDetectorApp:
         if (self.config["tinylcm"].get("enable_heuristic_adaptation", False) and 
             self.quarantine_buffer is not None):
             try:
-                from tinylcm.core.heuristics.adapter import HeuristicAdapter, HeuristicStrategy
-                
+                from tinylcm.core.heuristics.adapter import (HeuristicAdapter,
+                                                             HeuristicStrategy)
+
                 # Use default heuristic directory if not specified
                 heuristic_dir = self.config["tinylcm"].get("heuristic_dir", "tinylcm_data/heuristic_logs")
                 
@@ -388,10 +391,12 @@ class AutonomousStoneDetectorApp:
         
         try:
             # Try to import the autonomous drift detector modules
-            from tinylcm.core.drift_detection.confidence import EWMAConfidenceMonitor, PageHinkleyConfidenceMonitor
-            from tinylcm.core.drift_detection.distribution import PredictionDistributionMonitor
+            from tinylcm.core.drift_detection.confidence import (
+                EWMAConfidenceMonitor, PageHinkleyConfidenceMonitor)
+            from tinylcm.core.drift_detection.distribution import \
+                PredictionDistributionMonitor
             from tinylcm.core.drift_detection.features import FeatureMonitor
-            
+
             # Default configuration if none provided
             default_drift_config = {
                 "ewma_confidence": {

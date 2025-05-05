@@ -13,7 +13,7 @@
         "model_dir": "tinylcm_data/models",
         "data_dir": "tinylcm_data/data_logs",
         "inference_dir": "tinylcm_data/inference_logs",
-        "sync_interval_seconds": 30,
+        "sync_interval_seconds": 60,
         "quarantine_dir": "tinylcm_data/quarantine",
         "heuristic_dir": "tinylcm_data/heuristic_logs",
         "enable_autonomous_detection": true,
