@@ -69,8 +69,14 @@ class ModelTransformer(DataTransformer):
             except Exception as e:
                 self.logger.warning(f"Could not read metadata file: {str(e)}")
         
-        # Start MLflow run
-        with mlflow.start_run(run_name=f"model_import_{package_id}"):
+        # Start MLflow run with source set to device_id
+        run_tags = {
+            "mlflow.source.name": f"device_{device_id}",
+            "mlflow.source.type": "EDGE_DEVICE",
+            "device_id": device_id,
+            "package_type": metadata.get("package_type", "model")
+        }
+        with mlflow.start_run(run_name=f"model_import_{package_id}", tags=run_tags):
             # Log model information
             mlflow.log_param("model_format", model_format)
             mlflow.log_param("device_id", device_id)
@@ -97,6 +103,11 @@ class ModelTransformer(DataTransformer):
             # Get run info
             run_id = mlflow.active_run().info.run_id
             
+            # Add run tags for better model association
+            mlflow.set_tag("package_type", "model")
+            mlflow.set_tag("model_format", model_format)
+            mlflow.set_tag("device_id", device_id)
+            
             result = {
                 "status": "success",
                 "message": "Model imported successfully",
@@ -109,6 +120,9 @@ class ModelTransformer(DataTransformer):
                 # Modellname aus device_id und Formatinformationen erstellen
                 model_name = f"{device_id}-{model_format}-model"
                 
+                # Add proper tags before registration to ensure MLflow UI shows the correct relationships
+                mlflow.set_tag("candidate_model_name", model_name)
+                
                 # Modell-URI für die Registrierung definieren
                 model_uri = f"runs:/{run_id}/{model_file.name}"
                 
@@ -120,6 +134,52 @@ class ModelTransformer(DataTransformer):
                 
                 if existing_version:
                     self.logger.info(f"Model with hash {model_hash} already exists as {model_name} version {existing_version}. Skipping registration.")
+                    
+                    # Get existing model version details
+                    existing_version_info = self.client.get_model_version(model_name, existing_version)
+                    
+                    # Link the current run to the existing model version with MLflow's standard tags
+                    self.client.set_tag(run_id, "mlflow.registeredModelName", model_name)
+                    self.client.set_tag(run_id, "mlflow.registeredModelVersion", existing_version)
+                    
+                    # Explizite Verknüpfung in beide Richtungen herstellen:
+                    # 1. Das Modell weiß über den Run Bescheid:
+                    self.client.set_model_version_tag(
+                        name=model_name,
+                        version=existing_version,
+                        key="mlflow.runId",
+                        value=run_id
+                    )
+                    # 2. Der Run weiß über das Modell Bescheid (bereits durch obige Tags erledigt)
+                    
+                    # Check if this model version is in Production stage
+                    is_in_production = existing_version_info.current_stage == "Production"
+                    
+                    # If not in Production, transition it to Production
+                    if not is_in_production:
+                        # First, handle existing Production versions
+                        try:
+                            all_versions = self.client.get_latest_versions(model_name)
+                            
+                            # Set previous Production versions to Archived
+                            for version in all_versions:
+                                if version.current_stage == "Production":
+                                    self.client.transition_model_version_stage(
+                                        name=model_name,
+                                        version=version.version,
+                                        stage="Archived"
+                                    )
+                                    self.logger.info(f"Moved previous Production model {model_name} version {version.version} to Archived stage")
+                        except Exception as stage_e:
+                            self.logger.warning(f"Error handling previous model versions: {str(stage_e)}")
+                        
+                        # Set this version to Production
+                        self.client.transition_model_version_stage(
+                            name=model_name,
+                            version=existing_version,
+                            stage="Production"
+                        )
+                        self.logger.info(f"Set model {model_name} version {existing_version} to Production stage")
                     
                     # Füge existierende Versionsinformationen zum Ergebnis hinzu
                     registered_model = type('obj', (object,), {
@@ -135,10 +195,21 @@ class ModelTransformer(DataTransformer):
                     )
                     
                     # Speichere Hash als Beschreibung der Version für zukünftige Vergleiche
+                    # Wichtig: Setze die run_id, um die Verbindung zum Run herzustellen
                     self.client.update_model_version(
                         name=model_name,
                         version=registered_model.version,
                         description=f"File hash: {model_hash}"
+                    )
+                    
+                    # MLflow speichert normalerweise automatisch die run_id mit dem Modell-Versionseintrag,
+                    # wenn register_model aufgerufen wird. Aber für explizite Verknüpfung:
+                    # Stelle sicher, dass die run_id mit der Modellversion verknüpft ist:
+                    self.client.set_model_version_tag(
+                        name=model_name,
+                        version=registered_model.version,
+                        key="mlflow.runId",
+                        value=run_id
                     )
                     
                     # Handle model version stages
@@ -164,6 +235,11 @@ class ModelTransformer(DataTransformer):
                         version=registered_model.version,
                         stage="Production"
                     )
+                    
+                    # Add standard MLflow tags to link the run to the model
+                    self.client.set_tag(run_id, "mlflow.registeredModelName", model_name)
+                    self.client.set_tag(run_id, "mlflow.registeredModelVersion", registered_model.version)
+                    
                     self.logger.info(f"Set model {model_name} version {registered_model.version} to Production stage")
                 
                 # Erweiterte Ergebnisinformationen hinzufügen
@@ -171,7 +247,9 @@ class ModelTransformer(DataTransformer):
                     "message": "Model imported and registered successfully",
                     "registered_model_name": model_name,
                     "registered_model_version": registered_model.version,
-                    "stage": "Production"
+                    "stage": "Production",
+                    "is_duplicate": existing_version is not None,
+                    "model_hash": model_hash
                 })
                 
                 self.logger.info(f"Model registered successfully as {model_name} version {registered_model.version}")
@@ -249,3 +327,4 @@ class ModelTransformer(DataTransformer):
         except Exception as e:
             self.logger.warning(f"Error checking for existing model versions: {e}")
             return None
+            

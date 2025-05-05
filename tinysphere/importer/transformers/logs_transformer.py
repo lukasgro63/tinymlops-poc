@@ -162,19 +162,66 @@ class LogsTransformer(DataTransformer):
         
         # Find production version of the model if available
         production_version = None
-        if model_name:
-            try:
-                from mlflow.tracking import MlflowClient
-                client = MlflowClient()
+        client = None
+        found_model = False
+        
+        try:
+            from mlflow.tracking import MlflowClient
+            client = MlflowClient()
+            
+            # Direkte Suche mit dem gegebenen Modellnamen
+            if model_name:
+                # Suche zuerst nach Production-Versionen
                 versions = client.get_latest_versions(model_name, stages=["Production"])
                 if versions:
                     production_version = versions[0].version
                     self.logger.info(f"Found production version {production_version} for model {model_name}")
-            except Exception as e:
-                self.logger.warning(f"Error finding production version: {str(e)}")
+                    found_model = True
+                else:
+                    # Wenn keine Production-Version gefunden wurde, nimm die neueste Version
+                    all_versions = client.get_latest_versions(model_name)
+                    if all_versions:
+                        production_version = all_versions[0].version
+                        self.logger.info(f"No production version found, using latest version {production_version} for model {model_name}")
+                        found_model = True
+            
+            # Wenn kein Modell gefunden wurde, versuche alle Modelle für dieses Gerät zu finden
+            if not found_model and device_id:
+                self.logger.info(f"No model found with name {model_name}, searching for any model from device {device_id}")
+                # Alle Modelle suchen, die das device_id-Präfix haben
+                possible_model_prefix = f"{device_id}-"
+                
+                # Alle registrierten Modelle durchsuchen
+                registered_models = client.search_registered_models()
+                for registered_model in registered_models:
+                    if registered_model.name.startswith(possible_model_prefix):
+                        model_name = registered_model.name
+                        # Neueste Version nehmen
+                        versions = client.get_latest_versions(model_name, stages=["Production"])
+                        if versions:
+                            production_version = versions[0].version
+                            self.logger.info(f"Found model {model_name} version {production_version} for device {device_id}")
+                            found_model = True
+                            break
+                        else:
+                            all_versions = client.get_latest_versions(model_name)
+                            if all_versions:
+                                production_version = all_versions[0].version
+                                self.logger.info(f"Found model {model_name} version {production_version} for device {device_id}")
+                                found_model = True
+                                break
+                
+                if not found_model:
+                    self.logger.warning(f"Could not find any model for device {device_id}")
+        except Exception as e:
+            self.logger.warning(f"Error finding production version: {str(e)}")
         
-        # MLflow-Run starten
-        with mlflow.start_run(run_name=f"logs_import_{package_id}"):
+        # MLflow-Run starten mit korrekten Quelltags
+        run_tags = {
+            "mlflow.source.name": f"device_{device_id}",
+            "mlflow.source.type": "EDGE_DEVICE"
+        }
+        with mlflow.start_run(run_name=f"logs_import_{package_id}", tags=run_tags):
             # Parameter loggen
             mlflow.log_param("device_id", device_id)
             mlflow.log_param("package_id", package_id)
@@ -207,33 +254,102 @@ class LogsTransformer(DataTransformer):
             
             # Link the run to the model if we have model information
             # This uses direct MLflow Model Registry integration
-            if model_name and production_version:
+            if model_name and production_version and found_model:
                 try:
-                    from mlflow.tracking import MlflowClient
-                    client = MlflowClient()
+                    # Wir verwenden den bereits initialisierten Client von oben
+                    # Wenn noch nicht erstellt, erzeugen wir ihn hier
+                    if not client:
+                        from mlflow.tracking import MlflowClient
+                        client = MlflowClient()
                     
                     # Log the run directly to the model version
                     # First, get the model version details
                     model_version = client.get_model_version(model_name, production_version)
                     
                     # Create a link between the run and the model version
-                    # This makes the run appear under the model in the UI
+                    # This makes the run appear under the model in the UI by using MLflow's standard tags
                     
-                    # 1. Set standard MLflow tags for model linkage
+                    # Set the key MLflow standard tags for associating with a registered model
                     client.set_tag(run_id, "mlflow.registeredModelName", model_name)
                     client.set_tag(run_id, "mlflow.registeredModelVersion", production_version)
                     
-                    # 2. Create a direct alias for the logs run to appear in the model version UI
+                    # Bidirektionale Verknüpfung herstellen:
                     try:
-                        # Log the file as an artifact with a standard name
+                        # Set the artifact path for consistency
                         artifact_path = f"logs/{log_file.name}"
                         
-                        # Register the run as an additional version of the same model
-                        mlflow.register_model(
-                            f"runs:/{run_id}/{artifact_path}",
-                            model_name,
-                            tags={"logs_run_id": run_id, "original_run_id": run_id}
-                        )
+                        # Direkte Verknüpfung mit MLflow
+                        # 1. Hol die Modell-URI, mit der wir das Modell in MLflow registerieren können
+                        model_artifact_path = "logs"  # Standardpfad für Logs-Artefakte
+                        
+                        # Wir benötigen einen Artefakt als "Modell" für die Registrierung
+                        log_file_name = log_file.name
+                        log_uri = f"runs:/{run_id}/{model_artifact_path}/{log_file_name}"
+                        
+                        self.logger.info(f"Registering logs run {run_id} with model {model_name} version {production_version}")
+                        
+                        try:
+                            # KRITISCH: Hier fügen wir den Run dem Modell als registrierte Version hinzu
+                            # Dies ist der Schlüssel, um im MLflow UI in der "Registered Models"-Sektion zu erscheinen
+                            # Wir müssen das als Alias-Tag setzen, damit es richtig angezeigt wird
+                            registered_alias = f"logs_{device_id}"
+                            
+                            # Setze Tags, die vom MLflow UI für die Modellverknüpfung verwendet werden
+                            client.set_tag(run_id, "mlflow.registeredModelName", model_name)
+                            client.set_tag(run_id, "mlflow.registeredModelVersion", production_version)
+                            
+                            # 2. Registriere die Logs als Alias des Modells
+                            try:
+                                # Versuche, einen Alias für das Modell zu erstellen
+                                client.set_registered_model_alias(
+                                    name=model_name,
+                                    version=production_version,
+                                    alias=registered_alias
+                                )
+                                self.logger.info(f"Set alias {registered_alias} for model {model_name} version {production_version}")
+                            except Exception as alias_error:
+                                self.logger.warning(f"Could not set alias: {str(alias_error)}")
+                                
+                                # Wenn Alias nicht unterstützt wird, registriere als separates Modell
+                                try:
+                                    alias_model_name = f"{model_name}_logs"
+                                    client.create_registered_model(alias_model_name)
+                                    mlflow.register_model(
+                                        model_uri=log_uri,
+                                        name=alias_model_name,
+                                        tags={
+                                            "original_model": model_name,
+                                            "original_version": production_version,
+                                            "logs_run_id": run_id,
+                                            "device_id": device_id
+                                        }
+                                    )
+                                    self.logger.info(f"Registered logs as model {alias_model_name}")
+                                except Exception as model_reg_error:
+                                    self.logger.warning(f"Error registering logs as model: {str(model_reg_error)}")
+                            
+                            # 3. Zusätzliche Informationen für UI-Anzeige
+                            additional_tags = {
+                                "logs_type": "model_logs",
+                                "device_id": device_id,
+                                "model_link": f"models:/{model_name}/{production_version}",
+                                "linked_entity": "LOGS",
+                                "registered_model_name": model_name,
+                                "registered_model_version": production_version
+                            }
+                            
+                            for tag_key, tag_value in additional_tags.items():
+                                client.set_tag(run_id, tag_key, str(tag_value))
+                            
+                            # 4. Rückwärtsverknüpfung vom Modell zum Run
+                            client.set_model_version_tag(
+                                name=model_name,
+                                version=production_version,
+                                key="logs.runId",
+                                value=run_id
+                            )
+                        except Exception as e:
+                            self.logger.error(f"Error registering logs with model: {str(e)}")
                         self.logger.info(f"Directly registered logs run with model {model_name}")
                     except Exception as reg_error:
                         self.logger.warning(f"Could not register run directly with model: {str(reg_error)}")

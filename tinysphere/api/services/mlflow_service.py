@@ -367,7 +367,7 @@ class MLflowService:
             # Extract device metrics from package if possible
             try:
                 self.package_importer.extract_device_metrics(
-                    package_path=extract_dir,
+                    extract_dir=extract_dir,
                     metadata=metadata,
                     db=db
                 )
