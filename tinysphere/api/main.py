@@ -78,3 +78,8 @@ app.include_router(models_router, prefix="/api/models", tags=["models"])
 from tinysphere.api.routes.notifications import router as notifications_router
 
 app.include_router(notifications_router, prefix="/api/notifications", tags=["notifications"])
+
+# Add drift management router
+from tinysphere.api.routes.drift import router as drift_router
+
+app.include_router(drift_router, prefix="/api/drift", tags=["drift"])

@@ -7,13 +7,16 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
 import StorageIcon from '@mui/icons-material/Storage';
 import TimelineIcon from '@mui/icons-material/Timeline';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { Box, Button, CircularProgress, Typography } from '@mui/material';
 import React, { useEffect, useState } from 'react';
 
 // Components
+import DriftStatisticsCard from '../components/common/DriftStatisticsCard';
 import ModelPerformanceChart from '../components/common/ModelPerformanceChart';
 import PackageUploadChart from '../components/common/PackageUploadChart';
 import RecentActivitiesList from '../components/common/RecentActivitiesList';
+import RecentDriftEventsTable from '../components/common/RecentDriftEventsTable';
 import SectionCard from '../components/common/SectionCard';
 import StatusCard from '../components/common/StatusCard';
 import SystemStatusIndicator from '../components/common/SystemStatusIndicator';
@@ -254,6 +257,28 @@ const Dashboard: React.FC = () => {
             performanceData={performanceData}
           />
         </SectionCard>
+      </Box>
+      
+      {/* Drift Detection Row */}
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, mb: 3 }}>
+        {/* Drift Statistics */}
+        <Box sx={{ flex: '1 1 500px', minWidth: '400px' }}>
+          <DriftStatisticsCard
+            title="Drift Detection Statistics"
+            days={14}
+          />
+        </Box>
+        
+        {/* Recent Drift Events */}
+        <Box sx={{ flex: '1 1 500px', minWidth: '400px' }}>
+          <RecentDriftEventsTable
+            title="Recent Drift Events"
+            limit={5}
+            onViewEvent={(eventId) => {
+              window.location.href = `/drift/${eventId}`;
+            }}
+          />
+        </Box>
       </Box>
     </Box>
   );

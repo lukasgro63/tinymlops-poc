@@ -2,8 +2,8 @@
 FROM node:18-alpine as build
 
 WORKDIR /app
-COPY tinysphere/frontend/package.json tinysphere/frontend/package-lock.json ./
-RUN npm ci
+COPY tinysphere/frontend/package.json ./
+RUN npm install
 
 COPY tinysphere/frontend/ ./
 RUN npm run build

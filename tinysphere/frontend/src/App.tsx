@@ -6,6 +6,8 @@ import { Route, BrowserRouter as Router, Routes } from 'react-router-dom';
 import MainLayout from './components/Layout/MainLayout';
 import Dashboard from './pages/Dashboard';
 import Devices from './pages/Devices';
+import Drift from './pages/Drift';
+import DriftEvent from './pages/DriftEvent';
 import Models from './pages/Models';
 import theme from './theme';
 
@@ -99,6 +101,8 @@ function App() {
           <Route path="/" element={<MainLayout title="Dashboard"><Dashboard /></MainLayout>} />
           <Route path="/devices" element={<MainLayout title="Devices"><Devices /></MainLayout>} />
           <Route path="/models" element={<MainLayout title="Models"><Models /></MainLayout>} />
+          <Route path="/drift" element={<MainLayout title="Drift Management"><Drift /></MainLayout>} />
+          <Route path="/drift/:eventId" element={<MainLayout title="Drift Event Details"><DriftEvent /></MainLayout>} />
           
           {/* Anwendungen */}
           <Route path="/mlflow" element={

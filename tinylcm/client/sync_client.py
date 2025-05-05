@@ -3,6 +3,7 @@ import os
 import platform
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -21,6 +22,13 @@ try:
 except ImportError:
     QUARANTINE_AVAILABLE = False
 
+# Optional import for drift events support
+try:
+    from tinylcm.core.drift_detection import AutonomousDriftDetector
+    DRIFT_DETECTION_AVAILABLE = True
+except ImportError:
+    DRIFT_DETECTION_AVAILABLE = False
+
 
 class SyncClient:
     def __init__(
@@ -33,7 +41,8 @@ class SyncClient:
         max_retries: int = 3, 
         connection_timeout: float = 300.0, 
         auto_register: bool = True,
-        quarantine_buffer: Optional['QuarantineBuffer'] = None
+        quarantine_buffer: Optional['QuarantineBuffer'] = None,
+        drift_detectors: Optional[List[Any]] = None
     ):
         if not self.validate_server_url(server_url):
             raise ValueError(f"Invalid server URL: {server_url}")
@@ -53,6 +62,9 @@ class SyncClient:
             
         # Set up quarantine buffer reference
         self.quarantine_buffer = quarantine_buffer
+        
+        # Set up drift detectors reference
+        self.drift_detectors = drift_detectors or []
         
         # Set up headers
         self.headers = {
@@ -411,6 +423,197 @@ class SyncClient:
             "samples_sent": send_result.get("samples_sent", 0),
             "validation_results_received": len(validation_results),
             "server_error": send_result.get("error")
+        }
+    
+    def report_drift_event(self, drift_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Report a drift event to the TinySphere server.
+        
+        Args:
+            drift_data: Drift event data including type, score, detector name, 
+                        and optional samples
+        
+        Returns:
+            Dictionary with operation results
+        """
+        if not DRIFT_DETECTION_AVAILABLE:
+            self.logger.warning("Drift detection not available")
+            return {
+                "success": False,
+                "error": "Drift detection not available"
+            }
+        
+        # Ensure required fields
+        if "drift_type" not in drift_data:
+            drift_data["drift_type"] = "unknown"
+        
+        # Add device ID
+        drift_data["device_id"] = self.device_id
+        
+        # Add event_id if not present
+        if "event_id" not in drift_data:
+            drift_data["event_id"] = str(uuid.uuid4())
+            
+        # Add timestamp if not present
+        if "timestamp" not in drift_data:
+            drift_data["timestamp"] = time.time()
+            
+        self.logger.info(f"Reporting drift event: {drift_data['drift_type']} with ID {drift_data['event_id']}")
+        
+        try:
+            # Send drift event to server
+            response = self.connection_manager.execute_request(
+                method="POST",
+                endpoint="drift/events",
+                json=drift_data
+            )
+            
+            if response.status_code == 200:
+                response_data = response.json()
+                self.logger.info(f"Successfully reported drift event {drift_data['event_id']}")
+                return {
+                    "success": True,
+                    "event_id": drift_data["event_id"],
+                    "server_response": response_data
+                }
+            else:
+                error_msg = f"Failed to report drift event: {response.status_code} - {response.text}"
+                self.logger.error(error_msg)
+                return {
+                    "success": False,
+                    "error": error_msg
+                }
+        except Exception as e:
+            error_msg = f"Error reporting drift event: {str(e)}"
+            self.logger.error(error_msg)
+            return {
+                "success": False,
+                "error": error_msg
+            }
+    
+    def get_drift_validations(self) -> List[Dict[str, Any]]:
+        """Get pending drift validations from the server.
+        
+        Returns:
+            List of validation results from the server
+        """
+        if not DRIFT_DETECTION_AVAILABLE:
+            self.logger.warning("Drift detection not available")
+            return []
+        
+        try:
+            # Request pending validations from server
+            response = self.connection_manager.execute_request(
+                method="GET",
+                endpoint=f"drift/validations/pending?device_id={self.device_id}"
+            )
+            
+            if response.status_code == 200:
+                validations = response.json()
+                
+                if validations:
+                    self.logger.info(f"Received {len(validations)} drift validations")
+                    
+                    # Acknowledge validations
+                    if validations:
+                        validation_ids = [v["validation_id"] for v in validations]
+                        self._acknowledge_validations(validation_ids)
+                
+                return validations
+            else:
+                self.logger.error(f"Failed to get drift validations: {response.status_code} - {response.text}")
+                return []
+        except Exception as e:
+            self.logger.error(f"Error getting drift validations: {str(e)}")
+            return []
+    
+    def _acknowledge_validations(self, validation_ids: List[str]) -> bool:
+        """Acknowledge drift validations.
+        
+        Args:
+            validation_ids: List of validation IDs to acknowledge
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not validation_ids:
+            return True
+            
+        try:
+            response = self.connection_manager.execute_request(
+                method="POST",
+                endpoint="drift/validations/acknowledge",
+                json={"validation_ids": validation_ids}
+            )
+            
+            if response.status_code == 200:
+                self.logger.info(f"Acknowledged {len(validation_ids)} drift validations")
+                return True
+            else:
+                self.logger.error(f"Failed to acknowledge validations: {response.status_code} - {response.text}")
+                return False
+        except Exception as e:
+            self.logger.error(f"Error acknowledging validations: {str(e)}")
+            return False
+    
+    def sync_drift_events(self) -> Dict[str, Any]:
+        """Synchronize drift events with the server.
+        
+        This performs a full synchronization:
+        1. For each detector, collect drift events and report them
+        2. Retrieve validation results from the server
+        
+        Returns:
+            Dictionary with operation results
+        """
+        if not DRIFT_DETECTION_AVAILABLE or not self.drift_detectors:
+            self.logger.warning("Drift detection not available or no detectors configured")
+            return {
+                "success": False,
+                "error": "Drift detection not available or no detectors configured"
+            }
+            
+        # Collect drift events from detectors
+        events_sent = 0
+        events_failed = 0
+        
+        for detector in self.drift_detectors:
+            if not hasattr(detector, "get_drift_events"):
+                self.logger.warning(f"Detector {detector.__class__.__name__} does not support get_drift_events method")
+                continue
+                
+            try:
+                # Get drift events from detector
+                drift_events = detector.get_drift_events()
+                
+                for event in drift_events:
+                    result = self.report_drift_event(event)
+                    if result.get("success", False):
+                        events_sent += 1
+                    else:
+                        events_failed += 1
+            except Exception as e:
+                self.logger.error(f"Error collecting drift events from {detector.__class__.__name__}: {str(e)}")
+                events_failed += 1
+        
+        # Get validations from server
+        validations = self.get_drift_validations()
+        
+        # Process validations if we have handlers to do so
+        validations_processed = 0
+        for detector in self.drift_detectors:
+            if hasattr(detector, "process_validations"):
+                try:
+                    processed = detector.process_validations(validations)
+                    validations_processed += processed
+                except Exception as e:
+                    self.logger.error(f"Error processing validations with {detector.__class__.__name__}: {str(e)}")
+        
+        return {
+            "success": events_failed == 0,
+            "events_sent": events_sent,
+            "events_failed": events_failed,
+            "validations_received": len(validations),
+            "validations_processed": validations_processed
         }
     
     def close(self) -> None:
