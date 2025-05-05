@@ -37,6 +37,9 @@ import numpy as np
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
+    
+# Import preprocessors
+from preprocessors import resize_and_normalize, convert_uint8_to_float32
 
 # Add base directory to path (for tinylcm)
 base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -203,9 +206,14 @@ class AutonomousStoneDetectorApp:
             from tinylcm.core.inference_monitor.monitor import InferenceMonitor
             from tinylcm.core.handlers.hybrid import HybridHandler
             
-            # Initialize feature extractor
+            # Initialize feature extractor with appropriate preprocessors
             self.feature_extractor = TFLiteFeatureExtractor(
-                model_path=self.config["model"]["path"]
+                model_path=self.config["model"]["path"],
+                preprocessors=[
+                    # First resize and normalize the image to the correct dimensions
+                    lambda img: resize_and_normalize(img, 
+                        target_size=(224, 224)),  # Adjust target size to match your model's input
+                ]
             )
             
             # Initialize classifier

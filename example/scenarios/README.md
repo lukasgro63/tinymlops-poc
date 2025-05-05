@@ -45,6 +45,23 @@ When running on embedded devices like Raspberry Pi, the full TensorFlow library 
    pip install tflite-runtime
    ```
 
+3. **Input Data Type Handling**
+
+   TFLite models often expect input data in a specific format (typically FLOAT32). When passing images from OpenCV (which are usually UINT8), we need to convert them. This is handled by preprocessor functions in the `preprocessors.py` module:
+
+   ```python
+   # Example usage in main_autonomous.py
+   self.feature_extractor = TFLiteFeatureExtractor(
+       model_path=self.config["model"]["path"],
+       preprocessors=[
+           # Resize and normalize the image
+           lambda img: resize_and_normalize(img, target_size=(224, 224))
+       ]
+   )
+   ```
+
+   When you see an error like "Got value of type UINT8 but expected type FLOAT32 for input", make sure you're using the proper preprocessing.
+
 ## Creating New Scenarios
 
 When creating new scenarios, follow this pattern:
