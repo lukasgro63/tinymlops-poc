@@ -1,10 +1,11 @@
 import json
 import os
 import traceback
+import threading
 from typing import List
 
 import aiofiles
-from fastapi import (APIRouter, BackgroundTasks, Depends, File, Form,
+from fastapi import (APIRouter, Depends, File, Form,
                      HTTPException, UploadFile)
 from sqlalchemy.orm import Session
 
@@ -196,12 +197,52 @@ async def upload_package(
             package_type=db_package.package_type
         )
         
-        # Don't try to process automatically yet
+        # Trigger package processing after upload (synchronously since we can't use BackgroundTasks)
+        # Set the package status to "processing"
+        PackageService.update_package(
+            db, 
+            db_package.package_id, 
+            PackageUpdate(processing_status="processing")
+        )
+        
+        # Create a new thread to process the package
+        import threading
+        
+        def process_package_thread(package_id):
+            # Create a new DB session for the thread
+            from tinysphere.api.dependencies.db import SessionLocal
+            thread_db = SessionLocal()
+            
+            try:
+                service = MLflowService()
+                service.process_package(thread_db, package_id)
+            except Exception as e:
+                print(f"Background processing error: {str(e)}")
+                print(traceback.format_exc())
+                # Set error status in case of failure
+                PackageService.update_package(
+                    thread_db, 
+                    package_id, 
+                    PackageUpdate(
+                        processing_status="error",
+                        processing_error=str(e)
+                    )
+                )
+            finally:
+                # Close connection
+                thread_db.close()
+                
+        # Start a new thread to process the package
+        threading.Thread(
+            target=process_package_thread,
+            args=(db_package.package_id,),
+            daemon=True
+        ).start()
         
         return PackageUploadResponse(
             package_id=db_package.package_id,
             status="success",
-            message="Package uploaded successfully",
+            message="Package uploaded successfully and processing started",
             uploaded=True  # Required field in the model
         )
     except Exception as e:
@@ -214,7 +255,6 @@ async def upload_package(
 @router.post("/{package_id}/process")
 async def process_package(
     package_id: str,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     try:
@@ -230,7 +270,7 @@ async def process_package(
         )
         
         # Neue DB-Session für Hintergrundaufgabe erstellen (um Konflikte zu vermeiden)
-        from api.dependencies.db import SessionLocal
+        from tinysphere.api.dependencies.db import SessionLocal
         db_copy = SessionLocal()
         
         # Verarbeitungsfunktion für Hintergrundtask definieren
@@ -256,12 +296,12 @@ async def process_package(
                 # Verbindung schließen
                 db.close()
         
-        # Verarbeitung im Hintergrund starten
-        background_tasks.add_task(
-            process_package_background,
-            db=db_copy,
-            package_id=package_id
-        )
+        # Verarbeitung im Hintergrund starten mit Thread
+        threading.Thread(
+            target=process_package_background,
+            args=(db_copy, package_id),
+            daemon=True
+        ).start()
         
         return {
             "status": "accepted",
@@ -275,7 +315,6 @@ async def process_package(
 
 @router.post("/process-pending")
 async def process_pending_packages(
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     limit: int = 10
 ):
@@ -291,7 +330,7 @@ async def process_pending_packages(
             }
         
         # Neue DB-Session für Hintergrundaufgaben
-        from api.dependencies.db import SessionLocal
+        from tinysphere.api.dependencies.db import SessionLocal
         db_copy = SessionLocal()
         
         # Für jedes ausstehende Paket eine Hintergrundaufgabe starten
@@ -319,12 +358,12 @@ async def process_pending_packages(
             finally:
                 db.close()
         
-        # Starte die Verarbeitung im Hintergrund
-        background_tasks.add_task(
-            process_packages_background,
-            db=db_copy,
-            package_ids=package_ids
-        )
+        # Starte die Verarbeitung im Hintergrund mit Thread
+        threading.Thread(
+            target=process_packages_background,
+            args=(db_copy, package_ids),
+            daemon=True
+        ).start()
         
         return {
             "status": "accepted",

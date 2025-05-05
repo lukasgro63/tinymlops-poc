@@ -168,7 +168,23 @@ class LightweightKNN(BaseAdaptiveClassifier):
             List of predicted labels
         """
         if not self.X_train:
-            raise ValueError("Classifier has not been trained yet")
+            logger.warning("Classifier has not been trained yet - returning default predictions")
+            # Instead of raising an exception, return a default prediction
+            # If we're using numpy, we can determine how many samples were provided
+            if self.use_numpy and isinstance(features, np.ndarray):
+                if len(features.shape) == 1:
+                    # Single sample
+                    return ["unknown"]
+                else:
+                    # Multiple samples
+                    return ["unknown"] * features.shape[0]
+            else:
+                # If not using numpy, assume a single sample if features is not a list
+                # or return a list of "unknown" for each sample if features is a list
+                if isinstance(features, list):
+                    return ["unknown"] * len(features)
+                else:
+                    return ["unknown"]
         
         predictions = []
         
@@ -223,7 +239,27 @@ class LightweightKNN(BaseAdaptiveClassifier):
             Matrix of class probabilities, shape (n_samples, n_classes)
         """
         if not self.X_train:
-            raise ValueError("Classifier has not been trained yet")
+            logger.warning("Classifier has not been trained yet - returning uniform probabilities")
+            # Handle the case where classifier has not been trained yet
+            # Return a probability distribution with a single "unknown" class with prob 1.0
+            
+            # Determine the number of samples in the input
+            if self.use_numpy and isinstance(features, np.ndarray):
+                if len(features.shape) == 1:
+                    n_samples = 1
+                else:
+                    n_samples = features.shape[0]
+            else:
+                if isinstance(features, list):
+                    n_samples = len(features)
+                else:
+                    n_samples = 1
+            
+            # Create an array with a single class probability
+            if self.use_numpy:
+                return np.ones((n_samples, 1))
+            else:
+                return [[1.0] for _ in range(n_samples)]
         
         # Ensure classes are ordered consistently
         classes = sorted(list(self._classes))
@@ -286,6 +322,11 @@ class LightweightKNN(BaseAdaptiveClassifier):
         Returns:
             List of tuples (neighbor_index, distance)
         """
+        # Check if there are any training samples
+        if not self.X_train:
+            logger.warning("Cannot find neighbors - no training data available")
+            return []
+            
         # Compute distances to all training samples
         distances = []
         
