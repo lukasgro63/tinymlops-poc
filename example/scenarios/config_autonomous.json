@@ -22,6 +22,7 @@
         "external_validation": false,
         "quarantine_check_interval": 50,
         "heuristic_confidence_threshold": 0.7,
+        "use_detection_scores_as_features": true,  /* Important: Use detection scores as features instead of internal layers */
         "drift_detection": {
             "ewma_confidence": {
                 "enabled": true,

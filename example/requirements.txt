@@ -1,9 +1,16 @@
 
+# Core dependencies
 numpy>=1.20.0
 opencv-python>=4.5.0
-tflite-runtime>=2.11.0
 requests>=2.25.0
 python-dateutil>=2.8.2
+
+# TensorFlow Lite - Use tflite_runtime on embedded devices like Raspberry Pi
+tflite-runtime>=2.11.0
+# Note: Do NOT install full tensorflow on Raspberry Pi as it's too resource-intensive
+# On development machines, you can install tensorflow instead:
+# tensorflow>=2.11.0  # Uncomment this for development environments
+
 # For Raspberry Pi camera support
 # Note: picamera2 should be installed via apt on Raspberry Pi OS Bookworm
 # sudo apt-get install -y python3-picamera2
