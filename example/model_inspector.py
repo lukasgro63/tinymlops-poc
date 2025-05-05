@@ -214,32 +214,104 @@ def analyze_detector_outputs(outputs, score_threshold=0.5):
         
         print(f"Single output tensor shape: {shape}")
         
-        if len(shape) == 3 and shape[2] > 5:  # [batch, detections, values]
-            # Assuming format: [y1, x1, y2, x2, score, class_id, ...]
-            detections = output[0]
+        # Print tensor statistics to help analyze
+        flat_output = output.flatten()
+        print(f"Min: {np.min(flat_output)}, Max: {np.max(flat_output)}, Mean: {np.mean(flat_output)}")
+        
+        # Analyze output tensor contents in detail
+        output_data = output[0]  # Take first batch
+        
+        # Print the first few rows to inspect the data
+        if len(output_data) > 0:
+            print("\nFirst few rows of output data:")
+            for i in range(min(5, len(output_data))):
+                print(f"Row {i}: {output_data[i]}")
             
-            # Count detections above threshold
-            valid_count = 0
-            for i in range(len(detections)):
-                if len(detections[i]) >= 5 and detections[i][4] >= score_threshold:
-                    valid_count += 1
-            
-            print(f"Detections above threshold: {valid_count}")
-            
-            # Print top 5 detections
-            count = 0
-            for i in range(len(detections)):
-                if len(detections[i]) >= 6 and detections[i][4] >= score_threshold:
-                    count += 1
-                    box = detections[i][:4]
-                    score = detections[i][4]
-                    class_id = int(detections[i][5])
-                    print(f"Detection #{count}: class={class_id}, score={score:.4f}, box={box}")
-                    
-                    if count >= 5:
+            # Try to detect data patterns
+            # 1. Check for coordinates
+            has_coords = False
+            for i in range(min(5, len(output_data))):
+                if len(output_data[i]) >= 4:
+                    coords = output_data[i][:4]
+                    # Coordinates are usually between 0-1 (normalized) 
+                    if all(0 <= v <= 1 for v in coords):
+                        has_coords = True
+                        print(f"\nDetected possible normalized coordinates at row {i}: {coords}")
                         break
+            
+            # 2. Check for score-like values
+            has_scores = False
+            for i in range(min(10, len(output_data))):
+                if len(output_data[i]) >= 5:
+                    score = output_data[i][4]
+                    if 0 <= score <= 1:
+                        has_scores = True
+                        print(f"Detected possible score at row {i}: {score}")
+                        break
+            
+            # Specific formats
+            if len(shape) == 3 and shape[2] == 4:
+                # Likely bounding boxes
+                print("\nLikely a detection model with output format [batch, detections, 4]")
+                print("Format: [y1, x1, y2, x2] (normalized coordinates)")
+                print("Using default class_id=0 and score=1.0")
+                
+                # Visualize the first few detections
+                for i in range(min(5, len(output_data))):
+                    print(f"Detection #{i+1}: box={output_data[i]}")
+            
+            elif len(shape) == 3 and shape[2] > 5:  # [batch, detections, values]
+                # Try to interpret as [y1, x1, y2, x2, score, class_id, ...]
+                print("\nAttempting to interpret as standard detection format:")
+                
+                # Count detections above threshold
+                valid_count = 0
+                for i in range(len(output_data)):
+                    if len(output_data[i]) >= 5 and output_data[i][4] >= score_threshold:
+                        valid_count += 1
+                
+                print(f"Detections above threshold: {valid_count}")
+                
+                # Print top 5 detections
+                count = 0
+                for i in range(len(output_data)):
+                    if len(output_data[i]) >= 5 and output_data[i][4] >= score_threshold:
+                        count += 1
+                        
+                        # Extract box and score
+                        box = output_data[i][:4]
+                        score = output_data[i][4]
+                        
+                        # Extract class if available
+                        class_id = int(output_data[i][5]) if len(output_data[i]) >= 6 else 0
+                        
+                        print(f"Detection #{count}: class={class_id}, score={score:.4f}, box={box}")
+                        
+                        if count >= 5:
+                            break
+            
+            elif len(shape) == 2 and shape[1] <= 1001:
+                # Likely a classification model
+                print("\nLikely a classification model with output format [batch, classes]")
+                
+                # Find top classes
+                top_classes = np.argsort(output_data)[-5:][::-1]
+                
+                print("Top 5 classes:")
+                for i, class_id in enumerate(top_classes):
+                    print(f"#{i+1}: class={class_id}, score={output_data[class_id]:.4f}")
+            
+            else:
+                print("\nOutput format doesn't match common patterns")
+                print("You may need to implement custom parsing for this model format")
+                
+                # Last resort: just check if there are any values > threshold
+                high_values = np.where(output_data.flatten() > score_threshold)[0]
+                if len(high_values) > 0:
+                    print(f"Found {len(high_values)} values above threshold {score_threshold}")
+                    print(f"First few high values: {output_data.flatten()[high_values[:5]]}")
         else:
-            print("Unknown single output tensor format - cannot parse detections")
+            print("Empty output data")
     else:
         print(f"Unknown output format with {len(outputs)} tensors - cannot parse detections")
 

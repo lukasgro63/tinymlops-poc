@@ -116,36 +116,187 @@ class StoneDetector:
                 print(f"Warning: Expected at least 3 output tensors, but got {len(self.output_details)}")
                 # Try to infer the outputs based on shapes
                 if len(self.output_details) == 1:
-                    # Some models have a single output tensor with all information
+                    # Get the single output tensor
                     output = self.interpreter.get_tensor(self.output_details[0]['index'])
+                    output_shape = output.shape
                     
-                    # Try to determine the number of detections
-                    if len(output.shape) >= 2 and output.shape[1] >= 6:
-                        # Assuming output format: [batch, num_detections, 6]
-                        # where 6 = [y1, x1, y2, x2, score, class]
-                        # or [batch, num_detections * 6]
-                        detections_data = output[0]
+                    print(f"Single output tensor shape: {output_shape}")
+                    
+                    # Handle MobileSSD-like single tensor output format (most common)
+                    if len(output_shape) == 3 and output_shape[2] == 4:
+                        # Likely a standard detection model with format [batch, detections, 4]
+                        # where 4 = [y1, x1, y2, x2] - normalized coordinates
+                        boxes = output[0]
+                        
+                        # For single output models, we may need to make a fixed assumption about class
+                        # This assumes a single-class detector (e.g. a stone detector)
+                        default_class_id = 0
+                        default_score = 1.0  # We'll trust the model's detections
                         
                         # Process each detection
-                        for i in range(len(detections_data)):
-                            # Skip if we're at the end of valid detections
-                            if i >= len(detections_data):
-                                break
+                        for i in range(len(boxes)):
+                            # Parse the bounding box
+                            if len(boxes[i]) >= 4:
+                                y1, x1, y2, x2 = boxes[i][:4]
                                 
-                            # Check if this is a valid detection
-                            if len(detections_data[i]) >= 6:
-                                y1, x1, y2, x2, score, class_id = detections_data[i][:6]
+                                # Convert to pixel coordinates
+                                h, w = image.shape[:2]
+                                box = (
+                                    int(x1 * w),   # x
+                                    int(y1 * h),   # y
+                                    int((x2 - x1) * w),  # width
+                                    int((y2 - y1) * h)   # height
+                                )
                                 
+                                # Add to detections with default class and score
+                                detections.append((default_class_id, default_score, box))
+                                
+                    # Handle common classification output format
+                    elif len(output_shape) == 2 and output_shape[1] <= 1001:
+                        # Likely a classification model with format [batch, classes]
+                        scores = output[0]
+                        
+                        # Find the class with highest score
+                        max_score_idx = np.argmax(scores)
+                        max_score = scores[max_score_idx]
+                        
+                        if max_score > self.threshold:
+                            # For classification, use the whole image as the detection box
+                            h, w = image.shape[:2]
+                            box = (0, 0, w, h)
+                            
+                            # Add to detections
+                            detections.append((max_score_idx, float(max_score), box))
+                    
+                    # Try MobileNet SSD format - usually has 10 arrays of length 4 for coordinates
+                    elif len(output_shape) == 3 and output_shape[1] == 10:
+                        # MobileNet SSD detection model
+                        output_data = output[0]
+                        
+                        # First 10 entries are boxes, then scores, then classes
+                        num_detections = output_shape[1]
+                        
+                        # Check if we can guess the format - try to infer based on values
+                        # MobileNet detections usually have score arrays after the 10 box arrays
+                        max_values = np.max(output_data, axis=1)
+                        
+                        # Find arrays where max value is between 0-1 (likely scores)
+                        score_candidates = [i for i, v in enumerate(max_values) if 0 < v <= 1.0]
+                        
+                        if score_candidates:
+                            # Use the first probable score array
+                            score_idx = score_candidates[0]
+                            scores = output_data[score_idx]
+                            
+                            # Assume the next array contains classes
+                            class_idx = min(score_idx + 1, len(output_data) - 1)
+                            classes = output_data[class_idx]
+                            
+                            # Boxes are usually the first bunch of arrays
+                            # Take the first 4 values of each of the first entries
+                            for i in range(min(10, len(scores))):
+                                if scores[i] > self.threshold:
+                                    # Try to get box from first 4 arrays
+                                    if i < len(output_data):
+                                        box_data = output_data[i][:4]
+                                        y1, x1, y2, x2 = box_data
+                                        
+                                        # Convert to pixel coordinates
+                                        h, w = image.shape[:2]
+                                        box = (
+                                            int(x1 * w),   # x
+                                            int(y1 * h),   # y
+                                            int((x2 - x1) * w),  # width
+                                            int((y2 - y1) * h)   # height
+                                        )
+                                        
+                                        # Get class if available
+                                        class_id = int(classes[i]) if i < len(classes) else 0
+                                        
+                                        # Add to detections
+                                        detections.append((class_id, float(scores[i]), box))
+                        
+                    # Handle standard detection output in a single tensor
+                    elif len(output_shape) >= 2:
+                        # Some models output a single tensor with format [batch, num_detections, values]
+                        # Try to determine if it matches common formats
+                        
+                        # Get the first batch
+                        detections_data = output[0]
+                        
+                        # Check if each detection has at least 5 or 6 values 
+                        # (4 for bbox + 1 for score + optional 1 for class)
+                        if len(detections_data.shape) == 2 and detections_data.shape[1] >= 5:
+                            # Process each detection
+                            for i in range(len(detections_data)):
+                                detection = detections_data[i]
+                                
+                                # Extract values - format depends on the model
+                                # Most common formats are:
+                                # [x1, y1, x2, y2, score, class_id]
+                                # [y1, x1, y2, x2, score, class_id]
+                                
+                                # Try both formats
+                                if len(detection) >= 6:
+                                    # Format with class ID
+                                    format1 = [detection[0], detection[1], detection[2], detection[3], detection[4], detection[5]]
+                                    format2 = [detection[1], detection[0], detection[3], detection[2], detection[4], detection[5]]
+                                    
+                                    # Use format 1 by default
+                                    x1, y1, x2, y2, score, class_id = format1
+                                elif len(detection) >= 5:
+                                    # Format without class ID
+                                    format1 = [detection[0], detection[1], detection[2], detection[3], detection[4]]
+                                    format2 = [detection[1], detection[0], detection[3], detection[2], detection[4]]
+                                    
+                                    # Use format 1 by default
+                                    x1, y1, x2, y2, score = format1
+                                    class_id = 0  # Default class
+                                else:
+                                    # Skip if not enough values
+                                    continue
+                                
+                                # Check score threshold
                                 if score > self.threshold:
                                     # Convert to pixel coordinates
                                     h, w = image.shape[:2]
+                                    
+                                    # Normalize coordinates if they're not already (values > 1.0)
+                                    if x1 > 1.0 or y1 > 1.0 or x2 > 1.0 or y2 > 1.0:
+                                        # Convert absolute pixel coordinates to normalized
+                                        x1, y1, x2, y2 = x1/w, y1/h, x2/w, y2/h
+                                    
                                     box = (
                                         int(x1 * w),   # x
                                         int(y1 * h),   # y
                                         int((x2 - x1) * w),  # width
                                         int((y2 - y1) * h)   # height
                                     )
+                                    
+                                    # Add detection
                                     detections.append((int(class_id), float(score), box))
+                    
+                    # For any other single-output format, try to just use it as is
+                    # This works for many simple classification/detection models
+                    elif len(output_shape) >= 1:
+                        # Flatten output and treat it as scores
+                        flat_output = output.flatten()
+                        
+                        # Get the class with highest score
+                        if len(flat_output) > 0:
+                            max_score_idx = np.argmax(flat_output)
+                            max_score = flat_output[max_score_idx]
+                            
+                            if max_score > self.threshold:
+                                # For classification, use the whole image as the detection box
+                                h, w = image.shape[:2]
+                                box = (0, 0, w, h)
+                                
+                                # Add to detections
+                                detections.append((max_score_idx, float(max_score), box))
+                    
+                    # Print detection summary
+                    print(f"Processed single output tensor and found {len(detections)} detections above threshold")
                     
                     return detections  # Return early with what we have
             
