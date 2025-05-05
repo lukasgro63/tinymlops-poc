@@ -626,38 +626,66 @@ class AutonomousStoneDetectorApp:
         detections = await self.detector.detect_async(frame)
         
         # Extract features based on configuration
-        if self.config["tinylcm"].get("use_detection_scores_as_features", False):
+        if self.config["tinylcm"].get("use_detection_scores_as_features", True):  # Default to TRUE for safer execution
             # Use detection scores as features (more efficient for embedded devices)
             # This avoids using TensorFlow directly for feature extraction
-            if detections:
+            if len(detections) > 0:  # Explicit length check instead of bool conversion
                 # Create a feature vector from confidence scores
                 confidence_scores = [conf for _, conf, _ in detections]
                 # Pad with zeros if less than expected features
                 while len(confidence_scores) < 5:  # Pad to expected feature size
                     confidence_scores.append(0.0)
                 # Convert to numpy array
-                features = np.array(confidence_scores)
+                features = np.array(confidence_scores, dtype=np.float32)
             else:
                 # If no detections, create a zero vector
-                features = np.zeros(5)  # Default feature size
+                features = np.zeros(5, dtype=np.float32)  # Default feature size
         else:
-            # Use the traditional TFLite feature extractor
+            # Only enter this branch if explicitly configured to use the feature extractor
             try:
-                # First preprocess the frame - resize and convert to float32
-                preprocessed_frame = resize_and_normalize(frame, target_size=(224, 224))
-                # Then extract features using the preprocessed frame
-                features = self.feature_extractor.extract_features(preprocessed_frame)
-                # Make sure features is 1D
-                if features.ndim > 1 and features.size > 1:
-                    # Flatten to 1D if needed
-                    features = features.flatten()
+                # Create a proper preprocessor like in the example code
+                preprocessed_frame = None
+                
+                # Get input shape from model
+                if hasattr(self.feature_extractor, '_interpreter') and self.feature_extractor._interpreter is not None:
+                    input_details = self.feature_extractor._interpreter.get_input_details()
+                    if input_details and len(input_details) > 0:
+                        input_shape = input_details[0]['shape']
+                        if len(input_shape) >= 3:
+                            target_height, target_width = input_shape[1], input_shape[2]
+                            
+                            # Use the exact preprocessing approach from the example
+                            resized_image = cv2.resize(frame, (target_width, target_height), interpolation=cv2.INTER_AREA)
+                            
+                            # Convert to 3 channels if needed
+                            if len(resized_image.shape) > 2 and resized_image.shape[2] == 4:
+                                resized_image = cv2.cvtColor(resized_image, cv2.COLOR_RGBA2RGB)
+                                
+                            # Convert to float32 and normalize
+                            normalized_image = resized_image.astype('float32') / 255.0
+                            
+                            # Add batch dimension
+                            preprocessed_frame = np.expand_dims(normalized_image, axis=0)
+                            
+                            # Extract features
+                            features = self.feature_extractor.extract_features(preprocessed_frame)
+                            
+                            # Always flatten to 1D
+                            features = features.flatten()
+                        else:
+                            raise ValueError(f"Invalid input shape: {input_shape}")
+                    else:
+                        raise ValueError("No input details available")
+                else:
+                    raise ValueError("Feature extractor not properly initialized")
+                
             except Exception as e:
                 logger.error(f"Feature extraction error: {e}")
-                # Fallback to simple features
-                if detections:
-                    features = np.array([conf for _, conf, _ in detections])
+                # ALWAYS fallback to detection scores on error
+                if len(detections) > 0:
+                    features = np.array([conf for _, conf, _ in detections], dtype=np.float32)
                 else:
-                    features = np.zeros(5)
+                    features = np.zeros(5, dtype=np.float32)
         
         # Calculate inference time
         inference_time_ms = (time.time() - start_time) * 1000
@@ -668,19 +696,49 @@ class AutonomousStoneDetectorApp:
             prediction = self.detector.labels[class_id]
             
             # Process through adaptive pipeline with autonomous monitoring
-            result = self.adaptive_pipeline.process(
-                input_data=frame,  # Pass the frame for logging
-                features=features,  # Pass the extracted features
-                timestamp=time.time(),
-                sample_id=f"frame_{frame_id}_{i}",
-                extract_features=False,  # We already extracted features
-                metadata={
-                    "inference_time_ms": inference_time_ms,
-                    "bbox": bbox,
-                    "frame_id": frame_id,
-                    "detection_id": i
+            # Ensure features is a 1D array
+            safe_features = features
+            if isinstance(features, np.ndarray):
+                if features.ndim > 1:
+                    safe_features = features.flatten()
+                
+                # Ensure we have a non-empty feature vector
+                if safe_features.size == 0:
+                    safe_features = np.zeros(5, dtype=np.float32)
+            
+            # Add clear prediction and label
+            prediction_data = {
+                "prediction": prediction,
+                "confidence": float(confidence),  # Ensure it's a scalar
+                "features": safe_features,
+                "label": prediction  # Default label is the current prediction
+            }
+            
+            try:
+                result = self.adaptive_pipeline.process(
+                    input_data=frame,  # Pass the frame for logging
+                    features=safe_features,  # Pass the safe features
+                    prediction=prediction,  # Pass explicit prediction
+                    confidence=float(confidence),  # Ensure it's a scalar
+                    timestamp=time.time(),
+                    sample_id=f"frame_{frame_id}_{i}",
+                    extract_features=False,  # We already extracted features
+                    metadata={
+                        "inference_time_ms": inference_time_ms,
+                        "bbox": bbox,
+                        "frame_id": frame_id,
+                        "detection_id": i,
+                        "prediction_data": prediction_data
+                    }
+                )
+            except Exception as e:
+                logger.error(f"Error in adaptive pipeline processing: {e}")
+                # Create a minimal result to continue operation
+                result = {
+                    "sample_id": f"frame_{frame_id}_{i}",
+                    "quarantined": False,
+                    "autonomous_drift_detected": False
                 }
-            )
             
             # Queue inference tracking
             self.logging_queue.put(("track_inference", {
