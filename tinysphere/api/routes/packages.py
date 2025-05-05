@@ -202,7 +202,7 @@ async def upload_package(
             package_id=db_package.package_id,
             status="success",
             message="Package uploaded successfully",
-            server_id="tinysphere-server"
+            uploaded=True  # Required field in the model
         )
     except Exception as e:
         import traceback
