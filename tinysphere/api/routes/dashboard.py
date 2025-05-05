@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
@@ -17,32 +18,75 @@ router = APIRouter()
 def get_system_status(db: Session = Depends(get_db)):
     """Liefert den Gesamtstatus des Systems."""
     try:
-        devices = DeviceService.get_all_devices(db)
-        packages = PackageService.get_all_packages(db)
+        # Safer approach to querying system data with exception handling
+        # for individual components to prevent total failure
         
-        active_devices = len([d for d in devices if d.is_active])
+        # Get device data
+        try:
+            devices = DeviceService.get_all_devices(db)
+            active_devices = len([d for d in devices if d.is_active])
+            total_devices = len(devices)
+        except Exception as device_err:
+            import traceback
+            print(f"Error getting device data: {device_err}")
+            print(traceback.format_exc())
+            active_devices = 0
+            total_devices = 0
         
-        package_types = {}
-        for p in packages:
-            if p.package_type not in package_types:
-                package_types[p.package_type] = 0
-            package_types[p.package_type] += 1
+        # Get package data
+        try:
+            packages = PackageService.get_all_packages(db)
+            
+            package_types = {}
+            for p in packages:
+                if p.package_type not in package_types:
+                    package_types[p.package_type] = 0
+                package_types[p.package_type] += 1
+            
+            processed = len([p for p in packages if p.is_processed])
+            pending = len(packages) - processed
+            total_packages = len(packages)
+        except Exception as package_err:
+            import traceback
+            print(f"Error getting package data: {package_err}")
+            print(traceback.format_exc())
+            package_types = {}
+            processed = 0
+            pending = 0
+            total_packages = 0
         
-        processed = len([p for p in packages if p.is_processed])
-        pending = len(packages) - processed
+        # Get MLflow data
+        try:
+            import mlflow
+            mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+            mlflow.set_tracking_uri(mlflow_uri)
+            experiments = mlflow.search_experiments()
+            mlflow_status = "connected"
+            mlflow_experiments = len(experiments)
+        except Exception as mlflow_err:
+            import traceback
+            print(f"Error connecting to MLflow: {mlflow_err}")
+            print(traceback.format_exc()) 
+            mlflow_status = "disconnected"
+            mlflow_experiments = 0
         
         return {
             "status": "operational",
             "statistics": {
-                "total_devices": len(devices),
+                "total_devices": total_devices,
                 "active_devices": active_devices,
-                "total_packages": len(packages),
+                "total_packages": total_packages,
                 "processed_packages": processed,
                 "pending_packages": pending,
-                "package_types": package_types
+                "package_types": package_types,
+                "mlflow_status": mlflow_status,
+                "mlflow_experiments": mlflow_experiments
             }
         }
     except Exception as e:
+        import traceback
+        print(f"Critical error in get_system_status: {e}")
+        print(traceback.format_exc())
         return {
             "status": "error",
             "message": f"Error fetching system status: {str(e)}"
@@ -81,37 +125,66 @@ def get_models_summary(db: Session = Depends(get_db)):
     """Liefert eine Zusammenfassung aller Modelle in der Registry."""
     try:
         # MLflow Client initialisieren
-        mlflow_client = mlflow.tracking.MlflowClient()
-        
-        # Alle registrierten Modelle abrufen
-        registered_models = mlflow_client.search_registered_models()
-        
-        models_summary = []
-        for model in registered_models:
-            # Neueste Versionen abrufen
-            latest_versions = mlflow_client.get_latest_versions(model.name)
+        try:
+            mlflow_client = mlflow.tracking.MlflowClient()
             
-            # Aktive Versionen zählen (Production, Staging)
-            production_version = next((v for v in latest_versions if v.current_stage == "Production"), None)
-            staging_version = next((v for v in latest_versions if v.current_stage == "Staging"), None)
+            # Alle registrierten Modelle abrufen
+            registered_models = mlflow_client.search_registered_models()
             
-            # Modell-Zusammenfassung erstellen
-            model_summary = {
-                "name": model.name,
-                "total_versions": len(latest_versions),
-                "latest_version": max(v.version for v in latest_versions) if latest_versions else 0,
-                "has_production": production_version is not None,
-                "has_staging": staging_version is not None,
-                "production_version": production_version.version if production_version else None,
-                "staging_version": staging_version.version if staging_version else None,
-                "device_id": model.name.split('-')[0] if '-' in model.name else None,
-            }
+            models_summary = []
+            for model in registered_models:
+                try:
+                    # Neueste Versionen abrufen
+                    latest_versions = mlflow_client.get_latest_versions(model.name)
+                    
+                    # Aktive Versionen zählen (Production, Staging)
+                    production_version = next((v for v in latest_versions if v.current_stage == "Production"), None)
+                    staging_version = next((v for v in latest_versions if v.current_stage == "Staging"), None)
+                    
+                    # Modell-Zusammenfassung erstellen
+                    model_summary = {
+                        "name": model.name,
+                        "total_versions": len(latest_versions),
+                        "latest_version": max(v.version for v in latest_versions) if latest_versions else 0,
+                        "has_production": production_version is not None,
+                        "has_staging": staging_version is not None,
+                        "production_version": production_version.version if production_version else None,
+                        "staging_version": staging_version.version if staging_version else None,
+                        "device_id": model.name.split('-')[0] if '-' in model.name else None,
+                    }
+                    
+                    models_summary.append(model_summary)
+                except Exception as model_err:
+                    # Log error but continue with next model
+                    print(f"Error processing model {model.name}: {model_err}")
+                    # Add a minimal entry for this model
+                    models_summary.append({
+                        "name": model.name,
+                        "error": str(model_err),
+                        "total_versions": 0,
+                        "latest_version": 0,
+                        "has_production": False,
+                        "has_staging": False,
+                        "device_id": model.name.split('-')[0] if '-' in model.name else None,
+                    })
             
-            models_summary.append(model_summary)
+            return models_summary
         
-        return models_summary
+        except Exception as mlflow_err:
+            # If MLflow is completely unavailable, return an empty list
+            # rather than failing the entire request
+            print(f"Error connecting to MLflow: {mlflow_err}")
+            import traceback
+            traceback.print_exc()
+            return []
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching models summary: {str(e)}")
+        import traceback
+        print(f"Unexpected error in models_summary: {e}")
+        print(traceback.format_exc())
+        # Return empty list instead of raising an exception
+        # This allows the dashboard to continue working with partial data
+        return []
 
 @router.get("/models/device/{device_id}")
 def get_device_models(device_id: str, db: Session = Depends(get_db)):
@@ -297,40 +370,59 @@ def get_package_timeline(period: str = "week", db: Session = Depends(get_db)):
 def get_models_performance(metric: str = "accuracy", db: Session = Depends(get_db)):
     """Fetch performance metrics for models from MLflow."""
     try:
-        client = mlflow.tracking.MlflowClient()
-        
-        # Get all registered models
-        models = client.search_registered_models()
-        
-        performance_data = []
-        
-        for model in models:
-            # Get latest versions
-            versions = client.get_latest_versions(model.name)
+        try:
+            client = mlflow.tracking.MlflowClient()
             
-            for version in versions:
-                # Skip if no run ID
-                if not version.run_id:
-                    continue
-                    
+            # Get all registered models
+            models = client.search_registered_models()
+            
+            performance_data = []
+            
+            for model in models:
                 try:
-                    # Get run data
-                    run = client.get_run(version.run_id)
+                    # Get latest versions
+                    versions = client.get_latest_versions(model.name)
                     
-                    # Check if the run has the requested metric
-                    if metric in run.data.metrics:
-                        performance_data.append({
-                            "model_name": model.name,
-                            "version": version.version,
-                            "stage": version.current_stage,
-                            "metric_name": metric,
-                            "value": run.data.metrics[metric],
-                            "timestamp": run.info.start_time
-                        })
-                except Exception as run_err:
+                    for version in versions:
+                        # Skip if no run ID
+                        if not version.run_id:
+                            continue
+                            
+                        try:
+                            # Get run data
+                            run = client.get_run(version.run_id)
+                            
+                            # Check if the run has the requested metric
+                            if metric in run.data.metrics:
+                                performance_data.append({
+                                    "model_name": model.name,
+                                    "version": version.version,
+                                    "stage": version.current_stage,
+                                    "metric_name": metric,
+                                    "value": run.data.metrics[metric],
+                                    "timestamp": run.info.start_time
+                                })
+                        except Exception as run_err:
+                            print(f"Error getting run data for {model.name} version {version.version}: {run_err}")
+                            continue
+                except Exception as version_err:
+                    print(f"Error getting versions for model {model.name}: {version_err}")
                     continue
                     
-        return performance_data
+            return performance_data
+        
+        except Exception as mlflow_err:
+            # If MLflow is completely unavailable, return an empty list
+            # rather than failing the entire request
+            print(f"Error connecting to MLflow in performance endpoint: {mlflow_err}")
+            import traceback
+            traceback.print_exc()
+            return []
     
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching model performance: {str(e)}")
+        import traceback
+        print(f"Unexpected error in models_performance: {e}")
+        print(traceback.format_exc())
+        # Return empty list instead of raising an exception
+        # This allows the dashboard to continue working with partial data
+        return []
