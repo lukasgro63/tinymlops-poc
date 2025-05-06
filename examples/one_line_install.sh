@@ -151,79 +151,44 @@ else
     echo -e "${GREEN}✓ Konfiguration angepasst${NC}"
 fi
 
-# Behebe bekannte Probleme im Code
-echo -e "${YELLOW}Behebe bekannte Fehler im Code...${NC}"
+# Erstelle ein verbessertes Launch-Skript, das den Beispiel-Code korrekt startet
+echo -e "${YELLOW}Erstelle ein verbessertes Launch-Skript...${NC}"
 
-# 1. Fix CircularImport Problem in data_structures.py
-DATA_STRUCTURES_FILE="$BASE_DIR/tinylcm/core/data_structures.py"
-if [ -f "$DATA_STRUCTURES_FILE" ]; then
-    # Sichern der Originaldatei
-    cp "$DATA_STRUCTURES_FILE" "${DATA_STRUCTURES_FILE}.bak"
-    
-    echo -e "${YELLOW}Korrigiere CircularImport-Problem in data_structures.py...${NC}"
-    
-    # Prüfe, ob die Datei bereits den TYPE_CHECKING-Import enthält
-    if ! grep -q "TYPE_CHECKING" "$DATA_STRUCTURES_FILE"; then
-        # Ersetze Import-Sektion
-        sed -i '1s/^/from dataclasses import dataclass, field\nfrom enum import Enum\nfrom typing import Any, List, Optional, Dict, Union, TYPE_CHECKING, ForwardRef\nimport time\nimport numpy as np\nfrom uuid import uuid4\n\n# Forward reference for FeatureSample to resolve circular dependency\nif TYPE_CHECKING:\n    from typing import TypeAlias\n    FeatureSample: TypeAlias = "FeatureSample"\nelse:\n    FeatureSample = ForwardRef("FeatureSample")\n\n/' "$DATA_STRUCTURES_FILE"
-        
-        # Entferne alte Import-Zeilen
-        sed -i '/^from dataclasses import dataclass, field$/d' "$DATA_STRUCTURES_FILE"
-        sed -i '/^from enum import Enum$/d' "$DATA_STRUCTURES_FILE"
-        sed -i '/^from typing import Any, List, Optional, Dict, Union$/d' "$DATA_STRUCTURES_FILE"
-        sed -i '/^import time$/d' "$DATA_STRUCTURES_FILE"
-        sed -i '/^import numpy as np$/d' "$DATA_STRUCTURES_FILE"
-        sed -i '/^from uuid import uuid4$/d' "$DATA_STRUCTURES_FILE"
-        
-        # Füge Forward-Referenz-Auflösung am Ende hinzu
-        echo -e "\n# Resolve the forward reference\nif not TYPE_CHECKING:\n    FeatureSample.__forward_arg__ = None" >> "$DATA_STRUCTURES_FILE"
-        
-        echo -e "${GREEN}✓ CircularImport-Problem in data_structures.py korrigiert${NC}"
-    else
-        echo -e "${GREEN}✓ data_structures.py ist bereits korrigiert${NC}"
-    fi
-fi
-
-# 2. Korrigiere Importpfade in main_scenario1.py
-MAIN_SCRIPT="$BASE_DIR/scenario1_monitoring_only/main_scenario1.py"
-if [ -f "$MAIN_SCRIPT" ]; then
-    # Sichern der Originaldatei
-    cp "$MAIN_SCRIPT" "${MAIN_SCRIPT}.bak"
-    
-    echo -e "${YELLOW}Korrigiere Importpfade in main_scenario1.py...${NC}"
-    
-    # Modifiziere die Import-Sektion
-    # Suche nach dem System-Pfad-Import und ersetze ihn
-    if grep -q "sys.path.append" "$MAIN_SCRIPT"; then
-        # Ersetze die Zeile mit einer verbesserten Variante
-        sed -i 's/sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))/sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))/' "$MAIN_SCRIPT"
-        echo -e "${GREEN}✓ Importpfade in main_scenario1.py korrigiert${NC}"
-    else
-        echo -e "${YELLOW}Import-Pfad-Anweisung nicht gefunden - füge sie hinzu${NC}"
-        # Füge die Zeile nach den Imports ein
-        sed -i '/import numpy as np/a\
-# Insert module path at the beginning of sys.path to ensure local modules are found first\
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))' "$MAIN_SCRIPT"
-        echo -e "${GREEN}✓ Importpfade in main_scenario1.py korrigiert${NC}"
-    fi
-fi
-
-# 3. Erstelle ein verbessertes Launch-Skript
 LAUNCH_SCRIPT="$BASE_DIR/launch.sh"
-cat > "$LAUNCH_SCRIPT" <<EOF
+cat > "$LAUNCH_SCRIPT" <<'EOF'
 #!/bin/bash
-# Verbessertes Start-Skript für TinyLCM Beispiel Szenario 1
+# Start-Skript für TinyLCM Beispiel Szenario 1
 
 # Verwende die absolute Verzeichnis-Referenz
-SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-cd "\$SCRIPT_DIR"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
-# Stelle sicher, dass Python den korrekten Modul-Pfad hat
-export PYTHONPATH="\$SCRIPT_DIR:\$PYTHONPATH"
+# Stelle sicher, dass die lokalen utils vor der TinyLCM-Bibliothek importiert werden
+export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
+
+# Erstelle .pth Datei für den lokalen utils-Pfad im site-packages-Verzeichnis
+SITE_PACKAGES_DIR=$(python3 -c "import site; print(site.getsitepackages()[0])")
+if [ -d "$SITE_PACKAGES_DIR" ]; then
+    echo "# Pfad zu den lokalen utils für TinyLCM-Beispiele" > "$SITE_PACKAGES_DIR/tinylcm-examples.pth"
+    echo "$SCRIPT_DIR" >> "$SITE_PACKAGES_DIR/tinylcm-examples.pth"
+    echo "Site-packages Pfad konfiguriert."
+fi
 
 echo "Starte TinyLCM Szenario 1 (Autonomes Monitoring)..."
-cd "\$SCRIPT_DIR/scenario1_monitoring_only"
-python3 main_scenario1.py "\$@"
+cd "$SCRIPT_DIR/scenario1_monitoring_only"
+python3 -c "
+import sys
+import os
+
+# Füge den Beispiel-Pfad explizit am Anfang des Suchpfads hinzu
+example_path = os.path.dirname(os.path.dirname(os.path.abspath('__file__')))
+if example_path not in sys.path:
+    sys.path.insert(0, example_path)
+    print(f'Pfad {example_path} zum Python-Suchpfad hinzugefügt')
+
+# Starte main_scenario1.py
+exec(open('main_scenario1.py').read())
+"
 EOF
 chmod +x "$LAUNCH_SCRIPT"
 echo -e "${GREEN}✓ Verbessertes Launch-Skript erstellt${NC}"
@@ -251,7 +216,7 @@ try:
     tinylcm_config = config.get("tinylcm", {})
     sync_config = tinylcm_config.get("sync_client", {})
     
-    server_url = sync_config.get("server_url", "http://localhost:8000")
+    server_url = sync_config.get("server_url", "http://192.168.0.66:8000")
     api_key = sync_config.get("api_key", "tinylcm-demo-key")
     
     # Führe einen einfachen Verbindungstest durch

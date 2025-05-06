@@ -1,9 +1,16 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, List, Optional, Dict, Union
+from typing import Any, List, Optional, Dict, Union, TYPE_CHECKING, ForwardRef
 import time
 import numpy as np
 from uuid import uuid4
+
+# Forward reference for FeatureSample to resolve circular dependency
+if TYPE_CHECKING:
+    from typing import TypeAlias
+    FeatureSample: TypeAlias = "FeatureSample"
+else:
+    FeatureSample = ForwardRef("FeatureSample")
 
 
 class QuarantineStatus(str, Enum):
@@ -243,3 +250,8 @@ class AdaptiveState:
             version=data.get("version", "1.0.0"),
             metadata=data.get("metadata", {})
         )
+
+
+# Resolve the forward reference
+if not TYPE_CHECKING:
+    FeatureSample.__forward_arg__ = None
