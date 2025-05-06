@@ -31,7 +31,11 @@ class FeatureMonitor(AutonomousDriftDetector):
         max_features: Optional[int] = None,
         sampling_rate: float = 1.0,
         use_numpy: bool = True,
-        distance_metric: str = 'euclidean'
+        distance_metric: str = 'euclidean',
+        warm_up_samples: int = 300,
+        reference_update_interval: int = 100,
+        reference_update_factor: float = 0.05,
+        pause_reference_update_during_drift: bool = True
     ):
         """Initialize the feature monitor.
         
@@ -43,8 +47,18 @@ class FeatureMonitor(AutonomousDriftDetector):
             sampling_rate: Fraction of samples to process (for resource constraints)
             use_numpy: Whether to use NumPy for calculations
             distance_metric: Distance metric for feature space ('euclidean', 'cosine', 'manhattan')
+            warm_up_samples: Number of samples to collect during warm-up
+            reference_update_interval: Number of samples between reference updates
+            reference_update_factor: Factor for updating reference (β)
+            pause_reference_update_during_drift: Whether to pause updating during detected drift
         """
-        super().__init__()
+        super().__init__(
+            warm_up_samples=warm_up_samples,
+            reference_update_interval=reference_update_interval,
+            reference_update_factor=reference_update_factor,
+            pause_reference_update_during_drift=pause_reference_update_during_drift
+        )
+        
         self.window_size = window_size
         self.threshold = threshold
         self.reference_size = reference_size
@@ -99,6 +113,9 @@ class FeatureMonitor(AutonomousDriftDetector):
         Returns:
             Tuple of (drift_detected, drift_info)
         """
+        # Process base sample counting and warm-up phase
+        self._process_sample(record)
+        
         # Extract features from record
         if 'features' not in record:
             logger.warning("Features missing in record, skipping update")
@@ -146,13 +163,14 @@ class FeatureMonitor(AutonomousDriftDetector):
         self.last_update_time = time.time()
         
         # Handle training phase
-        if self.training_mode:
+        if self.in_warm_up_phase:
             self.reference_samples.append(features)
-            
-            if len(self.reference_samples) >= self.reference_size:
-                self._initialize_reference()
-                self.training_mode = False
-                logger.debug(f"Finished training phase with {len(self.reference_samples)} samples")
+            return False, None
+        
+        # Initialize reference if needed
+        if self.reference_mean is None and not self.in_warm_up_phase:
+            self._initialize_reference()
+            logger.debug(f"Finished warm-up phase with {len(self.reference_samples)} samples")
             return False, None
         
         # Calculate distance from reference
@@ -173,6 +191,9 @@ class FeatureMonitor(AutonomousDriftDetector):
         self.ewma_history.append(self.ewma_value)
         
         # Check for drift
+        drift_info = None
+        was_drift_detected = self.drift_detected
+        
         if not self.drift_detected and self.ewma_value > self.ucl:
             self.drift_detected = True
             self.drift_point_index = self.n_samples
@@ -197,16 +218,65 @@ class FeatureMonitor(AutonomousDriftDetector):
             
             # Notify callbacks
             self._notify_callbacks(drift_info)
-            
-            return True, drift_info
         
-        return False, None
+        # Update reference statistics if needed
+        if self.should_update_reference():
+            self._update_reference_statistics()
+            self.samples_since_last_update = 0
+        
+        return self.drift_detected, drift_info
     
     def _serialize_value(self, value):
         """Convert numpy arrays to lists for serialization."""
         if self.use_numpy and np and isinstance(value, np.ndarray):
             return value.tolist()
         return value
+    
+    def _update_reference_statistics(self):
+        """Update reference statistics using current window."""
+        if not self.current_window:
+            return
+            
+        # Calculate statistics from current window
+        window_statistics = self._calculate_window_statistics()
+        window_mean = window_statistics.get('mean')
+        
+        if window_mean is None:
+            return
+            
+        # Update reference mean using the rolling update formula
+        if self.use_numpy and np:
+            self.reference_mean = (
+                self.reference_update_factor * np.array(window_mean) + 
+                (1 - self.reference_update_factor) * self.reference_mean
+            )
+        else:
+            # Update each feature dimension
+            if isinstance(window_mean, list) and isinstance(self.reference_mean, list):
+                for i in range(min(len(window_mean), len(self.reference_mean))):
+                    self.reference_mean[i] = (
+                        self.reference_update_factor * window_mean[i] +
+                        (1 - self.reference_update_factor) * self.reference_mean[i]
+                    )
+        
+        # Update control limits based on new reference
+        distances = []
+        for sample in self.current_window:
+            distance = self._calculate_distance(sample)
+            distances.append(distance)
+            
+        if self.use_numpy and np:
+            mean_distance = np.mean(distances)
+            std_distance = np.std(distances)
+        else:
+            mean_distance = sum(distances) / len(distances)
+            sum_squared_diff = sum((d - mean_distance) ** 2 for d in distances)
+            std_distance = math.sqrt(sum_squared_diff / len(distances))
+            
+        self.ucl = mean_distance + self.threshold * std_distance
+        self.lcl = max(0, mean_distance - self.threshold * std_distance)
+        
+        logger.debug(f"Updated reference statistics. New control limits: UCL={self.ucl:.4f}, LCL={self.lcl:.4f}")
     
     def check_for_drift(self) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """Check if drift has been detected.
@@ -414,7 +484,11 @@ class FeatureMonitor(AutonomousDriftDetector):
         Returns:
             State dictionary
         """
-        state_dict = {
+        # Get base state from parent class
+        state_dict = self._get_base_state()
+        
+        # Add feature monitor specific state
+        state_dict.update({
             'window_size': self.window_size,
             'threshold': self.threshold,
             'reference_size': self.reference_size,
@@ -435,7 +509,7 @@ class FeatureMonitor(AutonomousDriftDetector):
             'drift_detected': self.drift_detected,
             'drift_point_index': self.drift_point_index,
             'last_update_time': self.last_update_time
-        }
+        })
         
         # Don't store full reference samples - too large
         # Just store the count
@@ -455,6 +529,10 @@ class FeatureMonitor(AutonomousDriftDetector):
             state: Previously saved state dictionary.
             Note: Reference samples are not restored, only the statistics.
         """
+        # Restore base state from parent class
+        self._set_base_state(state)
+        
+        # Restore feature monitor specific state
         self.window_size = state.get('window_size', self.window_size)
         self.threshold = state.get('threshold', self.threshold)
         self.reference_size = state.get('reference_size', self.reference_size)
@@ -492,3 +570,439 @@ class FeatureMonitor(AutonomousDriftDetector):
         # This means the detector can perform detection but not retrain reference
         # from scratch without new samples
         self.reference_samples = []
+
+
+class PageHinkleyFeatureMonitor(AutonomousDriftDetector):
+    """Page-Hinkley test for monitoring feature statistics to detect drift.
+    
+    This detector implements the Page-Hinkley test on feature statistics.
+    For a given feature statistic f(x_t), it tracks the cumulative sum of deviations
+    m_t = sum_{i=1}^{t} (f(x_i) - μ_ref - δ) along with the running minimum M_t = min_{i≤t} m_i.
+    Drift is signaled if m_t - M_t > λ.
+    
+    The feature_statistic_fn can be any function that reduces a feature vector to a scalar value,
+    such as norm, variance, max, min, etc.
+    """
+    
+    def __init__(
+        self,
+        feature_statistic_fn: Callable[[np.ndarray], float],
+        lambda_threshold: float = 50.0,
+        delta: float = 0.005,
+        warm_up_samples: int = 100,
+        reference_update_interval: int = 50,
+        reference_update_factor: float = 0.05,
+        pause_reference_update_during_drift: bool = True,
+    ):
+        """Initialize the Page-Hinkley feature monitor.
+        
+        Args:
+            feature_statistic_fn: Function that computes a scalar statistic from a feature vector
+            lambda_threshold: Threshold for drift detection (λ)
+            delta: Magnitude parameter to match expected drift direction (δ)
+            warm_up_samples: Number of samples to collect during warm-up
+            reference_update_interval: Number of samples between reference updates
+            reference_update_factor: Factor for updating reference (β)
+            pause_reference_update_during_drift: Whether to pause updating during detected drift
+        """
+        super().__init__(
+            warm_up_samples=warm_up_samples,
+            reference_update_interval=reference_update_interval,
+            reference_update_factor=reference_update_factor,
+            pause_reference_update_during_drift=pause_reference_update_during_drift,
+        )
+        
+        self.feature_statistic_fn = feature_statistic_fn
+        self.lambda_threshold = lambda_threshold
+        self.delta = delta
+        
+        # PH statistics
+        self.reference_mean = None  # μ_ref
+        self.cumulative_sum = 0.0   # m_t
+        self.minimum_sum = 0.0      # M_t
+        
+        # For warm-up calculations
+        self.warm_up_values = [] if self.in_warm_up_phase else None
+    
+    def update(self, record: Dict[str, Any]) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """Update the detector with new data.
+        
+        Args:
+            record: Dictionary containing 'features' key with feature vector
+            
+        Returns:
+            Tuple of (drift_detected, drift_info)
+        """
+        # Process base sample counting and warm-up phase
+        self._process_sample(record)
+        
+        # Extract features from record
+        features = record.get('features')
+        if features is None:
+            logger.warning("Record does not contain 'features' key")
+            return False, None
+        
+        # Calculate the feature statistic
+        try:
+            statistic_value = self.feature_statistic_fn(features)
+        except Exception as e:
+            logger.error(f"Error computing feature statistic: {str(e)}")
+            return False, None
+        
+        drift_info = None
+        
+        # Handle warm-up phase
+        if self.in_warm_up_phase:
+            self.warm_up_values.append(statistic_value)
+            return False, None
+        elif self.reference_mean is None and not self.in_warm_up_phase:
+            # Initialize reference after warm-up
+            self.reference_mean = np.mean(self.warm_up_values)
+            logger.debug(f"Initialized reference mean to {self.reference_mean}")
+            self.warm_up_values = None  # Free memory
+            self.cumulative_sum = 0.0
+            self.minimum_sum = 0.0
+            return False, None
+        
+        # Page-Hinkley test update
+        deviation = statistic_value - self.reference_mean - self.delta
+        self.cumulative_sum += deviation
+        self.minimum_sum = min(self.minimum_sum, self.cumulative_sum)
+        
+        # Check for drift
+        ph_value = self.cumulative_sum - self.minimum_sum
+        was_drift_detected = self.drift_detected
+        self.drift_detected = ph_value > self.lambda_threshold
+        
+        # If drift is newly detected, prepare drift info
+        if self.drift_detected and not was_drift_detected:
+            drift_info = {
+                'detector_type': 'PageHinkleyFeatureMonitor',
+                'statistic_value': statistic_value,
+                'reference_mean': self.reference_mean,
+                'ph_value': ph_value,
+                'threshold': self.lambda_threshold
+            }
+            self._notify_callbacks(drift_info)
+        
+        # If drift ends, reset detection state but keep statistics
+        elif was_drift_detected and not self.drift_detected:
+            logger.debug("Drift condition no longer met")
+            # Keep the reference statistics but reset the PH test
+            self.cumulative_sum = 0.0
+            self.minimum_sum = 0.0
+        
+        # Update reference statistics if needed
+        if self.should_update_reference():
+            self._update_statistics(statistic_value)
+            self.samples_since_last_update = 0
+        
+        return self.drift_detected, drift_info
+    
+    def _update_statistics(self, new_value: float) -> None:
+        """Update reference statistics with new value.
+        
+        Args:
+            new_value: New statistic value
+        """
+        # Using the rolling update formula: μ_ref_t ← β·μ_ref_t-1 + (1-β)·new_value
+        self.reference_mean = (self.reference_update_factor * self.reference_mean + 
+                              (1 - self.reference_update_factor) * new_value)
+        logger.debug(f"Updated reference mean to {self.reference_mean}")
+    
+    def _update_reference_statistics(self, new_stats: float, ref_stats: float) -> float:
+        """Implement the abstract method from base class.
+        
+        Args:
+            new_stats: New statistic value
+            ref_stats: Current reference value
+            
+        Returns:
+            Updated reference value
+        """
+        # Using the rolling update formula: μ_ref_t ← β·μ_ref_t-1 + (1-β)·new_value
+        return self.reference_update_factor * ref_stats + (1 - self.reference_update_factor) * new_stats
+    
+    def check_for_drift(self) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """Check if drift has been detected.
+        
+        For this detector, this simply returns the current drift state.
+        
+        Returns:
+            Tuple of (drift_detected, drift_info)
+        """
+        drift_info = None
+        if self.drift_detected:
+            drift_info = {
+                'detector_type': 'PageHinkleyFeatureMonitor',
+                'reference_mean': self.reference_mean,
+                'ph_value': self.cumulative_sum - self.minimum_sum,
+                'threshold': self.lambda_threshold
+            }
+        return self.drift_detected, drift_info
+    
+    def reset(self) -> None:
+        """Reset the detector state.
+        
+        This resets the Page-Hinkley statistics but keeps the reference statistics.
+        """
+        self.drift_detected = False
+        self.cumulative_sum = 0.0
+        self.minimum_sum = 0.0
+        logger.debug("Reset Page-Hinkley detector state")
+    
+    def get_state(self) -> Dict[str, Any]:
+        """Get the current state of the detector.
+        
+        Returns:
+            State dictionary
+        """
+        state = self._get_base_state()
+        state.update({
+            'reference_mean': self.reference_mean,
+            'cumulative_sum': self.cumulative_sum,
+            'minimum_sum': self.minimum_sum,
+            'lambda_threshold': self.lambda_threshold,
+            'delta': self.delta,
+            'warm_up_values': self.warm_up_values if self.warm_up_values is not None else []
+        })
+        return state
+    
+    def set_state(self, state: Dict[str, Any]) -> None:
+        """Restore the detector state.
+        
+        Args:
+            state: Previously saved state dictionary
+        """
+        self._set_base_state(state)
+        self.reference_mean = state.get('reference_mean', self.reference_mean)
+        self.cumulative_sum = state.get('cumulative_sum', self.cumulative_sum)
+        self.minimum_sum = state.get('minimum_sum', self.minimum_sum)
+        self.lambda_threshold = state.get('lambda_threshold', self.lambda_threshold)
+        self.delta = state.get('delta', self.delta)
+        warm_up_values = state.get('warm_up_values', [])
+        self.warm_up_values = warm_up_values if self.in_warm_up_phase else None
+
+
+class EWMAFeatureMonitor(AutonomousDriftDetector):
+    """EWMA-based monitor for feature statistics to detect drift.
+    
+    This detector implements an Exponentially Weighted Moving Average (EWMA) control chart
+    for monitoring feature statistics. It tracks S_t = α·stat_t + (1-α)·S_{t-1} and signals
+    drift if |S_t - μ_ref| > h·σ_ref, where h is a threshold multiplier.
+    
+    The feature_statistic_fn can be any function that reduces a feature vector to a scalar value,
+    such as norm, variance, max, min, etc.
+    """
+    
+    def __init__(
+        self,
+        feature_statistic_fn: Callable[[np.ndarray], float],
+        alpha: float = 0.1,
+        threshold_multiplier: float = 3.0,
+        warm_up_samples: int = 100,
+        reference_update_interval: int = 50,
+        reference_update_factor: float = 0.05,
+        pause_reference_update_during_drift: bool = True,
+    ):
+        """Initialize the EWMA feature monitor.
+        
+        Args:
+            feature_statistic_fn: Function that computes a scalar statistic from a feature vector
+            alpha: Smoothing factor for EWMA (α)
+            threshold_multiplier: Multiplier for σ_ref to set threshold (h)
+            warm_up_samples: Number of samples to collect during warm-up
+            reference_update_interval: Number of samples between reference updates
+            reference_update_factor: Factor for updating reference (β)
+            pause_reference_update_during_drift: Whether to pause updating during detected drift
+        """
+        super().__init__(
+            warm_up_samples=warm_up_samples,
+            reference_update_interval=reference_update_interval,
+            reference_update_factor=reference_update_factor,
+            pause_reference_update_during_drift=pause_reference_update_during_drift,
+        )
+        
+        self.feature_statistic_fn = feature_statistic_fn
+        self.alpha = alpha
+        self.threshold_multiplier = threshold_multiplier
+        
+        # EWMA statistics
+        self.reference_mean = None    # μ_ref
+        self.reference_std = None     # σ_ref
+        self.ewma_statistic = None    # S_t
+        
+        # For warm-up calculations
+        self.warm_up_values = [] if self.in_warm_up_phase else None
+    
+    def update(self, record: Dict[str, Any]) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """Update the detector with new data.
+        
+        Args:
+            record: Dictionary containing 'features' key with feature vector
+            
+        Returns:
+            Tuple of (drift_detected, drift_info)
+        """
+        # Process base sample counting and warm-up phase
+        self._process_sample(record)
+        
+        # Extract features from record
+        features = record.get('features')
+        if features is None:
+            logger.warning("Record does not contain 'features' key")
+            return False, None
+        
+        # Calculate the feature statistic
+        try:
+            statistic_value = self.feature_statistic_fn(features)
+        except Exception as e:
+            logger.error(f"Error computing feature statistic: {str(e)}")
+            return False, None
+        
+        drift_info = None
+        
+        # Handle warm-up phase
+        if self.in_warm_up_phase:
+            self.warm_up_values.append(statistic_value)
+            return False, None
+        elif self.reference_mean is None and not self.in_warm_up_phase:
+            # Initialize reference after warm-up
+            self.reference_mean = np.mean(self.warm_up_values)
+            self.reference_std = np.std(self.warm_up_values) if len(self.warm_up_values) > 1 else 1.0
+            self.ewma_statistic = self.reference_mean
+            logger.debug(f"Initialized reference mean={self.reference_mean}, std={self.reference_std}")
+            self.warm_up_values = None  # Free memory
+            return False, None
+        
+        # Update EWMA statistic
+        self.ewma_statistic = self.alpha * statistic_value + (1 - self.alpha) * self.ewma_statistic
+        
+        # Check for drift
+        threshold = self.threshold_multiplier * self.reference_std
+        deviation = abs(self.ewma_statistic - self.reference_mean)
+        was_drift_detected = self.drift_detected
+        self.drift_detected = deviation > threshold
+        
+        # If drift is newly detected, prepare drift info
+        if self.drift_detected and not was_drift_detected:
+            drift_info = {
+                'detector_type': 'EWMAFeatureMonitor',
+                'statistic_value': statistic_value,
+                'ewma_value': self.ewma_statistic,
+                'reference_mean': self.reference_mean,
+                'reference_std': self.reference_std,
+                'deviation': deviation,
+                'threshold': threshold
+            }
+            self._notify_callbacks(drift_info)
+        
+        # If drift ends, reset detection state but keep statistics
+        elif was_drift_detected and not self.drift_detected:
+            logger.debug("Drift condition no longer met")
+        
+        # Update reference statistics if needed
+        if self.should_update_reference():
+            self._update_statistics(statistic_value)
+            self.samples_since_last_update = 0
+        
+        return self.drift_detected, drift_info
+    
+    def _update_statistics(self, new_value: float) -> None:
+        """Update reference statistics with new value.
+        
+        Args:
+            new_value: New statistic value
+        """
+        # Update reference mean using the rolling update formula
+        old_mean = self.reference_mean
+        self.reference_mean = self.reference_update_factor * old_mean + (
+                              1 - self.reference_update_factor) * new_value
+        
+        # Update reference standard deviation
+        # We use a simplified approach that maintains the coefficient of variation
+        if old_mean != 0:
+            cv = self.reference_std / old_mean
+            self.reference_std = cv * self.reference_mean
+        
+        logger.debug(f"Updated reference mean={self.reference_mean}, std={self.reference_std}")
+    
+    def _update_reference_statistics(self, new_stats: float, ref_stats: Dict[str, float]) -> Dict[str, float]:
+        """Implement the abstract method from base class.
+        
+        Args:
+            new_stats: New statistic value
+            ref_stats: Current reference statistics (dict with 'mean' and 'std' keys)
+            
+        Returns:
+            Updated reference statistics
+        """
+        # This method isn't directly used in this implementation, as we have a specialized 
+        # _update_statistics method that handles both mean and std updates
+        return {
+            'mean': self.reference_update_factor * ref_stats['mean'] + 
+                    (1 - self.reference_update_factor) * new_stats,
+            'std': ref_stats['std']  # Would need more complex logic to update properly
+        }
+    
+    def check_for_drift(self) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """Check if drift has been detected.
+        
+        For this detector, this simply returns the current drift state.
+        
+        Returns:
+            Tuple of (drift_detected, drift_info)
+        """
+        drift_info = None
+        if self.drift_detected:
+            threshold = self.threshold_multiplier * self.reference_std
+            deviation = abs(self.ewma_statistic - self.reference_mean)
+            drift_info = {
+                'detector_type': 'EWMAFeatureMonitor',
+                'ewma_value': self.ewma_statistic,
+                'reference_mean': self.reference_mean,
+                'reference_std': self.reference_std,
+                'deviation': deviation,
+                'threshold': threshold
+            }
+        return self.drift_detected, drift_info
+    
+    def reset(self) -> None:
+        """Reset the detector state.
+        
+        This resets the drift flag but keeps the reference statistics and current EWMA value.
+        """
+        self.drift_detected = False
+        logger.debug("Reset EWMA detector state")
+    
+    def get_state(self) -> Dict[str, Any]:
+        """Get the current state of the detector.
+        
+        Returns:
+            State dictionary
+        """
+        state = self._get_base_state()
+        state.update({
+            'reference_mean': self.reference_mean,
+            'reference_std': self.reference_std,
+            'ewma_statistic': self.ewma_statistic,
+            'alpha': self.alpha,
+            'threshold_multiplier': self.threshold_multiplier,
+            'warm_up_values': self.warm_up_values if self.warm_up_values is not None else []
+        })
+        return state
+    
+    def set_state(self, state: Dict[str, Any]) -> None:
+        """Restore the detector state.
+        
+        Args:
+            state: Previously saved state dictionary
+        """
+        self._set_base_state(state)
+        self.reference_mean = state.get('reference_mean', self.reference_mean)
+        self.reference_std = state.get('reference_std', self.reference_std)
+        self.ewma_statistic = state.get('ewma_statistic', self.ewma_statistic)
+        self.alpha = state.get('alpha', self.alpha)
+        self.threshold_multiplier = state.get('threshold_multiplier', self.threshold_multiplier)
+        warm_up_values = state.get('warm_up_values', [])
+        self.warm_up_values = warm_up_values if self.in_warm_up_phase else None

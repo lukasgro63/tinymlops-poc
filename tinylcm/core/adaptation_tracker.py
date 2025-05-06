@@ -146,6 +146,292 @@ class AdaptationTracker:
         self.task_queue.put(("log_event", event_dict, callback))
         
         logger.debug(f"Queued adaptation event: {event.event_type} (drift: {event.drift_detected})")
+        
+    def log_drift_detection(
+        self,
+        detector_id: str,
+        detector_type: str,
+        metric_value: float,
+        threshold: float,
+        sample_id: Optional[str] = None,
+        additional_info: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Log a drift detection event (non-blocking).
+        
+        Args:
+            detector_id: Identifier of the detector that detected the drift
+            detector_type: Type of the detector (e.g., "confidence", "distribution")
+            metric_value: Value of the monitored metric that triggered the detection
+            threshold: Threshold value that was exceeded
+            sample_id: ID of the sample that triggered the detection (if available)
+            additional_info: Additional information about the detection
+        """
+        event = AdaptationEvent(
+            event_type="drift_detection",
+            drift_detected=True,
+            metadata={
+                "detector_id": detector_id,
+                "detector_type": detector_type,
+                "metric_value": metric_value,
+                "threshold": threshold,
+                "sample_id": sample_id,
+                **(additional_info or {})
+            }
+        )
+        self.log_adaptation_event(event)
+        
+    def log_quarantine(
+        self,
+        sample_id: str,
+        reason: str,
+        prediction: Any,
+        confidence: Optional[float] = None,
+        detector_id: Optional[str] = None
+    ) -> None:
+        """Log a sample quarantine event (non-blocking).
+        
+        Args:
+            sample_id: ID of the quarantined sample
+            reason: Reason for quarantining the sample
+            prediction: Original prediction for the sample
+            confidence: Confidence score of the prediction (if available)
+            detector_id: ID of the detector that triggered the quarantine (if applicable)
+        """
+        metadata = {
+            "sample_id": sample_id,
+            "reason": reason,
+            "prediction": prediction
+        }
+        
+        if confidence is not None:
+            metadata["confidence"] = confidence
+        
+        if detector_id is not None:
+            metadata["detector_id"] = detector_id
+        
+        event = AdaptationEvent(
+            event_type="sample_quarantined",
+            drift_detected=True,
+            metadata=metadata
+        )
+        self.log_adaptation_event(event)
+    
+    def log_heuristic_adaptation(
+        self,
+        samples: List[str],
+        original_label: Any,
+        new_label: Any,
+        pre_snapshot_id: Optional[str] = None,
+        cluster_size: Optional[int] = None,
+        variance: Optional[float] = None
+    ) -> None:
+        """Log a heuristic adaptation event (non-blocking).
+        
+        Args:
+            samples: List of sample IDs used for the adaptation
+            original_label: Original label before adaptation
+            new_label: New label assigned by the heuristic
+            pre_snapshot_id: ID of the snapshot created before adaptation (if available)
+            cluster_size: Size of the cluster used for adaptation (if applicable)
+            variance: Variance/dispersion of the cluster (if applicable)
+        """
+        metadata = {
+            "samples": samples,
+            "original_label": original_label,
+            "new_label": new_label
+        }
+        
+        if pre_snapshot_id is not None:
+            metadata["pre_snapshot_id"] = pre_snapshot_id
+        
+        if cluster_size is not None:
+            metadata["cluster_size"] = cluster_size
+        
+        if variance is not None:
+            metadata["variance"] = variance
+        
+        event = AdaptationEvent(
+            event_type="heuristic_adaptation",
+            samples_added=len(samples),
+            metadata=metadata
+        )
+        self.log_adaptation_event(event)
+    
+    def log_server_validation(
+        self,
+        sample_id: str,
+        heuristic_label: Optional[Any],
+        validated_label: Any,
+        is_correct: bool,
+        confidence: Optional[float] = None
+    ) -> None:
+        """Log a server validation event (non-blocking).
+        
+        Args:
+            sample_id: ID of the validated sample
+            heuristic_label: Label assigned by the heuristic (if applicable)
+            validated_label: Validated label from the server
+            is_correct: Whether the original or heuristic prediction was correct
+            confidence: Server confidence in the validation (if available)
+        """
+        metadata = {
+            "sample_id": sample_id,
+            "validated_label": validated_label,
+            "is_correct": is_correct
+        }
+        
+        if heuristic_label is not None:
+            metadata["heuristic_label"] = heuristic_label
+        
+        if confidence is not None:
+            metadata["confidence"] = confidence
+        
+        event = AdaptationEvent(
+            event_type="server_validation",
+            metadata=metadata
+        )
+        self.log_adaptation_event(event)
+    
+    def log_rollback(
+        self,
+        snapshot_id: str,
+        reason: str,
+        samples_affected: Optional[List[str]] = None,
+        triggered_by: Optional[str] = None
+    ) -> None:
+        """Log a rollback event (non-blocking).
+        
+        Args:
+            snapshot_id: ID of the snapshot that was restored
+            reason: Reason for the rollback
+            samples_affected: List of sample IDs affected by the rollback (if applicable)
+            triggered_by: Entity that triggered the rollback (e.g., "server", "local")
+        """
+        metadata = {
+            "snapshot_id": snapshot_id,
+            "reason": reason
+        }
+        
+        if samples_affected is not None:
+            metadata["samples_affected"] = samples_affected
+            metadata["samples_count"] = len(samples_affected)
+        
+        if triggered_by is not None:
+            metadata["triggered_by"] = triggered_by
+        
+        event = AdaptationEvent(
+            event_type="rollback",
+            metadata=metadata
+        )
+        self.log_adaptation_event(event)
+        
+    def log_accuracy_metric(
+        self,
+        metric_name: str,
+        value: float,
+        batch_size: Optional[int] = None,
+        window_size: Optional[int] = None,
+        labels: Optional[List[Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Log an accuracy metric event (non-blocking).
+        
+        Args:
+            metric_name: Name of the metric (e.g., "accuracy", "f1_score")
+            value: Value of the metric
+            batch_size: Size of the batch used to calculate the metric (if applicable)
+            window_size: Size of the rolling window (if applicable)
+            labels: List of labels included in the calculation (if applicable)
+            metadata: Additional metadata about the metric calculation
+        """
+        metric_data = {
+            "metric_name": metric_name,
+            "value": value
+        }
+        
+        if batch_size is not None:
+            metric_data["batch_size"] = batch_size
+        
+        if window_size is not None:
+            metric_data["window_size"] = window_size
+        
+        if labels is not None:
+            metric_data["labels"] = labels
+        
+        if metadata is not None:
+            metric_data.update(metadata)
+        
+        event = AdaptationEvent(
+            event_type="accuracy_metric",
+            performance_after={"accuracy": value} if metric_name == "accuracy" else {metric_name: value},
+            metadata=metric_data
+        )
+        self.log_adaptation_event(event)
+        
+    def log_snapshot_creation(
+        self,
+        snapshot_id: str,
+        reason: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Log a snapshot creation event (non-blocking).
+        
+        This method is designed to be called by the AdaptiveStateManager when
+        a new snapshot is created.
+        
+        Args:
+            snapshot_id: ID of the created snapshot
+            reason: Reason for creating the snapshot
+            metadata: Additional metadata about the snapshot
+        """
+        event_metadata = {
+            "snapshot_id": snapshot_id,
+            "reason": reason,
+            "operation": "creation"
+        }
+        
+        if metadata is not None:
+            event_metadata.update(metadata)
+        
+        event = AdaptationEvent(
+            event_type="snapshot",
+            metadata=event_metadata
+        )
+        self.log_adaptation_event(event)
+    
+    def log_snapshot_loading(
+        self,
+        snapshot_id: str,
+        reason: str,
+        success: bool,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Log a snapshot loading event (non-blocking).
+        
+        This method is designed to be called by the AdaptiveStateManager when
+        a snapshot is loaded.
+        
+        Args:
+            snapshot_id: ID of the loaded snapshot
+            reason: Reason for loading the snapshot
+            success: Whether the snapshot was loaded successfully
+            metadata: Additional metadata about the snapshot loading
+        """
+        event_metadata = {
+            "snapshot_id": snapshot_id,
+            "reason": reason,
+            "operation": "loading",
+            "success": success
+        }
+        
+        if metadata is not None:
+            event_metadata.update(metadata)
+        
+        event = AdaptationEvent(
+            event_type="snapshot",
+            metadata=event_metadata
+        )
+        self.log_adaptation_event(event)
     
     def log_metrics(
         self,

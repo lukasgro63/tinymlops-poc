@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tinylcm"
-version = "0.1.0"
-description = "Lightweight lifecycle management for TinyML on edge devices"
+version = "0.2.0"
+description = "Autonomous and adaptive lifecycle management for TinyML on edge devices"
 readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.10"
@@ -47,6 +47,14 @@ server = [
     "pandas>=2.0.0",
     "matplotlib>=3.0.0",
     "seaborn>=0.12.0",
+    "tqdm>=4.65.0",
+]
+
+# Adaptation-specific components
+adaptation = [
+    "scikit-learn>=1.0.0",
+    "scipy>=1.9.0",
+    "pydantic>=2.0.0",
 ]
 
 # TensorFlow Lite dependencies
@@ -69,6 +77,19 @@ all = [
     "opencv-python-headless>=4.5.0",
     "tflite-runtime>=2.10.0; platform_machine!='x86_64'",
     "tensorflow>=2.10.0,<2.16.0; platform_machine=='x86_64'",
+    "scikit-learn>=1.0.0",
+    "scipy>=1.9.0",
+    "pydantic>=2.0.0",
+    "tqdm>=4.65.0",
+]
+
+# Edge-optimized installation with minimal dependencies
+edge = [
+    "numpy>=1.23.5; python_version<'3.12'",
+    "numpy>=1.26.0; python_version>='3.12'",
+    "tflite-runtime>=2.10.0",
+    "pillow>=9.0.0",
+    "requests>=2.28.0",
 ]
 
 [tool.pytest.ini_options]

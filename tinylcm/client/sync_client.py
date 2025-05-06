@@ -29,6 +29,20 @@ try:
 except ImportError:
     DRIFT_DETECTION_AVAILABLE = False
 
+# Optional import for adaptation tracking
+try:
+    from tinylcm.core.adaptation_tracker import AdaptationTracker
+    ADAPTATION_TRACKER_AVAILABLE = True
+except ImportError:
+    ADAPTATION_TRACKER_AVAILABLE = False
+
+# Optional import for state management and snapshots
+try:
+    from tinylcm.core.state_manager import AdaptiveStateManager
+    STATE_MANAGER_AVAILABLE = True
+except ImportError:
+    STATE_MANAGER_AVAILABLE = False
+
 
 class SyncClient:
     def __init__(
@@ -42,7 +56,9 @@ class SyncClient:
         connection_timeout: float = 300.0, 
         auto_register: bool = True,
         quarantine_buffer: Optional['QuarantineBuffer'] = None,
-        drift_detectors: Optional[List[Any]] = None
+        drift_detectors: Optional[List[Any]] = None,
+        adaptation_tracker: Optional['AdaptationTracker'] = None,
+        state_manager: Optional['AdaptiveStateManager'] = None
     ):
         if not self.validate_server_url(server_url):
             raise ValueError(f"Invalid server URL: {server_url}")
@@ -65,6 +81,12 @@ class SyncClient:
         
         # Set up drift detectors reference
         self.drift_detectors = drift_detectors or []
+        
+        # Set up adaptation tracker reference
+        self.adaptation_tracker = adaptation_tracker
+        
+        # Set up state manager reference
+        self.state_manager = state_manager
         
         # Set up headers
         self.headers = {
@@ -555,6 +577,351 @@ class SyncClient:
             self.logger.error(f"Error acknowledging validations: {str(e)}")
             return False
     
+    def send_adaptation_logs(self, max_logs: int = 50) -> Dict[str, Any]:
+        """Send adaptation logs to the TinySphere server.
+        
+        Args:
+            max_logs: Maximum number of logs to send in one batch
+            
+        Returns:
+            Dictionary with operation results
+        """
+        if not ADAPTATION_TRACKER_AVAILABLE or self.adaptation_tracker is None:
+            self.logger.warning("Adaptation tracker not available or not configured")
+            return {
+                "success": False,
+                "error": "Adaptation tracker not available",
+                "logs_sent": 0
+            }
+        
+        # Get logs that need to be synced
+        logs_to_sync = self.adaptation_tracker.get_logs_for_sync(max_logs)
+        
+        if not logs_to_sync:
+            self.logger.info("No adaptation logs to sync")
+            return {
+                "success": True,
+                "logs_sent": 0
+            }
+        
+        self.logger.info(f"Syncing {len(logs_to_sync)} adaptation logs")
+        
+        try:
+            # Send logs to server
+            response = self.connection_manager.execute_request(
+                method="POST",
+                endpoint="adaptation/logs",
+                json={
+                    "device_id": self.device_id,
+                    "adaptation_logs": logs_to_sync
+                }
+            )
+            
+            if response.status_code == 200:
+                # Get the log IDs that were successfully synced
+                response_data = response.json()
+                log_ids = [log["log_id"] for log in logs_to_sync]
+                
+                # Mark logs as synced
+                self.adaptation_tracker.mark_as_synced(log_ids)
+                
+                self.logger.info(f"Successfully synced {len(log_ids)} adaptation logs")
+                return {
+                    "success": True,
+                    "logs_sent": len(log_ids),
+                    "server_response": response_data
+                }
+            else:
+                error_msg = f"Failed to sync adaptation logs: {response.status_code} - {response.text}"
+                self.logger.error(error_msg)
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "logs_sent": 0
+                }
+        except Exception as e:
+            error_msg = f"Error syncing adaptation logs: {str(e)}"
+            self.logger.error(error_msg)
+            return {
+                "success": False,
+                "error": error_msg,
+                "logs_sent": 0
+            }
+    
+    def send_snapshot_metadata(self, max_snapshots: int = 20) -> Dict[str, Any]:
+        """Send snapshot metadata to the TinySphere server.
+        
+        Args:
+            max_snapshots: Maximum number of snapshot metadata to send in one batch
+            
+        Returns:
+            Dictionary with operation results
+        """
+        if not STATE_MANAGER_AVAILABLE or self.state_manager is None:
+            self.logger.warning("State manager not available or not configured")
+            return {
+                "success": False,
+                "error": "State manager not available",
+                "snapshots_sent": 0
+            }
+        
+        # Get snapshots that need to be synced
+        snapshots_to_sync = self.state_manager.get_snapshots_for_sync(max_snapshots)
+        
+        if not snapshots_to_sync:
+            self.logger.info("No snapshot metadata to sync")
+            return {
+                "success": True,
+                "snapshots_sent": 0
+            }
+        
+        self.logger.info(f"Syncing metadata for {len(snapshots_to_sync)} snapshots")
+        
+        try:
+            # Send snapshot metadata to server
+            response = self.connection_manager.execute_request(
+                method="POST",
+                endpoint="adaptation/snapshots",
+                json={
+                    "device_id": self.device_id,
+                    "snapshots": snapshots_to_sync
+                }
+            )
+            
+            if response.status_code == 200:
+                # Get the snapshot IDs that were successfully synced
+                response_data = response.json()
+                snapshot_ids = [snapshot["snapshot_id"] for snapshot in snapshots_to_sync]
+                
+                # Mark snapshots as synced
+                self.state_manager.mark_snapshots_as_synced(snapshot_ids)
+                
+                self.logger.info(f"Successfully synced metadata for {len(snapshot_ids)} snapshots")
+                return {
+                    "success": True,
+                    "snapshots_sent": len(snapshot_ids),
+                    "server_response": response_data
+                }
+            else:
+                error_msg = f"Failed to sync snapshot metadata: {response.status_code} - {response.text}"
+                self.logger.error(error_msg)
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "snapshots_sent": 0
+                }
+        except Exception as e:
+            error_msg = f"Error syncing snapshot metadata: {str(e)}"
+            self.logger.error(error_msg)
+            return {
+                "success": False,
+                "error": error_msg,
+                "snapshots_sent": 0
+            }
+            
+    def get_adaptation_feedback(self) -> List[Dict[str, Any]]:
+        """Get adaptation feedback from the server.
+        
+        This includes validated labels and potential rollback commands.
+        
+        Returns:
+            List of adaptation feedback items from the server
+        """
+        try:
+            # Request adaptation feedback from server
+            response = self.connection_manager.execute_request(
+                method="GET",
+                endpoint=f"adaptation/feedback/{self.device_id}"
+            )
+            
+            if response.status_code == 200:
+                feedback_items = response.json().get("feedback", [])
+                
+                if feedback_items:
+                    self.logger.info(f"Received {len(feedback_items)} adaptation feedback items")
+                    
+                    # Acknowledge feedback
+                    if feedback_items:
+                        feedback_ids = [item["feedback_id"] for item in feedback_items]
+                        self._acknowledge_adaptation_feedback(feedback_ids)
+                
+                return feedback_items
+            else:
+                self.logger.error(f"Failed to get adaptation feedback: {response.status_code} - {response.text}")
+                return []
+        except Exception as e:
+            self.logger.error(f"Error getting adaptation feedback: {str(e)}")
+            return []
+    
+    def _acknowledge_adaptation_feedback(self, feedback_ids: List[str]) -> bool:
+        """Acknowledge adaptation feedback items.
+        
+        Args:
+            feedback_ids: List of feedback IDs to acknowledge
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not feedback_ids:
+            return True
+            
+        try:
+            response = self.connection_manager.execute_request(
+                method="POST",
+                endpoint="adaptation/feedback/acknowledge",
+                json={"feedback_ids": feedback_ids}
+            )
+            
+            if response.status_code == 200:
+                self.logger.info(f"Acknowledged {len(feedback_ids)} adaptation feedback items")
+                return True
+            else:
+                self.logger.error(f"Failed to acknowledge adaptation feedback: {response.status_code} - {response.text}")
+                return False
+        except Exception as e:
+            self.logger.error(f"Error acknowledging adaptation feedback: {str(e)}")
+            return False
+            
+    def process_adaptation_feedback(self, feedback_items: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Process adaptation feedback from the server.
+        
+        This handles both validated labels and rollback commands.
+        
+        Args:
+            feedback_items: List of feedback items from the server
+            
+        Returns:
+            Dictionary with processing results
+        """
+        if not feedback_items:
+            return {
+                "success": True,
+                "validated_labels_processed": 0,
+                "rollbacks_processed": 0
+            }
+            
+        validated_labels = []
+        rollback_commands = []
+        
+        # Categorize feedback items
+        for item in feedback_items:
+            if item.get("feedback_type") == "validated_label":
+                validated_labels.append(item)
+            elif item.get("feedback_type") == "rollback":
+                rollback_commands.append(item)
+                
+        # Process validated labels
+        validated_labels_processed = 0
+        for label_item in validated_labels:
+            try:
+                if STATE_MANAGER_AVAILABLE and self.state_manager is not None and ADAPTATION_TRACKER_AVAILABLE and self.adaptation_tracker is not None:
+                    # Extract information
+                    sample_id = label_item.get("sample_id")
+                    features = label_item.get("features")
+                    validated_label = label_item.get("validated_label")
+                    
+                    if sample_id and features and validated_label:
+                        # Use signal handler to update with validated label
+                        self.adaptation_tracker.log_event({
+                            "event_type": "external_validation",
+                            "sample_id": sample_id,
+                            "validated_label": validated_label,
+                            "timestamp": time.time()
+                        })
+                        
+                        # Signal is expected to be handled by AdaptivePipeline
+                        validated_labels_processed += 1
+                    else:
+                        self.logger.warning("Invalid validated label format in feedback")
+            except Exception as e:
+                self.logger.error(f"Error processing validated label: {str(e)}")
+                
+        # Process rollback commands
+        rollbacks_processed = 0
+        for rollback_item in rollback_commands:
+            try:
+                if STATE_MANAGER_AVAILABLE and self.state_manager is not None:
+                    # Extract information
+                    snapshot_id = rollback_item.get("snapshot_id")
+                    reason = rollback_item.get("reason", "Server-initiated rollback")
+                    
+                    if snapshot_id:
+                        # Perform the rollback
+                        self.state_manager.load_snapshot(snapshot_id)
+                        
+                        # Log the rollback
+                        if ADAPTATION_TRACKER_AVAILABLE and self.adaptation_tracker is not None:
+                            self.adaptation_tracker.log_event({
+                                "event_type": "external_rollback",
+                                "snapshot_id": snapshot_id,
+                                "reason": reason,
+                                "timestamp": time.time()
+                            })
+                            
+                        rollbacks_processed += 1
+                    else:
+                        self.logger.warning("Invalid rollback format in feedback")
+            except Exception as e:
+                self.logger.error(f"Error processing rollback command: {str(e)}")
+                
+        return {
+            "success": True,
+            "validated_labels_processed": validated_labels_processed,
+            "rollbacks_processed": rollbacks_processed
+        }
+        
+    def sync_adaptation(self) -> Dict[str, Any]:
+        """Synchronize adaptation components with the server.
+        
+        This method performs a full synchronization cycle:
+        1. Send adaptation logs to the server
+        2. Send snapshot metadata to the server
+        3. Fetch adaptation feedback from the server
+        4. Process the feedback
+        
+        Returns:
+            Dictionary with operation results
+        """
+        results = {
+            "success": True,
+            "logs_sent": 0,
+            "snapshots_sent": 0,
+            "feedback_received": 0,
+            "validated_labels_processed": 0,
+            "rollbacks_processed": 0
+        }
+        
+        # Step 1: Send adaptation logs
+        if ADAPTATION_TRACKER_AVAILABLE and self.adaptation_tracker is not None:
+            logs_result = self.send_adaptation_logs()
+            results["logs_sent"] = logs_result.get("logs_sent", 0)
+            if not logs_result.get("success", False):
+                results["success"] = False
+                results["logs_error"] = logs_result.get("error")
+        
+        # Step 2: Send snapshot metadata
+        if STATE_MANAGER_AVAILABLE and self.state_manager is not None:
+            snapshots_result = self.send_snapshot_metadata()
+            results["snapshots_sent"] = snapshots_result.get("snapshots_sent", 0)
+            if not snapshots_result.get("success", False):
+                results["success"] = False
+                results["snapshots_error"] = snapshots_result.get("error")
+        
+        # Step 3: Get adaptation feedback
+        feedback_items = self.get_adaptation_feedback()
+        results["feedback_received"] = len(feedback_items)
+        
+        # Step 4: Process feedback
+        if feedback_items:
+            process_result = self.process_adaptation_feedback(feedback_items)
+            results["validated_labels_processed"] = process_result.get("validated_labels_processed", 0)
+            results["rollbacks_processed"] = process_result.get("rollbacks_processed", 0)
+            if not process_result.get("success", False):
+                results["success"] = False
+                results["process_error"] = process_result.get("error")
+                
+        return results
+    
     def sync_drift_events(self) -> Dict[str, Any]:
         """Synchronize drift events with the server.
         
@@ -616,6 +983,75 @@ class SyncClient:
             "validations_processed": validations_processed
         }
     
+    def sync_all(self) -> Dict[str, Any]:
+        """Perform a comprehensive synchronization of all components with the server.
+        
+        This method synchronizes:
+        1. Quarantine buffer (samples and validation results)
+        2. Drift events and validations
+        3. Adaptation logs, snapshots, and feedback
+        4. Pending packages
+        
+        Returns:
+            Dictionary with comprehensive sync results
+        """
+        self.logger.info("Starting comprehensive synchronization with server")
+        
+        results = {
+            "success": True,
+            "components": {}
+        }
+        
+        # Step 1: Sync quarantine data
+        if QUARANTINE_AVAILABLE and self.quarantine_buffer is not None:
+            quarantine_result = self.sync_quarantine()
+            results["components"]["quarantine"] = quarantine_result
+            if not quarantine_result.get("success", False) and quarantine_result.get("error") != "Quarantine buffer not available":
+                results["success"] = False
+        
+        # Step 2: Sync drift events
+        if DRIFT_DETECTION_AVAILABLE and self.drift_detectors:
+            drift_result = self.sync_drift_events()
+            results["components"]["drift"] = drift_result
+            if not drift_result.get("success", False) and drift_result.get("error") != "Drift detection not available or no detectors configured":
+                results["success"] = False
+        
+        # Step 3: Sync adaptation components
+        if (ADAPTATION_TRACKER_AVAILABLE and self.adaptation_tracker is not None) or \
+           (STATE_MANAGER_AVAILABLE and self.state_manager is not None):
+            adaptation_result = self.sync_adaptation()
+            results["components"]["adaptation"] = adaptation_result
+            if not adaptation_result.get("success", False):
+                results["success"] = False
+        
+        # Step 4: Sync pending packages
+        package_results = self.sync_all_pending_packages()
+        if package_results:
+            success_count = sum(1 for r in package_results if r.get("success", False))
+            results["components"]["packages"] = {
+                "success": success_count == len(package_results),
+                "total": len(package_results),
+                "successful": success_count,
+                "failed": len(package_results) - success_count,
+                "details": package_results
+            }
+            if success_count < len(package_results):
+                results["success"] = False
+        
+        # Compile summary
+        components_synced = len(results["components"])
+        successful_components = sum(1 for c in results["components"].values() if c.get("success", False))
+        
+        results["summary"] = {
+            "components_synced": components_synced,
+            "successful_components": successful_components,
+            "timestamp": time.time()
+        }
+        
+        self.logger.info(f"Comprehensive synchronization completed: {successful_components}/{components_synced} components successful")
+        
+        return results
+
     def close(self) -> None:
         """Close the sync client and release resources."""
         self.logger.info("Closing sync client")

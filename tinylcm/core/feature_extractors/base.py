@@ -1,10 +1,46 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union, Tuple
+from typing import Any, Dict, List, Optional, Union, Tuple, Protocol
 import numpy as np
 
 from tinylcm.utils.logging import setup_logger
 
 logger = setup_logger(__name__)
+
+
+class FeatureExtractor(Protocol):
+    """Protocol defining the interface for feature extractors.
+    
+    Feature extractors transform input data into feature vectors suitable
+    for use with adaptive classifiers.
+    """
+    
+    def extract_features(self, input_data: Any) -> np.ndarray:
+        """Extract feature vectors from the input data.
+        
+        Args:
+            input_data: The input data to extract features from.
+                This could be images, text, sensor data, etc.
+                
+        Returns:
+            Feature vector as a numpy array
+        """
+        ...
+    
+    def get_state(self) -> Dict[str, Any]:
+        """Get the current state of the feature extractor.
+        
+        Returns:
+            Dict containing the serializable state
+        """
+        ...
+    
+    def set_state(self, state: Dict[str, Any]) -> None:
+        """Restore the feature extractor's state.
+        
+        Args:
+            state: Previously saved state dictionary
+        """
+        ...
 
 
 class BaseFeatureExtractor(ABC):
