@@ -10,6 +10,13 @@ from tinylcm.core.handlers.base import BaseAdaptiveHandler
 from tinylcm.core.drift_detection.cusum import AccuracyCUSUM
 from tinylcm.utils.logging import setup_logger
 
+# Import condensing functionality if available
+try:
+    from tinylcm.core.condensing import CondensingAlgorithm
+    CONDENSING_AVAILABLE = True
+except ImportError:
+    CONDENSING_AVAILABLE = False
+
 logger = setup_logger(__name__)
 
 
@@ -40,7 +47,9 @@ class HybridHandler(BaseAdaptiveHandler):
         cusum_delta: float = 0.1,
         use_numpy: bool = True,
         metrics_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-        adaptation_callback: Optional[Callable[[AdaptationEvent], None]] = None
+        adaptation_callback: Optional[Callable[[AdaptationEvent], None]] = None,
+        enable_condensing: bool = False,
+        condensing_method: str = "class_balanced"
     ):
         """Initialize the hybrid handler.
         
@@ -73,6 +82,14 @@ class HybridHandler(BaseAdaptiveHandler):
         
         # Buffer for tracking accuracy of validated samples
         self.validated_samples = []
+        
+        # Condensing configuration
+        self.enable_condensing = enable_condensing and CONDENSING_AVAILABLE
+        self.condensing_method = condensing_method
+        
+        if self.enable_condensing and not CONDENSING_AVAILABLE:
+            logger.warning("Condensing enabled but CondensingAlgorithm not available. Disabling condensing.")
+            self.enable_condensing = False
     
     def provide_feedback(
         self,
@@ -306,6 +323,75 @@ class HybridHandler(BaseAdaptiveHandler):
         """Clear the training samples buffer."""
         self.training_samples.clear()
         logger.debug("Cleared training samples buffer")
+        
+    def _apply_condensing(self) -> None:
+        """Apply condensing to the training samples if enabled.
+        
+        This reduces the number of training samples while trying to
+        maintain the decision boundaries and class distribution.
+        """
+        if not CONDENSING_AVAILABLE or not self.enable_condensing:
+            return
+            
+        # Skip if too few samples
+        if len(self.training_samples) < 10:
+            logger.debug("Too few samples for condensing, skipping")
+            return
+            
+        logger.debug(f"Applying condensing with method '{self.condensing_method}'")
+        
+        # Extract data from training samples
+        X, y, timestamps = self._extract_training_data()
+        
+        try:
+            # Apply condensing
+            X_condensed, y_condensed, timestamps_condensed = CondensingAlgorithm.condense_samples(
+                features=X,
+                labels=y,
+                max_size=self.max_samples,
+                method=self.condensing_method,
+                use_numpy=self.use_numpy,
+                timestamps=timestamps
+            )
+            
+            # Create new training samples deque
+            new_samples = deque(maxlen=self.max_samples)
+            for i in range(len(X_condensed)):
+                new_samples.append((X_condensed[i], y_condensed[i], timestamps_condensed[i]))
+                
+            # Replace training samples with condensed version
+            old_count = len(self.training_samples)
+            self.training_samples = new_samples
+            new_count = len(self.training_samples)
+            
+            logger.info(f"Condensed training samples from {old_count} to {new_count} using '{self.condensing_method}'")
+            
+        except Exception as e:
+            logger.error(f"Error during sample condensing: {str(e)}")
+            
+    def _extract_training_data(self) -> Tuple[np.ndarray, List[Any], List[float]]:
+        """Extract features, labels, and timestamps from training samples.
+        
+        Returns:
+            Tuple of (features_array, labels_list, timestamps_list)
+        """
+        if not self.training_samples:
+            return np.array([]), [], []
+            
+        features = []
+        labels = []
+        timestamps = []
+        
+        for f, l, ts in self.training_samples:
+            features.append(f)
+            labels.append(l)
+            timestamps.append(ts)
+            
+        # Convert features to numpy array if needed
+        if self.use_numpy and not isinstance(features[0], np.ndarray):
+            features = np.array(features)
+            
+        return features, labels, timestamps
     
     def get_state(self) -> Dict[str, Any]:
         """Get the current state of the handler.
@@ -340,7 +426,9 @@ class HybridHandler(BaseAdaptiveHandler):
             "use_numpy": self.use_numpy,
             "training_samples": serializable_training_samples,
             "validated_samples": self.validated_samples,
-            "accuracy_cusum": drift_detector_state
+            "accuracy_cusum": drift_detector_state,
+            "enable_condensing": self.enable_condensing,
+            "condensing_method": self.condensing_method
         }
         
         # Combine states
@@ -358,6 +446,8 @@ class HybridHandler(BaseAdaptiveHandler):
         # Restore handler-specific state
         self.batch_size = state.get("batch_size", self.batch_size)
         self.use_numpy = state.get("use_numpy", self.use_numpy)
+        self.enable_condensing = state.get("enable_condensing", self.enable_condensing)
+        self.condensing_method = state.get("condensing_method", self.condensing_method)
         
         # Restore training samples
         self.training_samples = deque(maxlen=self.max_samples)
@@ -380,6 +470,10 @@ class HybridHandler(BaseAdaptiveHandler):
             drift_detector_state = state.get("accuracy_cusum", {})
             if drift_detector_state:
                 self.accuracy_cusum.set_state(drift_detector_state)
+        
+        # Apply condensing if enabled
+        if self.enable_condensing and CONDENSING_AVAILABLE:
+            self._apply_condensing()
         
         # Train the classifier with the restored samples
         training_data = self._extract_training_data()

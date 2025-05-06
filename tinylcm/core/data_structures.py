@@ -1,8 +1,96 @@
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, List, Optional, Dict, Union
 import time
 import numpy as np
 from uuid import uuid4
+
+
+class QuarantineStatus(str, Enum):
+    """Status of a sample in the quarantine buffer."""
+    PENDING = "pending"      # Awaiting analysis
+    PROCESSED = "processed"  # Processed by heuristic adapter
+    SYNCED = "synced"        # Sent to server for validation
+    VALIDATED = "validated"  # Received validation from server
+    ADAPTED = "adapted"      # Used for adaptation
+    REJECTED = "rejected"    # Rejected by validation
+
+
+@dataclass
+class QuarantinedSample:
+    """A sample that has been quarantined due to potential drift."""
+    sample: FeatureSample
+    reason: str
+    status: QuarantineStatus = QuarantineStatus.PENDING
+    quarantine_time: float = field(default_factory=time.time)
+    processed_time: Optional[float] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "sample": self.sample.to_dict() if self.sample else None,
+            "reason": self.reason,
+            "status": self.status.value if isinstance(self.status, QuarantineStatus) else self.status,
+            "quarantine_time": self.quarantine_time,
+            "processed_time": self.processed_time
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'QuarantinedSample':
+        """Create from dictionary after deserialization."""
+        sample_dict = data.get("sample")
+        sample = FeatureSample.from_dict(sample_dict) if sample_dict else None
+        status_value = data.get("status", QuarantineStatus.PENDING.value)
+        status = QuarantineStatus(status_value) if isinstance(status_value, str) else status_value
+        
+        return cls(
+            sample=sample,
+            reason=data.get("reason", "Unknown"),
+            status=status,
+            quarantine_time=data.get("quarantine_time", time.time()),
+            processed_time=data.get("processed_time")
+        )
+
+
+@dataclass
+class AdaptationAction:
+    """An action resulting from heuristic adaptation."""
+    sample_id: str
+    features: np.ndarray
+    potential_label: Any
+    original_label: Any
+    reason: str
+    confidence: float = 0.0
+    timestamp: float = field(default_factory=time.time)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "sample_id": self.sample_id,
+            "features": self.features.tolist() if isinstance(self.features, np.ndarray) else self.features,
+            "potential_label": self.potential_label,
+            "original_label": self.original_label,
+            "reason": self.reason,
+            "confidence": self.confidence,
+            "timestamp": self.timestamp
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'AdaptationAction':
+        """Create from dictionary after deserialization."""
+        features = data.get("features")
+        if features and not isinstance(features, np.ndarray):
+            features = np.array(features)
+            
+        return cls(
+            sample_id=data.get("sample_id", ""),
+            features=features,
+            potential_label=data.get("potential_label"),
+            original_label=data.get("original_label"),
+            reason=data.get("reason", "Unknown"),
+            confidence=data.get("confidence", 0.0),
+            timestamp=data.get("timestamp", time.time())
+        )
 
 
 @dataclass

@@ -1004,9 +1004,26 @@ class AdaptivePipeline(InferencePipeline):
             # Log heuristic adaptations
             if self.adaptation_tracker:
                 for label, sample_ids in grouped_samples.items():
+                    # Get original labels from adapted samples for tracking
+                    original_labels = {}
+                    for sample in adapted_samples:
+                        if sample.sample_id in sample_ids:
+                            # Use prediction as original label (before adaptation)
+                            original_labels[sample.sample_id] = sample.prediction
+                    
+                    # Determine most common original label
+                    original_label = None
+                    if original_labels:
+                        label_counts = {}
+                        for orig_label in original_labels.values():
+                            if orig_label is not None:
+                                label_counts[orig_label] = label_counts.get(orig_label, 0) + 1
+                        if label_counts:
+                            original_label = max(label_counts.items(), key=lambda x: x[1])[0]
+                    
                     self.adaptation_tracker.log_heuristic_adaptation(
                         samples=sample_ids,
-                        original_label=None,  # Not tracked in this implementation
+                        original_label=original_label,
                         new_label=label,
                         pre_snapshot_id=snapshot_ids.get(label),
                         cluster_size=len(sample_ids)

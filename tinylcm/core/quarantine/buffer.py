@@ -8,10 +8,11 @@ adapters for on-device adaptation.
 
 from collections import deque
 import time
-from typing import Any, Dict, List, Optional
+import numpy as np
+from typing import Any, Dict, List, Optional, Union
 
 from tinylcm.utils.logging import setup_logger
-from tinylcm.core.data_structures import FeatureSample
+from tinylcm.core.data_structures import FeatureSample, QuarantinedSample, QuarantineStatus
 
 logger = setup_logger(__name__)
 
@@ -211,3 +212,86 @@ class QuarantineBuffer:
             logger.debug(f"Removed {removed} expired samples from quarantine buffer")
             
         return removed
+        
+    def get_samples_for_sync(self) -> List[Dict[str, Any]]:
+        """Get samples that need to be synchronized with server.
+        
+        Returns:
+            List of samples ready for server synchronization
+        """
+        samples_to_sync = []
+        
+        for entry in self.buffer:
+            # Only sync samples that are processed but not yet synced
+            if entry.get('processed', False) and not entry.get('synced', False):
+                # Create a serializable version of the sample
+                sample = entry['sample']
+                sample_dict = {
+                    'sample_id': sample.sample_id,
+                    'features': sample.features.tolist() if isinstance(sample.features, np.ndarray) else sample.features,
+                    'prediction': sample.prediction,
+                    'timestamp': entry['timestamp'],
+                    'reason': entry['reason']
+                }
+                samples_to_sync.append(sample_dict)
+                
+        return samples_to_sync
+        
+    def mark_as_synced(self, sample_ids: List[str]) -> int:
+        """Mark samples as synchronized with server.
+        
+        Args:
+            sample_ids: List of sample IDs to mark as synced
+            
+        Returns:
+            Number of samples marked as synced
+        """
+        # Convert to set for faster lookups
+        ids_to_mark = set(sample_ids)
+        
+        # Keep track of how many we marked
+        marked = 0
+        
+        # Mark samples as synced
+        for entry in self.buffer:
+            sample = entry['sample']
+            if sample.sample_id in ids_to_mark and not entry.get('synced', False):
+                entry['synced'] = True
+                marked += 1
+        
+        logger.debug(f"Marked {marked} samples as synced in quarantine buffer")
+        return marked
+        
+    def process_validation_results(self, validation_results: List[Dict[str, Any]]) -> int:
+        """Process validation results from server.
+        
+        Args:
+            validation_results: List of validation results from server
+            
+        Returns:
+            Number of samples updated with validation results
+        """
+        # Map of sample IDs to validation results for faster lookups
+        validation_map = {result['sample_id']: result for result in validation_results}
+        
+        # Counter for updated samples
+        updated = 0
+        
+        # Update samples with validation results
+        for entry in self.buffer:
+            sample = entry['sample']
+            if sample.sample_id in validation_map:
+                result = validation_map[sample.sample_id]
+                
+                # Update the sample status
+                entry['validated'] = True
+                entry['validation_result'] = result
+                
+                # Update the sample with the validated label if provided
+                if 'validated_label' in result:
+                    sample.label = result['validated_label']
+                    
+                updated += 1
+        
+        logger.debug(f"Updated {updated} samples with validation results in quarantine buffer")
+        return updated
