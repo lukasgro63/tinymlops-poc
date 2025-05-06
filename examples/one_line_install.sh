@@ -166,29 +166,45 @@ cd "$SCRIPT_DIR"
 # Stelle sicher, dass die lokalen utils vor der TinyLCM-Bibliothek importiert werden
 export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
 
-# Erstelle .pth Datei für den lokalen utils-Pfad im site-packages-Verzeichnis
-SITE_PACKAGES_DIR=$(python3 -c "import site; print(site.getsitepackages()[0])")
-if [ -d "$SITE_PACKAGES_DIR" ]; then
-    echo "# Pfad zu den lokalen utils für TinyLCM-Beispiele" > "$SITE_PACKAGES_DIR/tinylcm-examples.pth"
-    echo "$SCRIPT_DIR" >> "$SITE_PACKAGES_DIR/tinylcm-examples.pth"
-    echo "Site-packages Pfad konfiguriert."
-fi
+# Erstelle lokalen .pth Datei im Benutzerverzeichnis
+USER_SITE_DIR=$(python3 -c "import site; print(site.USER_SITE)")
+mkdir -p "$USER_SITE_DIR"
+cat > "$USER_SITE_DIR/tinylcm-examples.pth" <<EOL
+# Pfad zu den lokalen utils für TinyLCM-Beispiele
+$SCRIPT_DIR
+EOL
+echo "Lokaler Python-Pfad konfiguriert."
 
 echo "Starte TinyLCM Szenario 1 (Autonomes Monitoring)..."
 cd "$SCRIPT_DIR/scenario1_monitoring_only"
-python3 -c "
+
+# Einfaches Python-Skript erstellen, das den Pfad korrekt setzt
+cat > "$SCRIPT_DIR/scenario1_monitoring_only/run_with_path.py" <<EOL
+#!/usr/bin/env python3
 import sys
 import os
 
-# Füge den Beispiel-Pfad explizit am Anfang des Suchpfads hinzu
-example_path = os.path.dirname(os.path.dirname(os.path.abspath('__file__')))
+# Füge den Root-Pfad zum Beispielverzeichnis hinzu
+example_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if example_path not in sys.path:
     sys.path.insert(0, example_path)
     print(f'Pfad {example_path} zum Python-Suchpfad hinzugefügt')
 
-# Starte main_scenario1.py
-exec(open('main_scenario1.py').read())
-"
+# Konfiguriere Pfad für die lokalen utils
+utils_path = os.path.join(example_path, 'utils')
+if utils_path not in sys.path:
+    sys.path.insert(0, utils_path)
+    print(f'Pfad {utils_path} zum Python-Suchpfad hinzugefügt')
+
+# Lokalen Pfad vor der installierten TinyLCM-Bibliothek priorisieren
+import main_scenario1
+EOL
+
+# Skript ausführbar machen
+chmod +x "$SCRIPT_DIR/scenario1_monitoring_only/run_with_path.py"
+
+# Starte das Hilfsskript
+python3 run_with_path.py
 EOF
 chmod +x "$LAUNCH_SCRIPT"
 echo -e "${GREEN}✓ Verbessertes Launch-Skript erstellt${NC}"
