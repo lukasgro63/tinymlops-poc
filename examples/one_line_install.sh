@@ -19,7 +19,7 @@ echo -e "${BLUE}================================================================
 # Verzeichnisse definieren
 BASE_DIR="$HOME/tinylcm-examples"
 TEMP_DIR="$HOME/temp_tinylcm"
-REPO_URL="https://github.com/lukasgrodmeier/tinymlops-poc.git"
+REPO_URL="https://github.com/lukasgro63/tinymlops-poc.git"
 
 # Überprüfen, ob wir auf einem Raspberry Pi laufen
 IS_RASPBERRY_PI=false
