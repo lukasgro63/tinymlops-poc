@@ -128,10 +128,27 @@ if ! python3 -c "import cv2" 2>/dev/null; then
     python3 -m pip install --break-system-packages opencv-python-headless
 fi
 
-# Installiere TinyLCM als editable package
+# Installiere TinyLCM als editable package und stelle sicher, dass es korrekt ist
 cd "$BASE_DIR/tinylcm"
 python3 -m pip install -e . --break-system-packages
 cd "$BASE_DIR"
+
+# Stelle sicher, dass tinylcm im PYTHONPATH ist
+echo -e "${YELLOW}Prüfe, ob tinylcm korrekt installiert ist...${NC}"
+if ! python3 -c "import tinylcm; print(f'TinyLCM Version: {tinylcm.__version__}')" 2>/dev/null; then
+  echo -e "${YELLOW}TinyLCM-Modul nicht gefunden. Versuche direkten PYTHONPATH-Fix...${NC}"
+  # Erstelle kleine PYTHONPATH-Hilfsdatei für zukünftige Verwendung
+  cat > "$BASE_DIR/set_pythonpath.sh" <<'EOL'
+#!/bin/bash
+# Hilfsscript für die korrekte Einstellung des PYTHONPATH
+export PYTHONPATH="$HOME/tinylcm-examples:$HOME/tinylcm-examples/tinylcm:$PYTHONPATH"
+EOL
+  chmod +x "$BASE_DIR/set_pythonpath.sh"
+  echo -e "${GREEN}✓ PYTHONPATH-Hilfsdatei erstellt (verwenden Sie 'source set_pythonpath.sh' wenn Sie Probleme haben)${NC}"
+else
+  echo -e "${GREEN}✓ TinyLCM-Modul korrekt installiert${NC}"
+fi
+
 echo -e "${GREEN}✓ Python-Pakete installiert${NC}"
 
 # 5. Konfiguration, Fehlerbehebung und Launch-Skript erstellen
@@ -147,7 +164,7 @@ if [ -f "$BACKUP_CONFIG" ]; then
     echo -e "${GREEN}✓ Konfiguration wiederhergestellt${NC}"
 else
     # Bearbeite Server-URL entsprechend für lokalen Test
-    sed -i 's/"server_url": "http:\/\/192.168.0.66:8000"/"server_url": "http:\/\/localhost:8000"/' "$CONFIG_FILE"
+    sed -i 's/"server_url": "http:\/\/192.168.0.66:8000"/"server_url": "http:\/\/192.168.0.66:8000"/' "$CONFIG_FILE"
     echo -e "${GREEN}✓ Konfiguration angepasst${NC}"
 fi
 

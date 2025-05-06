@@ -1,0 +1,134 @@
+# Ersetzt den Launch-Skript-Teil in one_line_install.sh mit diesem Abschnitt
+
+# Erstelle ein verbessertes Launch-Skript, das den Beispiel-Code korrekt startet
+echo -e "${YELLOW}Erstelle ein verbessertes Launch-Skript...${NC}"
+
+LAUNCH_SCRIPT="$BASE_DIR/launch.sh"
+cat > "$LAUNCH_SCRIPT" <<'EOF'
+#!/bin/bash
+# Start-Skript für TinyLCM Beispiel Szenario 1
+
+# Verwende die absolute Verzeichnis-Referenz
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Stelle sicher, dass Python alle Pfade korrekt findet
+export PYTHONPATH="$SCRIPT_DIR:$SCRIPT_DIR/tinylcm:$HOME/.local/lib/python3.11/site-packages:$PYTHONPATH"
+
+echo "Starte TinyLCM Szenario 1 (Autonomes Monitoring)..."
+
+# Erstelle ein verbessertes Wrapper-Skript
+cat > "$SCRIPT_DIR/run_tinylcm.py" <<'EOL'
+#!/usr/bin/env python3
+"""
+Wrapper für TinyLCM Szenario 1 mit korrekter Pfadkonfiguration
+"""
+import os
+import sys
+import importlib.util
+import traceback
+from pathlib import Path
+
+def setup_paths():
+    """Konfiguriere alle nötigen Python-Pfade."""
+    # Bestimme absolute Pfade
+    script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+    utils_path = script_dir / "utils"
+    tinylcm_path = script_dir / "tinylcm"
+    scenario_path = script_dir / "scenario1_monitoring_only"
+    
+    # Stelle sicher, dass alle Pfade im sys.path sind
+    paths_to_add = [
+        str(script_dir),
+        str(utils_path),
+        str(tinylcm_path),
+        str(scenario_path)
+    ]
+    
+    for path in paths_to_add:
+        if path not in sys.path:
+            sys.path.insert(0, path)
+            print(f"Pfad hinzugefügt: {path}")
+    
+    # Versuche zu verifizieren, dass tinylcm gefunden werden kann
+    try:
+        site_packages = Path(os.path.expanduser("~/.local/lib/python3.11/site-packages"))
+        if site_packages.exists() and str(site_packages) not in sys.path:
+            sys.path.append(str(site_packages))
+            print(f"Site-packages hinzugefügt: {site_packages}")
+    except Exception as e:
+        print(f"Konnte site-packages nicht hinzufügen: {e}")
+
+def debug_imports():
+    """Überprüfe, ob alle nötigen Module geladen werden können."""
+    modules_to_check = [
+        "numpy", 
+        "cv2", 
+        "tinylcm"
+    ]
+    
+    print("\n--- Importierte Module überprüfen ---")
+    for module_name in modules_to_check:
+        try:
+            module = importlib.import_module(module_name)
+            print(f"✓ {module_name} erfolgreich geladen: {getattr(module, '__file__', 'unbekannter Pfad')}")
+        except ImportError as e:
+            print(f"✗ Konnte {module_name} nicht laden: {e}")
+    
+    print("\n--- Überprüfe utils Module ---")
+    try:
+        # Versuche, die lokalen utils zu importieren
+        import utils.camera_handler
+        print(f"✓ utils.camera_handler erfolgreich geladen")
+    except ImportError as e:
+        print(f"✗ Konnte utils.camera_handler nicht laden: {e}")
+        try:
+            # Alternativer Versuch
+            sys.path.insert(0, str(Path(os.path.dirname(os.path.abspath(__file__))) / "utils"))
+            import camera_handler
+            print(f"✓ camera_handler erfolgreich geladen: {camera_handler.__file__}")
+        except ImportError as e:
+            print(f"✗ Konnte auch camera_handler nicht direkt laden: {e}")
+    
+    print("\n--- Python-Suchpfade ---")
+    for i, path in enumerate(sys.path):
+        print(f"{i}: {path}")
+
+def run_main_script():
+    """Führe das Hauptskript aus."""
+    try:
+        main_path = Path(os.path.dirname(os.path.abspath(__file__))) / "scenario1_monitoring_only" / "main_scenario1.py"
+        print(f"\n--- Führe Skript aus: {main_path} ---\n")
+        
+        # Direktes Ausführen über exec
+        with open(main_path) as f:
+            # Vorbereitung der Umgebung für main_scenario1.py
+            os.chdir(main_path.parent)
+            globals_dict = {
+                "__file__": str(main_path),
+                "__name__": "__main__",
+                "sys": sys,
+                "os": os
+            }
+            
+            # Kompiliere den Code, um ihn auszuführen
+            code = compile(f.read(), str(main_path), 'exec')
+            exec(code, globals_dict)
+    except Exception as e:
+        print(f"Fehler beim Ausführen des Hauptskripts: {e}")
+        traceback.print_exc()
+
+if __name__ == "__main__":
+    setup_paths()
+    debug_imports()
+    run_main_script()
+EOL
+
+# Mache das Skript ausführbar
+chmod +x "$SCRIPT_DIR/run_tinylcm.py"
+
+# Starte das Skript
+python3 "$SCRIPT_DIR/run_tinylcm.py"
+EOF
+chmod +x "$LAUNCH_SCRIPT"
+echo -e "${GREEN}✓ Verbessertes Launch-Skript erstellt${NC}"
