@@ -11,7 +11,7 @@ import requests
 
 from tinylcm.client.connection_manager import ConnectionManager
 from tinylcm.client.sync_interface import SyncInterface
-from tinylcm.utils.errors import ConnectionError, SyncError
+from tinylcm.utils.errors import TinyLCMConnectionError, SyncError
 from tinylcm.utils.logging import setup_logger
 from tinylcm.utils.versioning import calculate_file_hash
 
@@ -109,7 +109,7 @@ class SyncClient:
         if auto_register:
             try:
                 self.register_device()
-            except ConnectionError as e:
+            except TinyLCMConnectionError as e:
                 self.logger.warning(f"Auto-registration failed: {str(e)}. Will retry on next connection.")
     
     @staticmethod
@@ -160,11 +160,11 @@ class SyncClient:
             else:
                 error_msg = f"Registration failed: {response.status_code} - {response.text}"
                 self.logger.error(error_msg)
-                raise ConnectionError(error_msg)
+                raise TinyLCMConnectionError(error_msg)
         except requests.RequestException as e:
             error_msg = f"Registration request failed: {str(e)}"
             self.logger.error(error_msg)
-            raise ConnectionError(error_msg)
+            raise TinyLCMConnectionError(error_msg)
     
     def check_server_status(self) -> Dict[str, Any]:
         self.logger.debug("Checking server status")
@@ -175,11 +175,11 @@ class SyncClient:
             else:
                 error_msg = f"Server status check failed: {response.status_code} - {response.text}"
                 self.logger.error(error_msg)
-                raise ConnectionError(error_msg)
+                raise TinyLCMConnectionError(error_msg)
         except requests.RequestException as e:
             error_msg = f"Server status request failed: {str(e)}"
             self.logger.error(error_msg)
-            raise ConnectionError(error_msg)
+            raise TinyLCMConnectionError(error_msg)
     
     def send_package(self, package_id: str) -> bool:
         self.logger.info(f"Preparing to send package: {package_id}")
@@ -253,11 +253,11 @@ class SyncClient:
                             server_id="none", 
                             status="error"
                         )
-                        raise ConnectionError(error_msg)
+                        raise TinyLCMConnectionError(error_msg)
             except Exception as e:
                 error_msg = f"Package upload request failed: {str(e)}"
                 self.logger.error(error_msg)
-                raise ConnectionError(error_msg)
+                raise TinyLCMConnectionError(error_msg)
         except SyncError as e:
             self.logger.error(f"Error preparing package {package_id}: {str(e)}")
             raise

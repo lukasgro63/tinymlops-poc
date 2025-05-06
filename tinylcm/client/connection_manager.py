@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import requests
 
-from tinylcm.utils.errors import ConnectionError
+from tinylcm.utils.errors import TinyLCMConnectionError
 from tinylcm.utils.logging import setup_logger
 
 
@@ -79,7 +79,7 @@ class ConnectionManager:
             retry_count += 1
         error_msg = f"Failed to connect after {self.max_retries} attempts"
         self.logger.error(error_msg)
-        raise ConnectionError(error_msg)
+        raise TinyLCMConnectionError(error_msg)
     
     def is_connected(self) -> bool:
         if self.last_connection_time is None:
