@@ -2,9 +2,6 @@
 # Simple One-Line Installer for TinyLCM Examples
 # Usage: curl -sSL https://raw.githubusercontent.com/lukasgro63/tinymlops-poc/main/examples/one_line_install.sh | bash
 
-# Exit on errors but don't exit on unbound variable
-set -e
-
 # Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -72,6 +69,24 @@ cd "$HOME"
 echo -e "${GREEN}✓ Python packages installed${NC}"
 
 echo -e "\n${YELLOW}[4/4] Creating launch script...${NC}"
+
+# First, patch all main Python files to fix imports
+for main_file in $(find "$BASE_DIR/examples" -name "main_*.py"); do
+  # Add import path fix to the file if not already there
+  if ! grep -q "sys.path.append" "$main_file"; then
+    echo -e "${YELLOW}Fixing imports in $(basename "$main_file")...${NC}"
+    # Create a temporary file
+    TMP_FILE=$(mktemp)
+    # Add the import fix after the first 3 lines
+    head -n 3 "$main_file" > "$TMP_FILE"
+    echo -e "# Fix imports by adding parent directory to path\nimport os, sys\nsys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))" >> "$TMP_FILE"
+    tail -n +4 "$main_file" >> "$TMP_FILE"
+    # Replace the original file
+    mv "$TMP_FILE" "$main_file"
+    chmod +x "$main_file"
+  fi
+done
+
 # Create a launch script
 cat > "$BASE_DIR/launch.sh" <<'EOL'
 #!/bin/bash
@@ -80,18 +95,6 @@ cat > "$BASE_DIR/launch.sh" <<'EOL'
 # Set base directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
-
-# Setup PYTHONPATH
-export PYTHONPATH="$SCRIPT_DIR:$SCRIPT_DIR/examples:$SCRIPT_DIR/examples/utils:$SCRIPT_DIR/tinylcm"
-
-# Simple function to fix imports in main scripts
-fix_imports() {
-  local main_script="$1"
-  local script_dir="$(dirname "$main_script")"
-  
-  # Add import fix at the top of the script 
-  sed -i '3i # Add parent directory to path for imports\nimport os, sys\nsys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))' "$main_script"
-}
 
 # Find scenarios
 echo -e "\033[0;34m===================================================================\033[0m"
@@ -107,11 +110,6 @@ while read -r main_script; do
   if [ -n "$main_script" ]; then
     scenario_dir="$(dirname "$main_script")"
     scenario_name="$(basename "$scenario_dir")"
-    
-    # Fix imports in the script if needed
-    if ! grep -q "sys.path.append" "$main_script"; then
-      fix_imports "$main_script"
-    fi
     
     SCENARIOS+=("$main_script")
     SCENARIO_NAMES+=("$scenario_name")
@@ -149,20 +147,15 @@ EOL
 chmod +x "$BASE_DIR/launch.sh"
 echo -e "${GREEN}✓ Launch script created${NC}"
 
-# Create a PYTHONPATH helper script
-cat > "$BASE_DIR/setup_env.sh" <<'EOL'
-#!/bin/bash
-# Setup environment for TinyLCM
-
-# Set Python path
-export PYTHONPATH="$HOME/tinymlops:$HOME/tinymlops/examples:$HOME/tinymlops/examples/utils:$HOME/tinymlops/tinylcm"
-
-echo "Environment variables set for TinyLCM"
-echo "Your PYTHONPATH is now:"
-echo "$PYTHONPATH"
-EOL
-
-chmod +x "$BASE_DIR/setup_env.sh"
+# Create directories required by scenarios
+for scenario_dir in $(find "$BASE_DIR/examples" -name "scenario*" -type d); do
+  mkdir -p "$scenario_dir/logs"
+  mkdir -p "$scenario_dir/state"
+  mkdir -p "$scenario_dir/debug"
+  mkdir -p "$scenario_dir/drift_images"
+  mkdir -p "$scenario_dir/sync_data"
+  echo -e "${GREEN}✓ Created directories for $(basename "$scenario_dir")${NC}"
+done
 
 # Conclusion
 echo -e "\n${BLUE}====================================================================${NC}"
@@ -173,8 +166,5 @@ echo -e "${GREEN}$BASE_DIR${NC}"
 
 echo -e "\n${YELLOW}To launch an example:${NC}"
 echo -e "${GREEN}$BASE_DIR/launch.sh${NC}"
-
-echo -e "\n${YELLOW}To ensure the correct Python path, first run:${NC}"
-echo -e "${GREEN}source $BASE_DIR/setup_env.sh${NC}"
 
 echo -e "\n${GREEN}Enjoy using TinyLCM!${NC}"
