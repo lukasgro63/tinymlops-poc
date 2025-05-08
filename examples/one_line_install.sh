@@ -59,11 +59,7 @@ echo -e "\n${YELLOW}[3/4] Installing Python requirements...${NC}"
 
 # Create requirements.txt file
 cat > "$BASE_DIR/requirements.txt" <<EOL
-numpy>=1.20.0
-pillow>=8.0.0
-requests>=2.25.0
-tflite-runtime>=2.7.0
-opencv-python-headless>=4.5.0
+
 psutil>=5.8.0
 EOL
 
