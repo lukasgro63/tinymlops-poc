@@ -2,9 +2,6 @@
 # TinyLCM One-Line Installer for Raspberry Pi Zero 2W
 # Usage: curl -sSL https://raw.githubusercontent.com/lukasgro63/tinymlops-poc/main/examples/one_line_install.sh | bash
 
-# Safe PYTHONPATH initialization
-PYTHONPATH=${PYTHONPATH:-}
-
 # Color codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -20,9 +17,10 @@ echo -e "${BLUE}================================================================
 BASE_DIR="$HOME/tinymlops"
 TEMP_DIR="$HOME/temp_tinymlops"
 REPO_URL="https://github.com/lukasgro63/tinymlops-poc.git"
+VENV_DIR="$BASE_DIR/venv"
 
 # 1. Clone repository
-echo -e "\n${YELLOW}[1/4] Cloning repository...${NC}"
+echo -e "\n${YELLOW}[1/5] Cloning repository...${NC}"
 if [ -d "$BASE_DIR" ]; then
   echo -e "${YELLOW}Existing installation found in $BASE_DIR${NC}"
   read -p "Would you like to remove it and reinstall? (y/n) " -n 1 -r
@@ -51,15 +49,18 @@ cp -r "$TEMP_DIR/examples" "$BASE_DIR/"
 rm -rf "$TEMP_DIR"
 echo -e "${GREEN}✓ Repository cloned and files copied${NC}"
 
-# 2. Install required packages
-echo -e "\n${YELLOW}[2/4] Installing required packages...${NC}"
+# 2. Install required system packages
+echo -e "\n${YELLOW}[2/5] Installing required system packages...${NC}"
 sudo apt update
-sudo apt install -y git python3 python3-pip libopenjp2-7 libatlas-base-dev \
+sudo apt install -y git python3 python3-pip python3-venv libopenjp2-7 libatlas-base-dev \
   python3-opencv python3-numpy python3-picamera2 python3-libcamera python3-psutil
-echo -e "${GREEN}✓ Required packages installed${NC}"
+echo -e "${GREEN}✓ Required system packages installed${NC}"
 
-# 3. Install Python requirements
-echo -e "\n${YELLOW}[3/4] Installing Python requirements...${NC}"
+# 3. Set up Python virtual environment
+echo -e "\n${YELLOW}[3/5] Setting up Python virtual environment...${NC}"
+# Create virtual environment
+python3 -m venv "$VENV_DIR"
+source "$VENV_DIR/bin/activate"
 
 # Create requirements.txt file
 cat > "$BASE_DIR/requirements.txt" <<EOL
@@ -71,18 +72,19 @@ opencv-python-headless>=4.5.0
 psutil>=5.8.0
 EOL
 
-# Install Python requirements
-echo -e "${YELLOW}Installing Python packages (this may take a few minutes)...${NC}"
-python3 -m pip install --user -r "$BASE_DIR/requirements.txt"
+# Install Python requirements in the virtual environment
+echo -e "${YELLOW}Installing Python packages in virtual environment (this may take a few minutes)...${NC}"
+pip install -r "$BASE_DIR/requirements.txt"
 
 # Install tinylcm in development mode
 cd "$BASE_DIR/tinylcm"
-python3 -m pip install --user -e .
+pip install -e .
 cd "$HOME"
-echo -e "${GREEN}✓ Python packages installed${NC}"
+deactivate  # Deactivate the virtual environment
+echo -e "${GREEN}✓ Python packages installed in virtual environment${NC}"
 
-# 4. Create directories and fix imports
-echo -e "\n${YELLOW}[4/4] Setting up directories and fixing scripts...${NC}"
+# 4. Create directories and fix symlinks
+echo -e "\n${YELLOW}[4/5] Setting up directories and fixing imports...${NC}"
 
 # Create necessary directories for scenarios
 for scenario_dir in $(find "$BASE_DIR/examples" -name "scenario*" -type d); do
@@ -100,7 +102,13 @@ for scenario_dir in $(find "$BASE_DIR/examples" -name "scenario*" -type d); do
   ln -sf ../utils "$scenario_dir/utils"
 done
 
-# Create a modified version of config file with absolute paths
+# Create a symlink to tinylcm in the examples directory for relative imports
+echo -e "${YELLOW}Creating tinylcm symlink...${NC}"
+cd "$BASE_DIR/examples"
+ln -sf ../tinylcm tinylcm
+cd "$HOME"
+
+# Update paths in config files
 for config_file in $(find "$BASE_DIR/examples" -name "config*.json"); do
   echo -e "${YELLOW}Updating paths in $(basename "$config_file")...${NC}"
   
@@ -114,19 +122,25 @@ for config_file in $(find "$BASE_DIR/examples" -name "config*.json"); do
   echo -e "${GREEN}✓ Updated paths in config file${NC}"
 done
 
-# Create a simple launch script
-cat > "$BASE_DIR/launch.sh" <<'EOL'
+# 5. Create launcher scripts
+echo -e "\n${YELLOW}[5/5] Creating launcher scripts...${NC}"
+
+# Create a simple launcher script that activates the virtual environment
+cat > "$BASE_DIR/launch.sh" <<EOL
 #!/bin/bash
 # TinyLCM Launcher Script
 
 # Set base directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+cd "\$SCRIPT_DIR"
+
+# Activate virtual environment
+source "\$SCRIPT_DIR/venv/bin/activate"
 
 # Find scenarios
-echo -e "\033[0;34m===================================================================\033[0m"
-echo -e "\033[0;34m                    TinyLCM Example Launcher                       \033[0m"
-echo -e "\033[0;34m===================================================================\033[0m"
+echo -e "${BLUE}====================================================================${NC}"
+echo -e "${BLUE}                    TinyLCM Example Launcher                       ${NC}"
+echo -e "${BLUE}====================================================================${NC}"
 
 echo -e "\nAvailable scenarios:"
 
@@ -134,49 +148,52 @@ echo -e "\nAvailable scenarios:"
 declare -a SCENARIOS SCENARIO_NAMES
 i=1
 while read -r main_script; do
-  if [ -n "$main_script" ]; then
-    scenario_dir="$(dirname "$main_script")"
-    scenario_name="$(basename "$scenario_dir")"
+  if [ -n "\$main_script" ]; then
+    scenario_dir="\$(dirname "\$main_script")"
+    scenario_name="\$(basename "\$scenario_dir")"
     
-    SCENARIOS+=("$main_script")
-    SCENARIO_NAMES+=("$scenario_name")
-    echo -e "  \033[0;32m$i\033[0m. $scenario_name"
-    i=$((i+1))
+    SCENARIOS+=("\$main_script")
+    SCENARIO_NAMES+=("\$scenario_name")
+    echo -e "  ${GREEN}\$i${NC}. \$scenario_name"
+    i=\$((i+1))
   fi
-done < <(find "$SCRIPT_DIR/examples" -name "main_*.py" -type f | sort)
+done < <(find "\$SCRIPT_DIR/examples" -name "main_*.py" -type f | sort)
 
-if [ ${#SCENARIOS[@]} -eq 0 ]; then
-  echo -e "\033[0;31mNo scenarios found!\033[0m"
+if [ \${#SCENARIOS[@]} -eq 0 ]; then
+  echo -e "${RED}No scenarios found!${NC}"
   exit 1
 fi
 
 # Ask user to select a scenario
-echo -e "\nPlease select a scenario to run (1-${#SCENARIOS[@]}):"
+echo -e "\nPlease select a scenario to run (1-\${#SCENARIOS[@]}):"
 read -r selection
 
 # Validate selection
-if ! [[ "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt ${#SCENARIOS[@]} ]; then
-  echo -e "\033[0;31mInvalid selection. Please enter a number between 1 and ${#SCENARIOS[@]}.\033[0m"
+if ! [[ "\$selection" =~ ^[0-9]+\$ ]] || [ "\$selection" -lt 1 ] || [ "\$selection" -gt \${#SCENARIOS[@]} ]; then
+  echo -e "${RED}Invalid selection. Please enter a number between 1 and \${#SCENARIOS[@]}.${NC}"
   exit 1
 fi
 
 # Get the selected scenario
-selected_script="${SCENARIOS[$((selection-1))]}"
-selected_name="${SCENARIO_NAMES[$((selection-1))]}"
+selected_script="\${SCENARIOS[\$((selection-1))]}"
+selected_name="\${SCENARIO_NAMES[\$((selection-1))]}"
 
-echo -e "\nStarting \033[0;32m$selected_name\033[0m..."
+echo -e "\nStarting ${GREEN}\$selected_name${NC}..."
 
-# Run the script from its own directory
-scenario_dir="$(dirname "$selected_script")"
-script_name="$(basename "$selected_script")"
-cd "$scenario_dir"
-python3 "./$script_name"
+# Run the script from its own directory with venv activated
+scenario_dir="\$(dirname "\$selected_script")"
+script_name="\$(basename "\$selected_script")"
+cd "\$scenario_dir"
+python "\$script_name"
+
+# Deactivate virtual environment when done
+deactivate
 EOL
 
 chmod +x "$BASE_DIR/launch.sh"
 echo -e "${GREEN}✓ Launch script created${NC}"
 
-# Create a convenient run script in each scenario directory
+# Create individual run scripts for each scenario
 for scenario_dir in $(find "$BASE_DIR/examples" -name "scenario*" -type d); do
   scenario_name=$(basename "$scenario_dir")
   main_script=$(find "$scenario_dir" -name "main_*.py" -type f | head -n 1)
@@ -191,8 +208,14 @@ for scenario_dir in $(find "$BASE_DIR/examples" -name "scenario*" -type d); do
 # Make sure we're in the right directory
 cd "\$(dirname "\$0")"
 
+# Activate virtual environment
+source "$BASE_DIR/venv/bin/activate"
+
 # Run the main script
-python3 ./$script_name
+python "./$script_name"
+
+# Deactivate virtual environment when done
+deactivate
 EOL
     chmod +x "$scenario_dir/run.sh"
     echo -e "${GREEN}✓ Created run.sh in $scenario_name${NC}"
