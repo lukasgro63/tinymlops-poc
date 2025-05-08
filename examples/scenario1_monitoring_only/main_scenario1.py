@@ -332,9 +332,11 @@ class TinyLCMMonitoringPipeline:
         if self.operational_monitor:
             inference_time = time.time() - start_time
             self.operational_monitor.track_inference(
-                inference_time=inference_time,
+                input_id=sample.sample_id,
                 prediction=sample.prediction,
-                confidence=sample.confidence
+                confidence=sample.confidence,
+                latency_ms=inference_time * 1000,  # Convert seconds to milliseconds
+                features=sample.features
             )
         
         # Log the sample if a data logger is available
@@ -457,10 +459,9 @@ def main():
         # Initialize operational monitor
         monitor_config = tinylcm_config["operational_monitor"]
         operational_monitor = OperationalMonitor(
-            track_system_metrics=monitor_config["track_system_metrics"],
-            track_inference_time=monitor_config["track_inference_time"],
-            track_memory_usage=monitor_config["track_memory_usage"],
-            report_interval_seconds=monitor_config["report_interval_seconds"]
+            storage_dir=monitor_config.get("storage_dir", "./metrics"),
+            collect_system_metrics=monitor_config.get("track_system_metrics", True),
+            system_metrics_interval=monitor_config.get("report_interval_seconds", 30)
         )
         
         # Initialize data logger if enabled
@@ -575,7 +576,7 @@ def main():
                     try:
                         # Get operational metrics from monitor
                         if operational_monitor:
-                            metrics = operational_monitor.get_metrics()
+                            metrics = operational_monitor.get_current_metrics()
                             # Send metrics to TinySphere
                             logger.debug("Sending metrics to TinySphere")
                             sync_client.create_and_send_metrics_package(metrics)
