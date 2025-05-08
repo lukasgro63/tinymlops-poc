@@ -342,11 +342,10 @@ class TinyLCMMonitoringPipeline:
         # Log the sample if a data logger is available
         if self.data_logger:
             self.data_logger.log_sample(
-                data=sample.features,
-                type="features",
+                input_data=sample.features,
+                prediction=sample.prediction,
+                confidence=sample.confidence,
                 metadata={
-                    "prediction": sample.prediction,
-                    "confidence": sample.confidence,
                     "sample_id": sample.sample_id,
                     "timestamp": sample.timestamp
                 }
@@ -468,8 +467,7 @@ def main():
         if tinylcm_config["data_logger"]["enabled"]:
             logger_config = tinylcm_config["data_logger"]
             data_logger = DataLogger(
-                log_dir=logger_config["log_dir"],
-                device_id=device_id
+                storage_dir=logger_config["log_dir"]
             )
         else:
             data_logger = None
