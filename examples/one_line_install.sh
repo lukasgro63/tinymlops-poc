@@ -82,7 +82,7 @@ cd "$HOME"
 echo -e "${GREEN}✓ Python packages installed${NC}"
 
 # 4. Create directories and fix imports
-echo -e "\n${YELLOW}[4/4] Setting up directories and fixing imports...${NC}"
+echo -e "\n${YELLOW}[4/4] Setting up directories and fixing scripts...${NC}"
 
 # Create necessary directories for scenarios
 for scenario_dir in $(find "$BASE_DIR/examples" -name "scenario*" -type d); do
@@ -98,10 +98,23 @@ echo -e "${YELLOW}Creating utils symlinks...${NC}"
 for scenario_dir in $(find "$BASE_DIR/examples" -name "scenario*" -type d); do
   # Create a symlink to utils in each scenario directory
   ln -sf ../utils "$scenario_dir/utils"
-  echo -e "${GREEN}✓ Symlink created in $(basename "$scenario_dir")${NC}"
 done
 
-# Create a modified launch script that runs from the scenario directory
+# Create a modified version of config file with absolute paths
+for config_file in $(find "$BASE_DIR/examples" -name "config*.json"); do
+  echo -e "${YELLOW}Updating paths in $(basename "$config_file")...${NC}"
+  
+  # Back up the original config
+  cp "$config_file" "${config_file}.bak"
+  
+  # Replace relative paths with absolute ones
+  sed -i "s|\"model_path\": \"../assets/|\"model_path\": \"$BASE_DIR/examples/assets/|g" "$config_file"
+  sed -i "s|\"labels_path\": \"../assets/|\"labels_path\": \"$BASE_DIR/examples/assets/|g" "$config_file"
+  
+  echo -e "${GREEN}✓ Updated paths in config file${NC}"
+done
+
+# Create a simple launch script
 cat > "$BASE_DIR/launch.sh" <<'EOL'
 #!/bin/bash
 # TinyLCM Launcher Script
@@ -153,7 +166,7 @@ selected_name="${SCENARIO_NAMES[$((selection-1))]}"
 
 echo -e "\nStarting \033[0;32m$selected_name\033[0m..."
 
-# Critical: Run the script from its own directory to ensure config and other files are found
+# Run the script from its own directory
 scenario_dir="$(dirname "$selected_script")"
 script_name="$(basename "$selected_script")"
 cd "$scenario_dir"
@@ -162,6 +175,29 @@ EOL
 
 chmod +x "$BASE_DIR/launch.sh"
 echo -e "${GREEN}✓ Launch script created${NC}"
+
+# Create a convenient run script in each scenario directory
+for scenario_dir in $(find "$BASE_DIR/examples" -name "scenario*" -type d); do
+  scenario_name=$(basename "$scenario_dir")
+  main_script=$(find "$scenario_dir" -name "main_*.py" -type f | head -n 1)
+  if [ -n "$main_script" ]; then
+    script_name=$(basename "$main_script")
+    
+    # Create a run.sh script in the scenario directory
+    cat > "$scenario_dir/run.sh" <<EOL
+#!/bin/bash
+# Run script for $scenario_name
+
+# Make sure we're in the right directory
+cd "\$(dirname "\$0")"
+
+# Run the main script
+python3 ./$script_name
+EOL
+    chmod +x "$scenario_dir/run.sh"
+    echo -e "${GREEN}✓ Created run.sh in $scenario_name${NC}"
+  fi
+done
 
 # Conclusion
 echo -e "\n${BLUE}====================================================================${NC}"
