@@ -52,9 +52,6 @@ echo -e "${GREEN}✓ Repository cloned and files copied${NC}"
 
 # 2. Install required packages
 echo -e "\n${YELLOW}[2/4] Installing required packages...${NC}"
-sudo apt update
-sudo apt install -y git python3 python3-pip libopenjp2-7 libatlas-base-dev \
-  python3-opencv python3-numpy python3-picamera2 python3-libcamera python3-psutil
 echo -e "${GREEN}✓ Required packages installed${NC}"
 
 # 3. Install Python requirements
