@@ -168,6 +168,45 @@ echo -e "${GREEN}✓ Python packages installed${NC}"
 # 5. Create launch script that lists and runs different scenarios
 echo -e "\n${YELLOW}[5/5] Creating launch script...${NC}"
 
+# Create helper wrapper file for scenarios
+mkdir -p "$BASE_DIR/examples/utils/wrappers"
+
+# Create a wrapper script for each main Python file
+find "$BASE_DIR/examples" -name "main_*.py" | while read main_file; do
+    scenario_dir=$(dirname "$main_file")
+    scenario_name=$(basename "$scenario_dir")
+    script_name=$(basename "$main_file")
+    wrapper_file="$BASE_DIR/examples/utils/wrappers/wrapper_${script_name}"
+    
+    cat > "$wrapper_file" <<EOL
+#!/usr/bin/env python3
+"""
+Wrapper script for ${script_name} to handle imports correctly
+"""
+import os
+import sys
+
+# Add the necessary paths to sys.path
+base_dir = os.path.abspath("${BASE_DIR}")
+examples_dir = os.path.join(base_dir, "examples")
+utils_dir = os.path.join(examples_dir, "utils")
+
+# Add paths to sys.path if they're not already there
+for path in [base_dir, examples_dir, utils_dir]:
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+# Import the actual main script and run its main function
+sys.path.insert(0, "${scenario_dir}")
+import ${script_name[:-3]}
+
+if __name__ == "__main__":
+    ${script_name[:-3]}.main()
+EOL
+    chmod +x "$wrapper_file"
+    echo -e "${GREEN}✓ Created wrapper for ${script_name}${NC}"
+done
+
 LAUNCH_SCRIPT="$BASE_DIR/launch.sh"
 cat > "$LAUNCH_SCRIPT" <<'EOL'
 #!/bin/bash
@@ -178,7 +217,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # Ensure local paths are in PYTHONPATH
-export PYTHONPATH="$SCRIPT_DIR:$SCRIPT_DIR/tinylcm:$PYTHONPATH"
+export PYTHONPATH="$SCRIPT_DIR:$SCRIPT_DIR/examples:$SCRIPT_DIR/examples/utils:$SCRIPT_DIR/tinylcm:$PYTHONPATH"
 
 # Find all scenario directories
 SCENARIOS=()
@@ -197,7 +236,10 @@ while read -r scenario_dir; do
     main_script=$(find "$scenario_dir" -name "main_*.py" -type f 2>/dev/null | head -n 1)
     
     if [ -n "$main_script" ]; then
-        SCENARIOS+=("$main_script")
+        script_name=$(basename "$main_script")
+        wrapper_script="$SCRIPT_DIR/examples/utils/wrappers/wrapper_${script_name}"
+        
+        SCENARIOS+=("$wrapper_script")
         SCENARIO_NAMES+=("$scenario_name")
         echo -e "  \033[0;32m$i\033[0m. $scenario_name"
         i=$((i+1))
@@ -225,13 +267,23 @@ selected_name="${SCENARIO_NAMES[$((selection-1))]}"
 
 echo -e "\nStarting \033[0;32m$selected_name\033[0m..."
 
-# Run the selected scenario
-cd "$(dirname "$selected_script")"
-python3 "$(basename "$selected_script")"
+# Run the selected scenario wrapper
+python3 "$selected_script"
 EOL
 
 chmod +x "$LAUNCH_SCRIPT"
 echo -e "${GREEN}✓ Launch script created${NC}"
+
+# Create a PYTHONPATH setup script to run at login
+PROFILE_SCRIPT="/home/pi/.profile"
+if [ -f "$PROFILE_SCRIPT" ]; then
+    # Check if entry already exists
+    if ! grep -q "PYTHONPATH.*tinymlops" "$PROFILE_SCRIPT"; then
+        echo -e "\n# TinyLCM Python Path Setup" >> "$PROFILE_SCRIPT"
+        echo "export PYTHONPATH=\"\$HOME/tinymlops:\$HOME/tinymlops/examples:\$HOME/tinymlops/examples/utils:\$HOME/tinymlops/tinylcm:\$PYTHONPATH\"" >> "$PROFILE_SCRIPT"
+        echo -e "${GREEN}✓ Added PYTHONPATH to .profile for automatic setup on login${NC}"
+    fi
+fi
 
 # Check camera configuration if on a Raspberry Pi
 if [ "$IS_RASPBERRY_PI" = true ]; then
@@ -255,7 +307,10 @@ echo -e "${GREEN}$BASE_DIR${NC}"
 echo -e "\n${YELLOW}To launch an example:${NC}"
 echo -e "${GREEN}$BASE_DIR/launch.sh${NC}"
 
-echo -e "\n${YELLOW}To ensure the correct Python path:${NC}"
+echo -e "\n${YELLOW}To ensure the correct Python path for this session:${NC}"
 echo -e "${GREEN}source $BASE_DIR/set_pythonpath.sh${NC}"
+
+echo -e "\n${YELLOW}To permanently set up the Python path, restart your session or run:${NC}"
+echo -e "${GREEN}source ~/.profile${NC}"
 
 echo -e "\n${GREEN}Enjoy using TinyLCM!${NC}"
