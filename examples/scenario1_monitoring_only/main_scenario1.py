@@ -326,7 +326,15 @@ class TinyLCMMonitoringPipeline:
         
         # Update all drift detectors with the sample
         for detector in self.drift_detectors:
-            detector.update(sample)
+            # Create record with proper format for drift detectors
+            record = {
+                "features": sample.features,
+                "prediction": sample.prediction,
+                "confidence": sample.metadata.get("confidence", 0.0),
+                "sample_id": sample.sample_id,
+                "timestamp": sample.timestamp
+            }
+            detector.update(record)
         
         # Track inference time with the operational monitor
         if self.operational_monitor:
@@ -334,7 +342,7 @@ class TinyLCMMonitoringPipeline:
             self.operational_monitor.track_inference(
                 input_id=sample.sample_id,
                 prediction=sample.prediction,
-                confidence=sample.confidence,
+                confidence=sample.metadata.get("confidence", 0.0),
                 latency_ms=inference_time * 1000,  # Convert seconds to milliseconds
                 features=sample.features
             )
@@ -356,8 +364,8 @@ class TinyLCMMonitoringPipeline:
         drift_detected = False
         
         for detector in self.drift_detectors:
-            result = detector.check_for_drift()
-            if result.drift_detected:
+            result, drift_info = detector.check_for_drift()
+            if result:
                 drift_detected = True
         
         return drift_detected
@@ -550,8 +558,8 @@ def main():
                 sample_id=sample_id,
                 features=features,
                 prediction=prediction,
-                confidence=confidence,
-                timestamp=time.time()
+                timestamp=time.time(),
+                metadata={"confidence": confidence}
             )
             
             # Update global current sample and frame for drift detection callback
@@ -574,10 +582,13 @@ def main():
                     try:
                         # Get operational metrics from monitor
                         if operational_monitor:
-                            metrics = operational_monitor.get_current_metrics()
-                            # Send metrics to TinySphere
-                            logger.debug("Sending metrics to TinySphere")
-                            sync_client.create_and_send_metrics_package(metrics)
+                            try:
+                                metrics = operational_monitor.get_current_metrics()
+                                # Send metrics to TinySphere
+                                logger.debug("Sending metrics to TinySphere")
+                                sync_client.create_and_send_metrics_package(metrics)
+                            except Exception as e:
+                                logger.error(f"Error getting metrics: {e}")
                         
                         # Sync all pending packages
                         logger.debug("Syncing pending packages with TinySphere")

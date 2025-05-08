@@ -60,12 +60,11 @@ class ExtendedSyncClient:
         # Initialize the core TinyLCM SyncClient
         self.client = TinyLCMSyncClient(
             server_url=server_url,
+            api_key=api_key,
             device_id=device_id,
             sync_interface=self.sync_interface,
-            sync_interval_seconds=sync_interval_seconds,
             max_retries=max_retries,
-            auto_register=auto_register,
-            headers=self.headers
+            auto_register=auto_register
         )
         
         self.device_id = device_id
