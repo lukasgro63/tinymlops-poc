@@ -171,40 +171,59 @@ echo -e "\n${YELLOW}[5/5] Creating launch script...${NC}"
 # Create helper wrapper file for scenarios
 mkdir -p "$BASE_DIR/examples/utils/wrappers"
 
-# Create a wrapper script for each main Python file
-find "$BASE_DIR/examples" -name "main_*.py" | while read main_file; do
-    scenario_dir=$(dirname "$main_file")
-    scenario_name=$(basename "$scenario_dir")
-    script_name=$(basename "$main_file")
-    wrapper_file="$BASE_DIR/examples/utils/wrappers/wrapper_${script_name}"
+# Create a simpler solution - a Python path fixer script
+cat > "$BASE_DIR/fix_paths.py" <<'EOL'
+#!/usr/bin/env python3
+import os
+import sys
+
+def fix_python_paths():
+    """Fix Python import paths to find utils and other modules."""
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    examples_dir = os.path.join(base_dir, "examples")
+    utils_dir = os.path.join(examples_dir, "utils")
+    tinylcm_dir = os.path.join(base_dir, "tinylcm")
     
-    cat > "$wrapper_file" <<EOL
+    # Add paths to sys.path if not already there
+    for path in [base_dir, examples_dir, utils_dir, tinylcm_dir]:
+        if path not in sys.path:
+            sys.path.insert(0, path)
+    
+    return True
+EOL
+
+# Create a wrapper script for each scenario
+find "$BASE_DIR/examples" -name "scenario*" -type d | while read scenario_dir; do
+    scenario_name=$(basename "$scenario_dir")
+    main_script=$(find "$scenario_dir" -name "main_*.py" -type f)
+    if [ -n "$main_script" ]; then
+        script_basename=$(basename "$main_script" .py)
+        wrapper_file="$BASE_DIR/examples/utils/wrappers/run_${scenario_name}.py"
+        
+        cat > "$wrapper_file" <<EOL
 #!/usr/bin/env python3
 """
-Wrapper script for ${script_name} to handle imports correctly
+Wrapper script for ${scenario_name} to handle imports correctly
 """
 import os
 import sys
 
-# Add the necessary paths to sys.path
-base_dir = os.path.abspath("${BASE_DIR}")
-examples_dir = os.path.join(base_dir, "examples")
-utils_dir = os.path.join(examples_dir, "utils")
+# Fix sys.path to include the necessary directories
+sys.path.insert(0, "${BASE_DIR}")
+sys.path.insert(0, "${BASE_DIR}/examples")
+sys.path.insert(0, "${BASE_DIR}/examples/utils")
+sys.path.insert(0, "${BASE_DIR}/tinylcm")
 
-# Add paths to sys.path if they're not already there
-for path in [base_dir, examples_dir, utils_dir]:
-    if path not in sys.path:
-        sys.path.insert(0, path)
-
-# Import the actual main script and run its main function
+# Import and run the main script
 sys.path.insert(0, "${scenario_dir}")
-import ${script_name[:-3]}
+from ${script_basename} import main
 
 if __name__ == "__main__":
-    ${script_name[:-3]}.main()
+    main()
 EOL
-    chmod +x "$wrapper_file"
-    echo -e "${GREEN}✓ Created wrapper for ${script_name}${NC}"
+        chmod +x "$wrapper_file"
+        echo -e "${GREEN}✓ Created wrapper for ${scenario_name}${NC}"
+    fi
 done
 
 LAUNCH_SCRIPT="$BASE_DIR/launch.sh"
@@ -229,22 +248,17 @@ echo -e "\033[0;34m=============================================================
 
 echo -e "\nAvailable scenarios:"
 
-# Find all scenario directories and their main scripts
+# Find all wrapper scripts
 i=1
-while read -r scenario_dir; do
-    scenario_name=$(basename "$scenario_dir")
-    main_script=$(find "$scenario_dir" -name "main_*.py" -type f 2>/dev/null | head -n 1)
+while read -r wrapper_script; do
+    # Extract scenario name from the wrapper filename
+    scenario_name=$(basename "$wrapper_script" .py | sed 's/run_//')
     
-    if [ -n "$main_script" ]; then
-        script_name=$(basename "$main_script")
-        wrapper_script="$SCRIPT_DIR/examples/utils/wrappers/wrapper_${script_name}"
-        
-        SCENARIOS+=("$wrapper_script")
-        SCENARIO_NAMES+=("$scenario_name")
-        echo -e "  \033[0;32m$i\033[0m. $scenario_name"
-        i=$((i+1))
-    fi
-done < <(find "$SCRIPT_DIR/examples" -name "scenario*" -type d | sort)
+    SCENARIOS+=("$wrapper_script")
+    SCENARIO_NAMES+=("$scenario_name")
+    echo -e "  \033[0;32m$i\033[0m. $scenario_name"
+    i=$((i+1))
+done < <(find "$SCRIPT_DIR/examples/utils/wrappers" -name "run_*.py" | sort)
 
 if [ ${#SCENARIOS[@]} -eq 0 ]; then
     echo -e "\033[0;31mNo scenarios found!\033[0m"
