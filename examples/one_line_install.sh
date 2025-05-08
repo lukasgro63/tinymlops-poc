@@ -93,28 +93,15 @@ for scenario_dir in $(find "$BASE_DIR/examples" -name "scenario*" -type d); do
   mkdir -p "$scenario_dir/sync_data"
 done
 
-# Create __init__.py files in utils directory
-mkdir -p "$BASE_DIR/examples/utils"
-touch "$BASE_DIR/examples/utils/__init__.py"
-touch "$BASE_DIR/examples/__init__.py"
-
-# FIX THE IMPORTS IN PYTHON FILES
-# The key issue is that main_scenario1.py is using 'from utils.camera_handler' instead of relative imports
-
-# Find each main Python file and fix the imports
-for main_file in $(find "$BASE_DIR/examples" -name "main_*.py"); do
-  echo -e "${YELLOW}Fixing imports in $(basename "$main_file")...${NC}"
-  
-  # Create a backup
-  cp "$main_file" "${main_file}.bak"
-  
-  # Fix the import statements
-  sed -i 's/from utils\./from examples.utils./g' "$main_file"
-  
-  chmod +x "$main_file"
+# Create symlinks to make utils accessible
+echo -e "${YELLOW}Creating utils symlinks...${NC}"
+for scenario_dir in $(find "$BASE_DIR/examples" -name "scenario*" -type d); do
+  # Create a symlink to utils in each scenario directory
+  ln -sf ../utils "$scenario_dir/utils"
+  echo -e "${GREEN}✓ Symlink created in $(basename "$scenario_dir")${NC}"
 done
 
-# Create a launch script
+# Create a modified launch script that runs from the scenario directory
 cat > "$BASE_DIR/launch.sh" <<'EOL'
 #!/bin/bash
 # TinyLCM Launcher Script
@@ -122,9 +109,6 @@ cat > "$BASE_DIR/launch.sh" <<'EOL'
 # Set base directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
-
-# Setup PYTHONPATH - this is crucial
-export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
 
 # Find scenarios
 echo -e "\033[0;34m===================================================================\033[0m"
@@ -169,19 +153,15 @@ selected_name="${SCENARIO_NAMES[$((selection-1))]}"
 
 echo -e "\nStarting \033[0;32m$selected_name\033[0m..."
 
-# Run the selected scenario directly with Python
-cd "$SCRIPT_DIR"
-python3 "$selected_script"
+# Critical: Run the script from its own directory to ensure config and other files are found
+scenario_dir="$(dirname "$selected_script")"
+script_name="$(basename "$selected_script")"
+cd "$scenario_dir"
+python3 "./$script_name"
 EOL
 
 chmod +x "$BASE_DIR/launch.sh"
 echo -e "${GREEN}✓ Launch script created${NC}"
-
-# Create a simple symlink to make utils directory accessible
-echo -e "${YELLOW}Creating symlink for utils...${NC}"
-cd "$BASE_DIR/examples/scenario1_monitoring_only"
-ln -sf ../utils utils
-cd "$HOME"
 
 # Conclusion
 echo -e "\n${BLUE}====================================================================${NC}"
