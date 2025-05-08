@@ -50,6 +50,13 @@
         "alpha": 0.1,
         "min_samples": 100,
         "warmup_samples": 200
+      },
+      {
+        "type": "PredictionDistributionMonitor",
+        "window_size": 50,
+        "threshold": 0.2,
+        "method": "block",
+        "min_samples": 100
       }
     ],
     "operational_monitor": {

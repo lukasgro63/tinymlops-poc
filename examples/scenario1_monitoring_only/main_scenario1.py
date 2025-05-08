@@ -420,23 +420,26 @@ def main():
         for detector_config in tinylcm_config["drift_detectors"]:
             if detector_config["type"] == "EWMAConfidenceMonitor":
                 detector = EWMAConfidenceMonitor(
-                    window_size=detector_config["window_size"],
-                    alpha=detector_config["alpha"],
+                    lambda_param=detector_config["alpha"],
                     threshold_factor=detector_config["threshold_factor"],
-                    min_samples=detector_config["min_samples"],
-                    warmup_samples=detector_config["warmup_samples"]
+                    drift_window=detector_config["window_size"],
+                    warm_up_samples=detector_config["min_samples"],
+                    reference_update_interval=detector_config["warmup_samples"]
                 )
                 drift_detectors.append(detector)
                 logger.info(f"Initialized EWMAConfidenceMonitor with alpha={detector_config['alpha']}")
             
             elif detector_config["type"] == "PageHinkleyFeatureMonitor":
+                # Create a function that extracts a specific feature
+                feature_index = detector_config["feature_index"]
+                feature_extractor = lambda features: features[feature_index]
+                
                 detector = PageHinkleyFeatureMonitor(
-                    feature_index=detector_config["feature_index"],
+                    feature_statistic_fn=feature_extractor,
                     delta=detector_config["delta"],
-                    lambda_param=detector_config["lambda_param"],
-                    alpha=detector_config["alpha"],
-                    min_samples=detector_config["min_samples"],
-                    warmup_samples=detector_config["warmup_samples"]
+                    lambda_threshold=detector_config["lambda_param"],
+                    warm_up_samples=detector_config["min_samples"],
+                    reference_update_interval=detector_config["warmup_samples"]
                 )
                 drift_detectors.append(detector)
                 logger.info(f"Initialized PageHinkleyFeatureMonitor for feature index {detector_config['feature_index']}")
@@ -445,11 +448,11 @@ def main():
                 detector = PredictionDistributionMonitor(
                     window_size=detector_config.get("window_size", 100),
                     threshold=detector_config.get("threshold", 0.15),
-                    min_samples=detector_config.get("min_samples", 100),
-                    warmup_samples=detector_config.get("warmup_samples", 200)
+                    method=detector_config.get("method", "block"),
+                    min_samples=detector_config.get("min_samples", 100)
                 )
                 drift_detectors.append(detector)
-                logger.info(f"Initialized PredictionDistributionMonitor")
+                logger.info(f"Initialized PredictionDistributionMonitor with window_size={detector_config.get('window_size', 100)}, threshold={detector_config.get('threshold', 0.15)}")
         
         # Initialize operational monitor
         monitor_config = tinylcm_config["operational_monitor"]
