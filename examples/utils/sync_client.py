@@ -179,7 +179,7 @@ class ExtendedSyncClient:
                 "sample": {
                     "sample_id": sample.sample_id if sample else None,
                     "prediction": sample.prediction if sample else None,
-                    "confidence": float(sample.confidence) if sample else None,
+                    "confidence": float(sample.metadata.get("confidence", 0.0)) if sample else None,
                     "timestamp": sample.timestamp if sample else None
                 }
             }

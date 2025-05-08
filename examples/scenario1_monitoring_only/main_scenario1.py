@@ -352,7 +352,7 @@ class TinyLCMMonitoringPipeline:
             self.data_logger.log_sample(
                 input_data=sample.features,
                 prediction=sample.prediction,
-                confidence=sample.confidence,
+                confidence=sample.metadata.get("confidence", 0.0),
                 metadata={
                     "sample_id": sample.sample_id,
                     "timestamp": sample.timestamp
@@ -412,7 +412,7 @@ def main():
         
         # Initialize StoneDetector (TFLite classifier)
         model_config = config["model"]
-        detector = StoneDetector(
+        stone_detector = StoneDetector(
             model_path=model_config["model_path"],
             labels_path=model_config["labels_path"],
             threshold=model_config["threshold"],
@@ -428,14 +428,14 @@ def main():
         drift_detectors = []
         for detector_config in tinylcm_config["drift_detectors"]:
             if detector_config["type"] == "EWMAConfidenceMonitor":
-                detector = EWMAConfidenceMonitor(
+                drift_detector = EWMAConfidenceMonitor(
                     lambda_param=detector_config["alpha"],
                     threshold_factor=detector_config["threshold_factor"],
                     drift_window=detector_config["window_size"],
                     warm_up_samples=detector_config["min_samples"],
                     reference_update_interval=detector_config["warmup_samples"]
                 )
-                drift_detectors.append(detector)
+                drift_detectors.append(drift_detector)
                 logger.info(f"Initialized EWMAConfidenceMonitor with alpha={detector_config['alpha']}")
             
             elif detector_config["type"] == "PageHinkleyFeatureMonitor":
@@ -443,24 +443,24 @@ def main():
                 feature_index = detector_config["feature_index"]
                 feature_extractor = lambda features: features[feature_index]
                 
-                detector = PageHinkleyFeatureMonitor(
+                drift_detector = PageHinkleyFeatureMonitor(
                     feature_statistic_fn=feature_extractor,
                     delta=detector_config["delta"],
                     lambda_threshold=detector_config["lambda_param"],
                     warm_up_samples=detector_config["min_samples"],
                     reference_update_interval=detector_config["warmup_samples"]
                 )
-                drift_detectors.append(detector)
+                drift_detectors.append(drift_detector)
                 logger.info(f"Initialized PageHinkleyFeatureMonitor for feature index {detector_config['feature_index']}")
             
             elif detector_config["type"] == "PredictionDistributionMonitor":
-                detector = PredictionDistributionMonitor(
+                drift_detector = PredictionDistributionMonitor(
                     window_size=detector_config.get("window_size", 100),
                     threshold=detector_config.get("threshold", 0.15),
                     method=detector_config.get("method", "block"),
                     min_samples=detector_config.get("min_samples", 100)
                 )
-                drift_detectors.append(detector)
+                drift_detectors.append(drift_detector)
                 logger.info(f"Initialized PredictionDistributionMonitor with window_size={detector_config.get('window_size', 100)}, threshold={detector_config.get('threshold', 0.15)}")
         
         # Initialize operational monitor
@@ -548,7 +548,7 @@ def main():
             resized_frame = resize_image(frame, target_size)
             
             # Perform object detection
-            prediction, confidence, features = detector.detect(resized_frame)
+            prediction, confidence, features = stone_detector.detect(resized_frame)
             
             # Create sample ID
             sample_id = f"{device_id}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
