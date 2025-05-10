@@ -187,12 +187,24 @@ class ExtendedSyncClient:
                 }
             }
 
-            # Add metadata to package
-            self.sync_interface.add_json_to_package(
+            # Create a temporary file for metadata and add it to the package
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp_file:
+                json.dump(metadata, tmp_file)
+                tmp_path = tmp_file.name
+
+            # Add the metadata file to the package
+            success = self.sync_interface.add_file_to_package(
                 package_id=package_id,
-                json_data=metadata,
-                path="model_info.json"
+                file_path=tmp_path,
+                file_type="metadata"
             )
+
+            # Clean up the temporary file
+            try:
+                os.remove(tmp_path)
+            except Exception as e:
+                logger.warning(f"Failed to remove temporary metadata file: {e}")
 
             # Finalize the package
             self.sync_interface.finalize_package(package_id)
@@ -290,21 +302,32 @@ class ExtendedSyncClient:
                 }
             }
             
-            # Add drift event data to the package
-            self.sync_interface.add_json_to_package(
+            # Create a temporary file for drift event data and add it to the package
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp_file:
+                json.dump(drift_data, tmp_file)
+                tmp_path = tmp_file.name
+
+            # Add the drift event file to the package
+            success = self.sync_interface.add_file_to_package(
                 package_id=package_id,
-                json_data=drift_data,
-                path="drift_event.json"
+                file_path=tmp_path,
+                file_type="drift_event"
             )
+
+            # Clean up the temporary file
+            try:
+                os.remove(tmp_path)
+            except Exception as e:
+                logger.warning(f"Failed to remove temporary drift event file: {e}")
             
             # Add image to the package if provided
             if image_path and os.path.exists(image_path):
-                with open(image_path, 'rb') as file:
-                    self.sync_interface.add_file_to_package(
-                        package_id=package_id,
-                        file_path=image_path,
-                        target_path="image.jpg"
-                    )
+                self.sync_interface.add_file_to_package(
+                    package_id=package_id,
+                    file_path=image_path,
+                    file_type="image"
+                )
             
             # Finalize the package
             self.sync_interface.finalize_package(package_id)
@@ -334,12 +357,24 @@ class ExtendedSyncClient:
                 description=description
             )
             
-            # Add metrics data to the package
-            self.sync_interface.add_json_to_package(
+            # Create a temporary file for metrics data and add it to the package
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp_file:
+                json.dump(metrics, tmp_file)
+                tmp_path = tmp_file.name
+
+            # Add the metrics file to the package
+            success = self.sync_interface.add_file_to_package(
                 package_id=package_id,
-                json_data=metrics,
-                path="metrics.json"
+                file_path=tmp_path,
+                file_type="metrics"
             )
+
+            # Clean up the temporary file
+            try:
+                os.remove(tmp_path)
+            except Exception as e:
+                logger.warning(f"Failed to remove temporary metrics file: {e}")
             
             # Finalize the package
             self.sync_interface.finalize_package(package_id)
