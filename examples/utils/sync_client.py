@@ -9,6 +9,7 @@ Extends the base SyncClient with application-specific functionality.
 import json
 import logging
 import os
+import tempfile  # Add this import
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -185,9 +186,6 @@ class ExtendedSyncClient:
             }
 
             # Create a properly named metadata file (model_info.json for the model transformer)
-            import tempfile
-            import os
-
             # Create a temp directory to store our properly named files
             temp_dir = tempfile.mkdtemp()
             metadata_file_path = os.path.join(temp_dir, "model_info.json")
@@ -307,9 +305,6 @@ class ExtendedSyncClient:
             }
             
             # Create a properly named drift event file
-            import tempfile
-            import os
-
             # Create a temp directory to store our properly named files
             temp_dir = tempfile.mkdtemp()
             drift_file_path = os.path.join(temp_dir, "drift_event.json")
@@ -369,9 +364,6 @@ class ExtendedSyncClient:
             )
             
             # Create a properly named metrics file (needs to be named metrics.json for the transformer)
-            import tempfile
-            import os
-
             # Create a temp directory to store our properly named files
             temp_dir = tempfile.mkdtemp()
             metrics_file_path = os.path.join(temp_dir, "metrics.json")
