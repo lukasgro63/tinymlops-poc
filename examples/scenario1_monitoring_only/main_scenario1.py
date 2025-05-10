@@ -20,7 +20,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Any
 
 import cv2
 import numpy as np
@@ -48,6 +48,9 @@ from tinylcm.core.drift_detection import (
 from tinylcm.core.operational_monitor.monitor import OperationalMonitor
 from tinylcm.core.data_logger import DataLogger
 from tinylcm.core.data_structures import FeatureSample
+from tinylcm.core.feature_extractors.tflite import TFLiteFeatureExtractor
+from tinylcm.core.classifiers.knn import LightweightKNN
+from tinylcm.core.pipeline import InferencePipeline
 from utils.sync_client import ExtendedSyncClient
 from tinylcm.utils.logging import setup_logger
 
@@ -83,7 +86,7 @@ class StoneDetector:
         threshold: float = 0.6,
         input_mean: float = 127.5,
         input_std: float = 127.5,
-        feature_layer_index: int = -1  # Changed from -2 to -1 to use the final output layer
+        feature_layer_index: int = -1  # Use the final output layer
     ):
         """Initialize the stone detector.
         
@@ -313,84 +316,6 @@ def handle_sigterm(signum, frame):
     running = False
 
 
-class TinyLCMMonitoringPipeline:
-    """Simple monitoring pipeline for autonomous drift detection.
-    
-    This is a simplified version of the TinyLCM InferencePipeline
-    that only focuses on autonomous drift detection and monitoring
-    without using the full LightweightKNN and feature extraction components.
-    """
-    
-    def __init__(
-        self,
-        drift_detectors: List,
-        operational_monitor: Optional[OperationalMonitor] = None,
-        data_logger: Optional[DataLogger] = None
-    ):
-        """Initialize the monitoring pipeline.
-        
-        Args:
-            drift_detectors: List of autonomous drift detectors
-            operational_monitor: Optional operational monitor
-            data_logger: Optional data logger
-        """
-        self.drift_detectors = drift_detectors
-        self.operational_monitor = operational_monitor
-        self.data_logger = data_logger
-        logger.info(f"Initialized TinyLCMMonitoringPipeline with {len(drift_detectors)} drift detectors")
-    
-    def process(self, sample: FeatureSample) -> None:
-        """Process a sample with the monitoring pipeline."""
-        # Start timing for performance monitoring
-        start_time = time.time()
-        
-        # Update all drift detectors with the sample
-        for detector in self.drift_detectors:
-            # Create record with proper format for drift detectors
-            record = {
-                "features": sample.features,
-                "prediction": sample.prediction,
-                "confidence": sample.metadata.get("confidence", 0.0),
-                "sample_id": sample.sample_id,
-                "timestamp": sample.timestamp
-            }
-            detector.update(record)
-        
-        # Track inference time with the operational monitor
-        if self.operational_monitor:
-            inference_time = time.time() - start_time
-            self.operational_monitor.track_inference(
-                input_id=sample.sample_id,
-                prediction=sample.prediction,
-                confidence=sample.metadata.get("confidence", 0.0),
-                latency_ms=inference_time * 1000,  # Convert seconds to milliseconds
-                features=sample.features
-            )
-        
-        # Log the sample if a data logger is available
-        if self.data_logger:
-            self.data_logger.log_sample(
-                input_data=sample.features,
-                prediction=sample.prediction,
-                confidence=sample.metadata.get("confidence", 0.0),
-                metadata={
-                    "sample_id": sample.sample_id,
-                    "timestamp": sample.timestamp
-                }
-            )
-    
-    def check_autonomous_drifts(self) -> bool:
-        """Check all autonomous drift detectors for drift."""
-        drift_detected = False
-        
-        for detector in self.drift_detectors:
-            result, drift_info = detector.check_for_drift()
-            if result:
-                drift_detected = True
-        
-        return drift_detected
-
-
 def main():
     """Main function for the TinyLCM Scenario 1 example."""
     global running, config, sync_client
@@ -434,7 +359,7 @@ def main():
             rotation=camera_config["rotation"]
         )
         
-        # Initialize StoneDetector (TFLite classifier)
+        # Initialize the standard StoneDetector for preprocessing and class names
         model_config = config["model"]
         stone_detector = StoneDetector(
             model_path=model_config["model_path"],
@@ -447,6 +372,43 @@ def main():
         
         # Initialize TinyLCM components
         tinylcm_config = config["tinylcm"]
+        
+        # Create preprocessor function to prepare input tensors
+        def preprocess_image(image):
+            """Preprocess image for the TFLite model."""
+            # Resize to the correct input size
+            target_size = tuple(camera_config["inference_resolution"])
+            resized_image = resize_image(image, target_size)
+            
+            # Convert to RGB
+            if len(resized_image.shape) == 3 and resized_image.shape[2] == 3:
+                # BGR to RGB
+                resized_image = cv2.cvtColor(resized_image, cv2.COLOR_BGR2RGB)
+            elif len(resized_image.shape) == 3 and resized_image.shape[2] == 4:
+                # BGRA to RGB
+                resized_image = cv2.cvtColor(resized_image, cv2.COLOR_BGRA2RGB)
+            
+            # Normalize and return
+            return resized_image
+        
+        # Initialize TFLiteFeatureExtractor
+        fe_config = tinylcm_config["feature_extractor"]
+        feature_extractor = TFLiteFeatureExtractor(
+            model_path=os.path.abspath(fe_config["model_path"]),
+            feature_layer_index=fe_config["feature_layer_index"],
+            preprocessors=[preprocess_image],  # Add preprocessor function
+            normalize_features=True,  # Normalize feature vectors
+            lazy_loading=False  # Load model immediately
+        )
+        
+        # Initialize LightweightKNN classifier
+        knn_config = tinylcm_config["adaptive_classifier"]
+        classifier = LightweightKNN(
+            k=knn_config["k"],
+            distance_metric=knn_config["distance_metric"],
+            max_samples=knn_config["max_samples"],
+            use_numpy=knn_config["use_numpy"]
+        )
         
         # Initialize drift detectors
         drift_detectors = []
@@ -465,10 +427,10 @@ def main():
             elif detector_config["type"] == "PageHinkleyFeatureMonitor":
                 # Create a function that extracts a specific feature
                 feature_index = detector_config["feature_index"]
-                feature_extractor = lambda features: features[feature_index]
+                feature_extractor_fn = lambda features: features[feature_index]
                 
                 drift_detector = PageHinkleyFeatureMonitor(
-                    feature_statistic_fn=feature_extractor,
+                    feature_statistic_fn=feature_extractor_fn,
                     delta=detector_config["delta"],
                     lambda_threshold=detector_config["lambda_param"],
                     warm_up_samples=detector_config["min_samples"],
@@ -525,18 +487,23 @@ def main():
             model_path = model_config["model_path"]
             labels_path = model_config["labels_path"]
 
-            if sync_client.send_model(model_path=model_path, labels_path=labels_path):
-                logger.info(f"Successfully sent model to TinySphere server")
+            if os.path.exists(model_path) and os.path.exists(labels_path):
+                if sync_client.send_model(model_path=model_path, labels_path=labels_path):
+                    logger.info(f"Successfully sent model to TinySphere server")
+                else:
+                    logger.warning("Failed to send model to TinySphere server - will try again later")
             else:
-                logger.warning("Failed to send model to TinySphere server - will try again later")
+                logger.error(f"Model or labels file not found: {model_path}, {labels_path}")
         else:
             logger.warning("Could not connect to TinySphere server - will continue and try again later")
         
-        # Initialize simplified monitoring pipeline (without LightweightKNN and FeatureExtractor)
-        pipeline = TinyLCMMonitoringPipeline(
-            drift_detectors=drift_detectors,
+        # Initialize TinyLCM InferencePipeline
+        pipeline = InferencePipeline(
+            feature_extractor=feature_extractor,
+            classifier=classifier,
             operational_monitor=operational_monitor,
-            data_logger=data_logger
+            data_logger=data_logger,
+            autonomous_monitors=drift_detectors
         )
         
         # Register drift detection callbacks
@@ -549,6 +516,7 @@ def main():
         
         # Warm-up: Wait for a few frames
         logger.info("Warming up camera...")
+        frame = None
         for _ in range(10):
             frame = camera.get_frame()
             if frame is not None:
@@ -567,6 +535,9 @@ def main():
         last_drift_check_time = time.time()
         drift_check_interval = 1.0  # Check for drift every 1 second
         
+        # Class labels dictionary for mapping
+        class_labels = stone_detector.labels
+        
         while running:
             loop_start_time = time.time()
             
@@ -577,37 +548,50 @@ def main():
                 time.sleep(0.1)
                 continue
             
-            # Resize image to target size
-            target_size = tuple(camera_config["inference_resolution"])
-            resized_frame = resize_image(frame, target_size)
+            # Store current frame for drift detection callback
+            global current_frame
+            current_frame = frame.copy()
             
-            # Perform object detection
-            prediction, confidence, features = stone_detector.detect(resized_frame)
-            
-            # Create sample ID
-            sample_id = f"{device_id}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-            
-            # Create FeatureSample for TinyLCM
-            sample = FeatureSample(
-                sample_id=sample_id,
-                features=features,
-                prediction=prediction,
-                timestamp=time.time(),
-                metadata={"confidence": confidence}
+            # Process frame with TinyLCM InferencePipeline
+            # The pipeline will handle preprocessing via the preprocessor function
+            result = pipeline.process(
+                input_data=frame,
+                label=None,
+                sample_id=f"{device_id}_{int(time.time())}_{uuid.uuid4().hex[:8]}",
+                extract_features=True
             )
             
-            # Update global current sample and frame for drift detection callback
-            global current_sample, current_frame
-            current_sample = sample
-            current_frame = frame.copy() if frame is not None else None
+            # Extract results
+            prediction = result["prediction"]
+            confidence = result.get("confidence")
+            autonomous_drift_detected = result.get("autonomous_drift_detected", False)
             
-            # Process sample with TinyLCM monitoring pipeline
-            pipeline.process(sample)
+            # Convert numeric prediction to class name if needed
+            if isinstance(prediction, (int, np.integer)) and 0 <= prediction < len(class_labels):
+                prediction_name = class_labels[prediction]
+            else:
+                prediction_name = str(prediction)
+            
+            # Check the drift info
+            if autonomous_drift_detected:
+                drift_info = result.get("drift_info")
+                logger.info(f"Drift detected during frame processing: {drift_info}")
+            
+            # Update global current sample
+            current_sample = FeatureSample(
+                sample_id=result["sample_id"],
+                features=None,  # Features are already processed by pipeline
+                prediction=prediction,
+                timestamp=result["timestamp"],
+                metadata={"confidence": confidence}
+            )
             
             # Check for drift periodically
             current_time = time.time()
             if current_time - last_drift_check_time >= drift_check_interval:
-                if pipeline.check_autonomous_drifts():
+                # Explicit drift check
+                drift_results = pipeline.check_autonomous_drifts()
+                if any(result.get("drift_detected", False) for result in drift_results):
                     logger.info("Drift detected during periodic check")
                 last_drift_check_time = current_time
                 
@@ -637,7 +621,7 @@ def main():
             # Display frames if enabled
             if config["application"]["display_frames"]:
                 # Add prediction text to frame
-                text = f"{prediction}: {confidence:.2f}"
+                text = f"{prediction_name}: {confidence:.2f}"
                 cv2.putText(frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
                            1, (0, 255, 0), 2, cv2.LINE_AA)
                 
@@ -651,7 +635,7 @@ def main():
             # Save debug frames if enabled
             if config["application"]["save_debug_frames"] and frame_count % 100 == 0:
                 debug_dir = Path(config["application"]["debug_output_dir"])
-                frame_path = debug_dir / f"frame_{frame_count:06d}_{prediction}.jpg"
+                frame_path = debug_dir / f"frame_{frame_count:06d}_{prediction_name}.jpg"
                 cv2.imwrite(str(frame_path), frame)
             
             # Increment frame counter
@@ -693,6 +677,14 @@ def main():
                 logger.info("Sync client closed")
         except Exception as e:
             logger.error(f"Error closing sync client: {e}")
+        
+        # Clean up the pipeline
+        try:
+            if 'pipeline' in locals():
+                pipeline.cleanup()
+                logger.info("TinyLCM pipeline cleaned up")
+        except Exception as e:
+            logger.error(f"Error cleaning up pipeline: {e}")
         
         # Clean up OpenCV windows
         if config and config.get("application", {}).get("display_frames", False):
