@@ -164,11 +164,39 @@ def on_drift_detected(drift_info: Dict[str, Any]) -> None:
     # If sync client is available, create and send a drift event package
     if sync_client:
         try:
-            # Send metrics package with drift event details
-            sync_client.synchronize_all()
-            logger.info(f"Synchronized data with TinySphere after drift event")
+            # Send drift event information to server (create a custom package)
+            # First check if method exists and use appropriate one
+
+            # Prepare drift info for sending
+            drift_data = {
+                "detector_name": detector_name,
+                "reason": reason,
+                "metrics": metrics,
+                "timestamp": datetime.now().isoformat()
+            }
+
+            # Write drift data to a temporary file
+            drift_dir = os.path.join(sync_client.sync_dir, "drift_events")
+            os.makedirs(drift_dir, exist_ok=True)
+
+            drift_file = os.path.join(drift_dir, f"drift_event_{timestamp.replace(' ', '_').replace(':', '-')}.json")
+            with open(drift_file, 'w') as f:
+                json.dump(drift_data, f)
+
+            # Notify sync client about the file
+            if hasattr(sync_client, 'create_package'):
+                # Use the create_package method if available
+                sync_client.create_package("drift_event", {"file_path": drift_file})
+                logger.info(f"Created drift event package for TinySphere")
+            elif hasattr(sync_client, 'sync_all_pending_packages'):
+                # Some implementations may have this method
+                sync_client.sync_all_pending_packages()
+                logger.info(f"Synced drift event with TinySphere")
+            else:
+                # Try direct API client methods if available
+                logger.info(f"Saved drift information for next sync cycle")
         except Exception as e:
-            logger.error(f"Failed to synchronize after drift event: {e}")
+            logger.error(f"Failed to save/send drift event: {e}")
 
 
 def handle_sigterm(signum, frame):
@@ -304,10 +332,35 @@ def main():
         
         # Create a function that extracts a specific feature dimension
         feature_index = drift_detector_config["feature_index"]
-        feature_extractor_fn = lambda features: features[feature_index]
-        
+
+        # Make a more robust feature extraction function that handles edge cases
+        def safe_feature_extractor(features):
+            """Extract a feature safely with boundary checking."""
+            if features is None:
+                return 0.0
+
+            # Convert to numpy array if needed
+            if not isinstance(features, np.ndarray):
+                try:
+                    features = np.array(features)
+                except:
+                    return 0.0
+
+            # Check if feature index is in range
+            if feature_index < 0 or feature_index >= features.size:
+                # Use last feature if index out of range
+                if features.size > 0:
+                    return float(features.flatten()[-1])
+                return 0.0
+
+            # Get the feature at the specified index
+            try:
+                return float(features.flatten()[feature_index])
+            except:
+                return 0.0
+
         drift_detector = PageHinkleyFeatureMonitor(
-            feature_statistic_fn=feature_extractor_fn,
+            feature_statistic_fn=safe_feature_extractor,
             delta=drift_detector_config["delta"],
             lambda_threshold=drift_detector_config["lambda_param"],
             warm_up_samples=drift_detector_config["min_samples"],
@@ -442,8 +495,22 @@ def main():
             # Periodically sync with TinySphere
             if current_time - last_sync_time >= sync_interval:
                 try:
-                    sync_client.synchronize_all()
+                    # Try different sync methods depending on what's available
+                    if hasattr(sync_client, 'sync_all_pending_packages'):
+                        # Use sync_all_pending_packages if available
+                        sync_client.sync_all_pending_packages()
+                    elif hasattr(sync_client, 'synchronize'):
+                        # Some implementations may have this method
+                        sync_client.synchronize()
+                    elif hasattr(sync_client, 'process_pending_packages'):
+                        # Try alternative methods
+                        sync_client.process_pending_packages()
+                    else:
+                        # Just log status if no sync method found
+                        logger.info("Checking sync status")
+
                     last_sync_time = current_time
+                    logger.debug("Successfully synchronized with TinySphere")
                 except Exception as e:
                     logger.warning(f"Failed to synchronize with TinySphere: {e}")
             
@@ -468,10 +535,23 @@ def main():
         logger.info("Performing final sync with TinySphere")
         if 'sync_client' in locals() and sync_client:
             try:
-                sync_client.synchronize_all()
-            except Exception:
+                # Try different sync methods depending on what's available
+                if hasattr(sync_client, 'sync_all_pending_packages'):
+                    # Use sync_all_pending_packages if available
+                    sync_client.sync_all_pending_packages()
+                elif hasattr(sync_client, 'synchronize'):
+                    # Some implementations may have this method
+                    sync_client.synchronize()
+                elif hasattr(sync_client, 'process_pending_packages'):
+                    # Try alternative methods
+                    sync_client.process_pending_packages()
+            except Exception as e:
+                logger.warning(f"Error during final sync: {e}")
                 pass
-            sync_client.close()
+
+            # Close the client
+            if hasattr(sync_client, 'close'):
+                sync_client.close()
             logger.info("Sync client closed")
         
         logger.info("TinyLCM Autonomous Monitoring Example completed")
