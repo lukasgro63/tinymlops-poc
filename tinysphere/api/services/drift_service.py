@@ -144,7 +144,8 @@ class DriftService:
             db=db,
             notification=NotificationCreate(
                 message=f"Drift detected on device {device_id} ({drift_type_str})",
-                notification_type=NotificationType.WARNING,
+                # Use enum value string instead of enum for better cross-module compatibility
+                notification_type="warning",
                 source="drift_event",
                 source_id=event_id,
                 details={

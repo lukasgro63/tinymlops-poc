@@ -13,7 +13,7 @@ from typing import Any, Dict, List
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 from tinysphere.api.models.notification import NotificationCreate
-from tinysphere.db.models import Device, DriftEvent, DriftSample, DriftType, NotificationType
+from tinysphere.db.models import Device, DriftEvent, DriftSample, DriftType
 from tinysphere.api.services.drift_service import DriftService
 
 logger = logging.getLogger(__name__)

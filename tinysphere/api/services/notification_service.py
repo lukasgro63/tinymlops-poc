@@ -158,7 +158,7 @@ class NotificationService:
             db,
             NotificationCreate(
                 message=f"Device {device_name} connected",
-                notification_type=NotificationType.INFO,
+                notification_type="info",
                 source="device",
                 source_id=device_id,
                 details={"hostname": hostname}
@@ -172,7 +172,7 @@ class NotificationService:
             db,
             NotificationCreate(
                 message=f"New {package_type} package uploaded from device {device_id}",
-                notification_type=NotificationType.INFO,
+                notification_type="info",
                 source="package",
                 source_id=package_id,
                 details={"device_id": device_id, "package_type": package_type}
@@ -187,7 +187,7 @@ class NotificationService:
                 db,
                 NotificationCreate(
                     message=f"Package {package_id} processed successfully",
-                    notification_type=NotificationType.SUCCESS,
+                    notification_type="success",
                     source="package",
                     source_id=package_id
                 )
@@ -197,7 +197,7 @@ class NotificationService:
                 db,
                 NotificationCreate(
                     message=f"Error processing package {package_id}",
-                    notification_type=NotificationType.ERROR,
+                    notification_type="error",
                     source="package",
                     source_id=package_id,
                     details={"error": error_msg}
@@ -211,7 +211,7 @@ class NotificationService:
             db,
             NotificationCreate(
                 message=f"New model registered: {model_name} (version {version})",
-                notification_type=NotificationType.SUCCESS,
+                notification_type="success",
                 source="model",
                 source_id=model_name,
                 details={"version": version}

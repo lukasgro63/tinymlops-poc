@@ -2,6 +2,7 @@
 DriftTransformer for TinySphere
 -------------------------------
 Transforms drift event packages uploaded by TinyLCM devices.
+Integrates with MLflow for tracking and visualizing drift events.
 """
 
 import json
@@ -11,9 +12,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
+import mlflow
+
 from tinysphere.api.models.notification import NotificationCreate
 from tinysphere.api.services.drift_service import DriftService
-from tinysphere.db.models import DriftStatus, DriftType, NotificationType
+from tinysphere.db.models import DriftStatus, DriftType
 from tinysphere.importer.transformers.base import DataTransformer
 
 logger = logging.getLogger(__name__)
@@ -88,9 +91,12 @@ class DriftTransformer(DataTransformer):
         logger.info(f"DriftTransformer.transform called for package: {package_id} from device: {device_id}")
         logger.info(f"Metadata: {metadata}")
 
+        # Set up MLflow tracking
+        mlflow.set_experiment(f"device_{device_id}_drift")
+
         result = {
             "transformer": "drift",
-            "status": "processed",
+            "status": "success",  # Use "success" instead of "processed" to match other transformers
             "processed_files": [],
             "drift_events": []
         }
@@ -120,24 +126,130 @@ class DriftTransformer(DataTransformer):
                         logger.error(f"Error checking JSON file {json_file}: {e}")
 
             if not drift_files:
-                result["status"] = "no_content"
+                # Return with error status for proper handling
+                result["status"] = "error"
+                result["message"] = f"No drift files found in package {package_id}"
                 logger.warning(f"After additional checks, still no drift files found in package {package_id}")
                 return result
-        
+
+        # Determine model name - needed for MLflow integration
+        model_name = None
+        model_version = None
+
+        # Try to find model_info.json which might contain model information
+        model_info_files = []
+        for file in files:
+            if file.name.lower() in ['model_info.json', 'metadata.json']:
+                model_info_files.append(file)
+            elif file.name.lower().startswith('model_info_') and file.suffix.lower() == '.json':
+                model_info_files.append(file)
+
+        if model_info_files:
+            try:
+                with open(model_info_files[0], 'r') as f:
+                    model_info = json.load(f)
+                    if "model_name" in model_info:
+                        model_name = model_info["model_name"]
+                    if "model_version" in model_info:
+                        model_version = model_info["model_version"]
+            except Exception as e:
+                logger.warning(f"Could not read model info file: {str(e)}")
+
+        # If no model info available, construct model name from device_id
+        if not model_name:
+            model_name = f"{device_id}-model"
+            logger.info(f"Using constructed model name: {model_name}")
+
+        # Find production version of the model if available
+        production_version = None
+        client = None
+        found_model = False
+
+        try:
+            from mlflow.tracking import MlflowClient
+            client = MlflowClient()
+
+            # Search with the given model name
+            if model_name:
+                # First look for production versions
+                versions = client.get_latest_versions(model_name, stages=["Production"])
+                if versions:
+                    production_version = versions[0].version
+                    logger.info(f"Found production version {production_version} for model {model_name}")
+                    found_model = True
+                else:
+                    # If no production version found, use the latest version
+                    all_versions = client.get_latest_versions(model_name)
+                    if all_versions:
+                        production_version = all_versions[0].version
+                        logger.info(f"No production version found, using latest version {production_version} for model {model_name}")
+                        found_model = True
+
+            # If no model found, try to find any model for this device
+            if not found_model and device_id:
+                logger.info(f"No model found with name {model_name}, searching for any model from device {device_id}")
+                # Search for models with device_id prefix
+                possible_model_prefix = f"{device_id}-"
+
+                # Search all registered models
+                registered_models = client.search_registered_models()
+                for registered_model in registered_models:
+                    if registered_model.name.startswith(possible_model_prefix):
+                        model_name = registered_model.name
+                        # Get latest version
+                        versions = client.get_latest_versions(model_name, stages=["Production"])
+                        if versions:
+                            production_version = versions[0].version
+                            logger.info(f"Found model {model_name} version {production_version} for device {device_id}")
+                            found_model = True
+                            break
+                        else:
+                            all_versions = client.get_latest_versions(model_name)
+                            if all_versions:
+                                production_version = all_versions[0].version
+                                logger.info(f"Found model {model_name} version {production_version} for device {device_id}")
+                                found_model = True
+                                break
+
+                if not found_model:
+                    logger.warning(f"Could not find any model for device {device_id}")
+        except Exception as e:
+            logger.warning(f"Error finding production version: {str(e)}")
+
         # Process each drift file
+        mlflow_run_ids = []  # List to store created MLflow run IDs
+
         for drift_file in drift_files:
             try:
                 logger.debug(f"Processing drift file: {drift_file}")
-                
+
                 # Handle different file formats
                 if drift_file.suffix.lower() == ".json":
                     with open(drift_file, "r") as f:
                         data = json.load(f)
-                    
+
                     # Process the single event
-                    self._process_drift_event(data, device_id, result)
+                    drift_event = {}
+                    self._process_drift_event(data, device_id, result, package_id)
                     result["processed_files"].append(str(drift_file))
-                    
+
+                    # Get the last processed drift event from the result
+                    if result.get("drift_events"):
+                        drift_event = result["drift_events"][-1]
+
+                    # Log the drift event to MLflow
+                    if drift_event:
+                        mlflow_run_id = self._log_drift_to_mlflow(
+                            drift_event=drift_event,
+                            device_id=device_id,
+                            model_name=model_name,
+                            model_version=production_version,
+                            package_id=package_id,
+                            drift_file=drift_file
+                        )
+                        if mlflow_run_id:
+                            mlflow_run_ids.append(mlflow_run_id)
+
                 elif drift_file.suffix.lower() == ".jsonl":
                     # Process line by line for JSONL format
                     events_processed = 0
@@ -146,30 +258,50 @@ class DriftTransformer(DataTransformer):
                             line = line.strip()
                             if not line:
                                 continue
-                                
+
                             try:
                                 data = json.loads(line)
-                                self._process_drift_event(data, device_id, result)
+
+                                # Process drift event and update result
+                                result_before = len(result.get("drift_events", []))
+                                self._process_drift_event(data, device_id, result, package_id)
                                 events_processed += 1
+
+                                # Check if a new drift event was added
+                                if len(result.get("drift_events", [])) > result_before:
+                                    drift_event = result["drift_events"][-1]
+
+                                    # Log the drift event to MLflow
+                                    mlflow_run_id = self._log_drift_to_mlflow(
+                                        drift_event=drift_event,
+                                        device_id=device_id,
+                                        model_name=model_name,
+                                        model_version=production_version,
+                                        package_id=package_id,
+                                        drift_file=drift_file
+                                    )
+                                    if mlflow_run_id:
+                                        mlflow_run_ids.append(mlflow_run_id)
+
                             except json.JSONDecodeError as e:
                                 logger.error(f"Error parsing JSON line in {drift_file}: {e}")
                                 continue
-                    
+
                     if events_processed > 0:
                         result["processed_files"].append(str(drift_file))
                         logger.info(f"Processed {events_processed} drift events from {drift_file}")
-                    
+
             except Exception as e:
                 logger.error(f"Error processing drift file {drift_file}: {e}")
                 result["errors"] = result.get("errors", [])
                 result["errors"].append(f"Failed to process {drift_file}: {str(e)}")
-        
+
         # Process sample images if any
         sample_images = []
         for file in files:
             if file.suffix.lower() in [".jpg", ".jpeg", ".png"] and "sample" in file.name.lower():
                 sample_images.append(file)
-        
+
         if sample_images:
             for img_file in sample_images:
                 # Find sample ID from filename if possible
@@ -180,7 +312,7 @@ class DriftTransformer(DataTransformer):
                     if len(parts) > 1:
                         # Assume last part is sample_id
                         sample_id = parts[-1]
-                
+
                 # Record processed image
                 result["processed_files"].append(str(img_file))
                 result["sample_images"] = result.get("sample_images", [])
@@ -188,11 +320,37 @@ class DriftTransformer(DataTransformer):
                     "file": str(img_file),
                     "sample_id": sample_id
                 })
-        
-        logger.info(f"Drift transformer processed {len(result.get('drift_events', []))} events from package {package_id}")
-        return result
+
+        # Check if we processed events successfully and set status accordingly
+        processed_events = len(result.get('drift_events', []))
+        logger.info(f"Drift transformer processed {processed_events} events from package {package_id}")
+
+        # Add MLflow run IDs to result
+        if mlflow_run_ids:
+            result["mlflow_run_ids"] = mlflow_run_ids
+            logger.info(f"Created {len(mlflow_run_ids)} MLflow runs for drift events")
+
+        # Final result should use same format as other transformers
+        if processed_events > 0:
+            # We processed at least one event successfully
+            return {
+                "status": "success",
+                "message": f"Successfully processed {processed_events} drift events",
+                "drift_event_count": processed_events,
+                "processed_files": result["processed_files"],
+                "drift_events": result.get("drift_events", []),
+                "mlflow_run_ids": mlflow_run_ids
+            }
+        else:
+            # No events processed
+            return {
+                "status": "error",
+                "message": "Failed to process any drift events",
+                "processed_files": result["processed_files"],
+                "errors": result.get("errors", [])
+            }
     
-    def _process_drift_event(self, data: Dict[str, Any], device_id: str, result: Dict[str, Any]) -> None:
+    def _process_drift_event(self, data: Dict[str, Any], device_id: str, result: Dict[str, Any], package_id: str = None) -> None:
         """
         Process a single drift event and update the result.
 
@@ -200,6 +358,7 @@ class DriftTransformer(DataTransformer):
             data: Drift event data
             device_id: ID of the device
             result: Result dictionary to update
+            package_id: ID of the package (optional)
         """
         try:
             logger.info(f"Processing drift event data: {data}")
@@ -336,19 +495,225 @@ class DriftTransformer(DataTransformer):
         else:
             return "UNKNOWN"
     
+    def _log_drift_to_mlflow(self, drift_event: Dict[str, Any], device_id: str, model_name: str, model_version: str, package_id: str, drift_file: Path) -> str:
+        """
+        Log a drift event to MLflow as a run.
+
+        Args:
+            drift_event: Drift event data to log
+            device_id: Device ID
+            model_name: Model name (if available)
+            model_version: Model version (if available)
+            package_id: Package ID
+            drift_file: Path to the drift file
+
+        Returns:
+            MLflow run ID if successful, None otherwise
+        """
+        try:
+            # Set up the run name based on drift event data
+            detector_name = drift_event.get("detector_name", "unknown")
+            drift_type = drift_event.get("drift_type", "UNKNOWN")
+            timestamp = drift_event.get("timestamp", datetime.now().isoformat())
+
+            # Format timestamp for display
+            try:
+                if isinstance(timestamp, str):
+                    dt = datetime.fromisoformat(timestamp)
+                    timestamp_str = dt.strftime("%Y-%m-%d_%H-%M-%S")
+                else:
+                    timestamp_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            except Exception:
+                timestamp_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+            # Create a descriptive run name
+            run_name = f"drift_{drift_type.lower()}_{detector_name}_{timestamp_str}"
+
+            # Set up run tags
+            run_tags = {
+                "mlflow.source.name": f"device_{device_id}",
+                "mlflow.source.type": "EDGE_DEVICE",
+                "drift_type": drift_type,
+                "detector_name": detector_name,
+                "device_id": device_id,
+                "package_id": package_id,
+                "entity_type": "DRIFT_EVENT"
+            }
+
+            # Start MLflow run
+            with mlflow.start_run(run_name=run_name, tags=run_tags):
+                # Log drift score and other metrics
+                drift_score = drift_event.get("drift_score", 0.0)
+                mlflow.log_metric("drift_score", drift_score)
+
+                # Log additional metrics from the original metrics
+                metrics = drift_event.get("metadata", {}).get("original_metrics", {})
+                if isinstance(metrics, dict):
+                    for key, value in metrics.items():
+                        if isinstance(value, (int, float)):
+                            mlflow.log_metric(f"drift_{key}", value)
+
+                # Log parameters
+                mlflow.log_param("device_id", device_id)
+                mlflow.log_param("package_id", package_id)
+                mlflow.log_param("drift_type", drift_type)
+                mlflow.log_param("detector_name", detector_name)
+
+                if "description" in drift_event and drift_event["description"]:
+                    mlflow.log_param("drift_reason", drift_event["description"])
+
+                # Log model information if available
+                if model_name:
+                    mlflow.log_param("model_name", model_name)
+                if model_version:
+                    mlflow.log_param("model_version", model_version)
+
+                # Log the drift file as an artifact
+                artifact_path = "drift_data"
+                mlflow.log_artifact(str(drift_file), artifact_path)
+
+                # Get run info
+                run_id = mlflow.active_run().info.run_id
+
+                # Link the run to the model if we have model information
+                if model_name and model_version and run_id:
+                    try:
+                        # Use the MLflow client for Registry operations
+                        from mlflow.tracking import MlflowClient
+                        client = MlflowClient()
+
+                        # Set the standard MLflow tags for model association
+                        client.set_tag(run_id, "mlflow.registeredModelName", model_name)
+                        client.set_tag(run_id, "mlflow.registeredModelVersion", model_version)
+
+                        # Create bidirectional link
+                        try:
+                            # Create alias for drift events
+                            registered_alias = f"drift_{device_id}"
+
+                            # Try to set the registered model alias
+                            try:
+                                client.set_registered_model_alias(
+                                    name=model_name,
+                                    version=model_version,
+                                    alias=registered_alias
+                                )
+                                logger.info(f"Set alias {registered_alias} for model {model_name} version {model_version}")
+                            except Exception as alias_error:
+                                logger.warning(f"Could not set alias: {str(alias_error)}")
+
+                                # If alias is not supported, register as a separate model
+                                try:
+                                    alias_model_name = f"{model_name}_drift"
+
+                                    # Check if model exists, create if not
+                                    try:
+                                        client.get_registered_model(alias_model_name)
+                                    except:
+                                        client.create_registered_model(alias_model_name)
+
+                                    # Create a dummy artifact to register
+                                    import tempfile
+                                    with tempfile.NamedTemporaryFile(suffix=".json") as tmp:
+                                        # Write drift data to temp file
+                                        json_str = json.dumps(drift_event, indent=2)
+                                        tmp.write(json_str.encode('utf-8'))
+                                        tmp.flush()
+
+                                        # Log as artifact
+                                        mlflow.log_artifact(tmp.name, "drift_data")
+
+                                    # Get artifact URI for the drift data
+                                    artifact_uri = f"runs:/{run_id}/drift_data"
+
+                                    # Register the drift event as a "model"
+                                    model_details = mlflow.register_model(
+                                        model_uri=artifact_uri,
+                                        name=alias_model_name,
+                                        tags={
+                                            "original_model": model_name,
+                                            "original_version": model_version,
+                                            "drift_run_id": run_id,
+                                            "device_id": device_id,
+                                            "drift_type": drift_type
+                                        }
+                                    )
+                                    logger.info(f"Registered drift as model {alias_model_name} version {model_details.version}")
+                                except Exception as model_reg_error:
+                                    logger.warning(f"Error registering drift as model: {str(model_reg_error)}")
+
+                            # Additional tags for UI display
+                            additional_tags = {
+                                "drift_type": drift_type,
+                                "device_id": device_id,
+                                "model_link": f"models:/{model_name}/{model_version}",
+                                "linked_entity": "DRIFT",
+                                "registered_model_name": model_name,
+                                "registered_model_version": model_version,
+                                "drift_score": str(drift_score)
+                            }
+
+                            for tag_key, tag_value in additional_tags.items():
+                                client.set_tag(run_id, tag_key, str(tag_value))
+
+                            # Add backward link from model to run
+                            try:
+                                client.set_model_version_tag(
+                                    name=model_name,
+                                    version=model_version,
+                                    key="drift.runId",
+                                    value=run_id
+                                )
+
+                                # Add drift score tag to model version for easy visibility
+                                client.set_model_version_tag(
+                                    name=model_name,
+                                    version=model_version,
+                                    key="drift.score",
+                                    value=str(drift_score)
+                                )
+
+                                # Add drift type tag to model version
+                                client.set_model_version_tag(
+                                    name=model_name,
+                                    version=model_version,
+                                    key="drift.type",
+                                    value=drift_type
+                                )
+                            except Exception as tag_error:
+                                logger.warning(f"Error setting model version tags: {str(tag_error)}")
+
+                        except Exception as reg_error:
+                            logger.warning(f"Could not register run with model directly: {str(reg_error)}")
+                            # Fallback - at least add basic tags
+                            client.set_tag(run_id, "registered_model_name", model_name)
+                            client.set_tag(run_id, "registered_model_version", model_version)
+
+                        logger.info(f"Linked drift run {run_id} to model {model_name} version {model_version}")
+
+                    except Exception as e:
+                        logger.warning(f"Error linking run to model version: {str(e)}")
+
+                logger.info(f"Created MLflow run {run_id} for drift event from {detector_name}")
+                return run_id
+
+        except Exception as e:
+            logger.error(f"Error logging drift event to MLflow: {e}")
+            return None
+
     def _parse_timestamp(self, timestamp) -> str:
         """
         Parse timestamp from various formats to ISO format.
-        
+
         Args:
             timestamp: Timestamp in various formats (Unix timestamp, ISO string)
-            
+
         Returns:
             Timestamp in ISO format
         """
         if timestamp is None:
             return datetime.now().isoformat()
-            
+
         try:
             if isinstance(timestamp, (int, float)):
                 dt = datetime.fromtimestamp(timestamp)
@@ -359,6 +724,6 @@ class DriftTransformer(DataTransformer):
                 return dt.isoformat()
         except (ValueError, TypeError):
             pass
-            
+
         # Default to current time
         return datetime.now().isoformat()
