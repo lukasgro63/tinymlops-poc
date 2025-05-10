@@ -383,7 +383,11 @@ def main():
     
     # Load configuration
     config = load_config(args.config)
-    
+
+    # Make config globally available for sync client
+    import examples.utils.sync_client as sync_client_module
+    sync_client_module.config = config
+
     # Set up logging
     setup_logging(config["device"]["log_level"])
     

@@ -20,6 +20,9 @@ from tinylcm.utils.errors import TinyLCMConnectionError, SyncError
 
 logger = logging.getLogger(__name__)
 
+# Global configuration variable that will be set from main_scenario1.py
+config = None
+
 
 class ExtendedSyncClient:
     """Extended SyncClient for the TinyLCM application."""
@@ -91,14 +94,120 @@ class ExtendedSyncClient:
     
     def register_device(self) -> bool:
         """Register the device with TinySphere.
-        
+
         Returns:
             True if registration was successful, False otherwise
         """
         try:
-            return self.client.register_device()
+            success = self.client.register_device()
+            if success:
+                # After successful device registration, send the model
+                self.send_model()
+            return success
         except TinyLCMConnectionError as e:
             logger.error(f"Device registration failed: {e}")
+            return False
+
+    def send_model(self, model_path: Optional[str] = None, labels_path: Optional[str] = None) -> bool:
+        """Send the device's model to the TinySphere server.
+
+        Args:
+            model_path: Path to the model file (optional, will use default if not specified)
+            labels_path: Path to the labels file (optional, will use default if not specified)
+
+        Returns:
+            True if the model was sent successfully, False otherwise
+        """
+        try:
+            # Use the provided paths or get them from the global config
+            global config
+            if config and "model" in config:
+                model_config = config.get("model", {})
+                model_path = model_path or model_config.get("model_path")
+                labels_path = labels_path or model_config.get("labels_path")
+
+            if not model_path:
+                logger.error("No model path specified and no config available")
+                return False
+
+            # Get current directory
+            current_dir = os.getcwd()
+            logger.info(f"Current working directory: {current_dir}")
+
+            # Ensure we have absolute paths
+            if not os.path.isabs(model_path):
+                model_path = os.path.join(current_dir, model_path)
+
+            if labels_path and not os.path.isabs(labels_path):
+                labels_path = os.path.join(current_dir, labels_path)
+
+            logger.info(f"Using model path: {model_path}")
+            if labels_path:
+                logger.info(f"Using labels path: {labels_path}")
+
+            # Check if files exist
+            if not os.path.exists(model_path):
+                logger.error(f"Model file not found: {model_path}")
+                return False
+
+            # Create package for model
+            description = f"Initial model from device {self.device_id}"
+            package_id = self.sync_interface.create_package(
+                device_id=self.device_id,
+                package_type="model",
+                description=description
+            )
+
+            # Add model file to package
+            if not self.sync_interface.add_file_to_package(
+                package_id=package_id,
+                file_path=model_path,
+                file_type="model"
+            ):
+                logger.error(f"Failed to add model file {model_path} to package")
+                return False
+
+            # Add labels file if available
+            if labels_path and os.path.exists(labels_path):
+                if not self.sync_interface.add_file_to_package(
+                    package_id=package_id,
+                    file_path=labels_path,
+                    file_type="labels"
+                ):
+                    logger.warning(f"Failed to add labels file {labels_path} to package")
+
+            # Create metadata
+            metadata = {
+                "device_id": self.device_id,
+                "timestamp": time.time(),
+                "model_info": {
+                    "source": "device_registration",
+                    "model_type": "tflite",
+                    "description": "Initial device model"
+                }
+            }
+
+            # Add metadata to package
+            self.sync_interface.add_json_to_package(
+                package_id=package_id,
+                json_data=metadata,
+                path="model_info.json"
+            )
+
+            # Finalize the package
+            self.sync_interface.finalize_package(package_id)
+
+            # Send the package
+            result = self.send_package(package_id)
+            if result:
+                logger.info(f"Successfully sent initial model to server")
+            else:
+                logger.error(f"Failed to send initial model to server")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to send model to server: {e}")
             return False
     
     def send_package(self, package_id: str) -> bool:
