@@ -49,7 +49,7 @@ from tinylcm.core.operational_monitor.monitor import OperationalMonitor
 from tinylcm.core.data_logger.logger import DataLogger
 from tinylcm.core.pipeline import InferencePipeline
 from tinylcm.core.data_structures import FeatureSample
-from tinylcm.client.sync_client import SyncClient
+from utils.sync_client import ExtendedSyncClient  # Use the extended version with additional features
 from tinylcm.utils.logging import setup_logger
 
 # Global variables
@@ -189,24 +189,112 @@ def on_drift_detected(drift_info: Dict[str, Any]) -> None:
             if image_path:
                 drift_data["image_path"] = str(image_path)
 
-            # Create files in the format expected by SyncClient
-            # Check SyncClient implementation to see where it looks for packages
+            # Try to use the ExtendedSyncClient method if available
+            if hasattr(sync_client, 'create_and_send_drift_event_package'):
+                # This is the best case - use the extended client's method
+                # Create a FeatureSample-like object for the current state
+                from tinylcm.core.data_structures import FeatureSample
+                current_sample_obj = FeatureSample(
+                    sample_id=f"drift_{int(time.time())}",
+                    features=None,
+                    prediction=None,
+                    timestamp=time.time(),
+                    metadata={"confidence": 0.0}
+                )
+
+                # Use the specialized method
+                success = sync_client.create_and_send_drift_event_package(
+                    detector_name=detector_name,
+                    reason=reason,
+                    metrics=metrics,
+                    sample=current_sample_obj,
+                    image_path=str(image_path) if image_path else None
+                )
+
+                logger.info(f"Drift event sent using extended client: {'Success' if success else 'Failed'}")
+                return  # Exit early if we used this method
+
+            # Fall back to manual package creation
+            # Get the correct directory structure - usually it's in the sync_interface
+            if hasattr(sync_client, 'sync_interface') and hasattr(sync_client.sync_interface, 'create_package'):
+                # Use the sync_interface to create package with proper structure
+                try:
+                    # Get device_id for the package
+                    dev_id = None
+                    if 'device_id_manager' in globals():
+                        dev_id = device_id_manager.get_device_id()
+                    elif hasattr(sync_client, 'device_id'):
+                        dev_id = sync_client.device_id
+                    else:
+                        import socket
+                        dev_id = f"device-{socket.gethostname()}"
+
+                    package_id = sync_client.sync_interface.create_package(
+                        device_id=dev_id,
+                        package_type="drift_event",
+                        description=f"Drift detected by {detector_name}: {reason}"
+                    )
+
+                    # Now create a temp file for the drift data
+                    import tempfile
+                    temp_dir = tempfile.mkdtemp()
+                    drift_file = os.path.join(temp_dir, "drift_event.json")
+
+                    with open(drift_file, 'w') as f:
+                        json.dump(drift_data, f)
+
+                    # Add to package
+                    sync_client.sync_interface.add_file_to_package(
+                        package_id=package_id,
+                        file_path=drift_file,
+                        file_type="drift_event"
+                    )
+
+                    # Add image if available
+                    if image_path:
+                        sync_client.sync_interface.add_file_to_package(
+                            package_id=package_id,
+                            file_path=str(image_path),
+                            file_type="image"
+                        )
+
+                    # Finalize the package
+                    sync_client.sync_interface.finalize_package(package_id)
+
+                    # We'll use this package_id for future references
+                    return  # Exit early - we're done!
+                except Exception as e:
+                    logger.warning(f"Failed to create package using sync_interface: {e}")
+
+            # If we're still here, fall back to the most manual approach
             packages_dir = os.path.join(sync_dir, "packages")
             os.makedirs(packages_dir, exist_ok=True)
 
             # Create a unique package ID
             package_id = f"drift_{int(time.time())}_{uuid.uuid4().hex[:8]}"
 
-            # Create the package directory
+            # Create the package directory - try different structures that SyncClient might recognize
+            # Structure 1: packages/package_id/
             package_dir = os.path.join(packages_dir, package_id)
             os.makedirs(package_dir, exist_ok=True)
 
             # Create metadata.json - this is what SyncClient looks for
+            # Get device_id safely
+            dev_id = None
+            if 'device_id_manager' in globals():
+                dev_id = device_id_manager.get_device_id()
+            elif hasattr(sync_client, 'device_id'):
+                dev_id = sync_client.device_id
+            else:
+                # Last resort - use hostname
+                import socket
+                dev_id = f"device-{socket.gethostname()}"
+
             metadata = {
                 "id": package_id,
                 "type": "drift_event",
                 "timestamp": time.time(),
-                "device_id": device_id,  # Global device ID
+                "device_id": dev_id,  # Use the safely obtained device ID
                 "status": "pending"
             }
 
@@ -471,13 +559,14 @@ def main():
         else:
             data_logger = None
         
-        # Initialize SyncClient for communication with TinySphere
+        # Initialize ExtendedSyncClient for communication with TinySphere
         sync_config = tinylcm_config["sync_client"]
-        sync_client = SyncClient(
+        sync_client = ExtendedSyncClient(
             server_url=sync_config["server_url"],
-            api_key=sync_config["api_key"],
             device_id=device_id,
-            sync_dir=sync_config.get("sync_dir", "./sync_data"),  # Wichtig: sync_dir Parameter hinzufügen
+            api_key=sync_config["api_key"],
+            sync_dir=sync_config.get("sync_dir", "./sync_data"),
+            sync_interval_seconds=sync_config["sync_interval_seconds"],
             max_retries=sync_config["max_retries"],
             auto_register=sync_config["auto_register"]
         )
@@ -579,22 +668,25 @@ def main():
             # Periodically sync with TinySphere
             if current_time - last_sync_time >= sync_interval:
                 try:
-                    # Try different sync methods depending on what's available
-                    if hasattr(sync_client, 'sync_all_pending_packages'):
-                        # Use sync_all_pending_packages if available
-                        sync_client.sync_all_pending_packages()
-                    elif hasattr(sync_client, 'synchronize'):
-                        # Some implementations may have this method
-                        sync_client.synchronize()
-                    elif hasattr(sync_client, 'process_pending_packages'):
-                        # Try alternative methods
-                        sync_client.process_pending_packages()
+                    # Get operational metrics from monitor
+                    if operational_monitor:
+                        try:
+                            metrics = operational_monitor.get_current_metrics()
+                            # Send metrics to TinySphere
+                            logger.debug("Sending metrics to TinySphere")
+                            sync_client.create_and_send_metrics_package(metrics)
+                        except Exception as e:
+                            logger.error(f"Error getting metrics: {e}")
+
+                    # Sync all pending packages
+                    logger.debug("Syncing pending packages with TinySphere")
+                    sync_results = sync_client.sync_all_pending_packages()
+                    if sync_results:
+                        logger.info(f"Synced {len(sync_results)} packages with TinySphere")
                     else:
-                        # Just log status if no sync method found
-                        logger.info("Checking sync status")
+                        logger.debug("No packages to sync with TinySphere")
 
                     last_sync_time = current_time
-                    logger.debug("Successfully synchronized with TinySphere")
                 except Exception as e:
                     logger.warning(f"Failed to synchronize with TinySphere: {e}")
             
@@ -619,23 +711,14 @@ def main():
         logger.info("Performing final sync with TinySphere")
         if 'sync_client' in locals() and sync_client:
             try:
-                # Try different sync methods depending on what's available
-                if hasattr(sync_client, 'sync_all_pending_packages'):
-                    # Use sync_all_pending_packages if available
-                    sync_client.sync_all_pending_packages()
-                elif hasattr(sync_client, 'synchronize'):
-                    # Some implementations may have this method
-                    sync_client.synchronize()
-                elif hasattr(sync_client, 'process_pending_packages'):
-                    # Try alternative methods
-                    sync_client.process_pending_packages()
+                # Sync all pending packages
+                sync_client.sync_all_pending_packages()
+                logger.info("Final sync completed")
             except Exception as e:
                 logger.warning(f"Error during final sync: {e}")
-                pass
 
             # Close the client
-            if hasattr(sync_client, 'close'):
-                sync_client.close()
+            sync_client.close()
             logger.info("Sync client closed")
         
         logger.info("TinyLCM Autonomous Monitoring Example completed")
