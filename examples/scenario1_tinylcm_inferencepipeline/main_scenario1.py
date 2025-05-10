@@ -251,10 +251,28 @@ def main():
         
         # Initialize feature extractor
         feature_extractor_config = tinylcm_config["feature_extractor"]
+
+        # Create preprocessor function for image conversion
+        def preprocess_image(image):
+            """Preprocess image for the TFLite model."""
+            # Convert to RGB if needed
+            if image.ndim == 3 and image.shape[2] == 3:
+                # Check if image is already RGB (not BGR)
+                if isinstance(image, np.ndarray) and image.flags['C_CONTIGUOUS']:
+                    # Image is likely BGR from OpenCV
+                    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            elif image.ndim == 3 and image.shape[2] == 4:
+                # BGRA to RGB
+                image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGB)
+
+            return image
+
         feature_extractor = TFLiteFeatureExtractor(
             model_path=feature_extractor_config["model_path"],
             feature_layer_index=feature_extractor_config["feature_layer_index"],
-            batch_size=feature_extractor_config.get("batch_size", 1)
+            normalize_features=feature_extractor_config.get("normalize_features", True),
+            lazy_loading=feature_extractor_config.get("lazy_loading", False),
+            preprocessors=[preprocess_image]
         )
         
         # Initialize lightweight KNN
@@ -268,9 +286,14 @@ def main():
         
         # Initialize some initial samples for the KNN classifier
         # This is necessary even in monitoring-only mode
-        feature_dimension = feature_extractor.output_dimension
+
+        # First extract features from a test image to determine dimension
+        # Create a small test image for feature extraction
+        test_image = np.zeros((224, 224, 3), dtype=np.uint8)
+        features = feature_extractor.extract_features(test_image)
+        feature_dimension = features.shape[0] if features.ndim == 1 else features.shape[1]
         logger.info(f"Feature extractor output dimension: {feature_dimension}")
-        
+
         # Generate some initial samples for classifier
         initial_features = np.random.randn(len(labels), feature_dimension)
         initial_timestamps = [time.time() - (i*10) for i in range(len(labels))]
@@ -325,7 +348,7 @@ def main():
         pipeline = InferencePipeline(
             feature_extractor=feature_extractor,
             classifier=classifier,
-            drift_detectors=[drift_detector],
+            autonomous_monitors=[drift_detector],
             operational_monitor=operational_monitor,
             data_logger=data_logger
         )
@@ -381,24 +404,19 @@ def main():
             # Resize image to target size
             target_size = tuple(camera_config["inference_resolution"])
             resized_frame = resize_image(frame, target_size)
-            
-            # Convert to RGB (TFLite model expects RGB input)
-            rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
-            
+
             # Create sample ID
             sample_id = f"{device_id}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-            
-            # Create FeatureSample with the raw input
-            sample = FeatureSample(
+
+            # Process the frame directly with TinyLCM pipeline
+            # The pipeline will use the preprocessor function to convert BGR to RGB
+            result = pipeline.process(
+                input_data=resized_frame,
+                label=None,  # No ground truth label available
                 sample_id=sample_id,
-                features=None,  # Will be extracted by the pipeline
-                prediction=None,  # Will be assigned by the pipeline
                 timestamp=time.time(),
-                metadata={"input_data": rgb_frame}
+                extract_features=True  # Tell the pipeline to extract features from the input
             )
-            
-            # Process the sample with TinyLCM pipeline
-            result = pipeline.process(sample)
             
             # Extract prediction and confidence from result
             if result:
