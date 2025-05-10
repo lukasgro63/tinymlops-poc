@@ -175,8 +175,18 @@ def on_drift_detected(drift_info: Dict[str, Any]) -> None:
                 "timestamp": datetime.now().isoformat()
             }
 
+            # Get sync directory - check if it's available in various ways
+            sync_dir = None
+            if hasattr(sync_client, 'sync_dir'):
+                sync_dir = sync_client.sync_dir
+            elif hasattr(sync_client, 'sync_interface') and hasattr(sync_client.sync_interface, 'storage_dir'):
+                sync_dir = sync_client.sync_interface.storage_dir
+            else:
+                # Use default location from config
+                sync_dir = tinylcm_config["sync_client"].get("sync_dir", "./sync_data")
+
             # Write drift data to a temporary file
-            drift_dir = os.path.join(sync_client.sync_dir, "drift_events")
+            drift_dir = os.path.join(sync_dir, "drift_events")
             os.makedirs(drift_dir, exist_ok=True)
 
             drift_file = os.path.join(drift_dir, f"drift_event_{timestamp.replace(' ', '_').replace(':', '-')}.json")
@@ -367,6 +377,47 @@ def main():
             reference_update_interval=drift_detector_config["warmup_samples"]
         )
         
+        # Add a filter to prevent multiple sequential drift detections
+        drift_detector.drift_cooldown_period = 100  # Samples to wait before detecting drift again
+        drift_detector.samples_since_last_drift = 0
+
+        # Override update method to handle detection cooldown
+        original_update = drift_detector.update
+        def update_with_cooldown(record, *args, **kwargs):
+            # Increment counter since last drift
+            drift_detector.samples_since_last_drift += 1
+
+            # Check if we're in cooldown period after drift detected
+            if hasattr(drift_detector, 'drift_detected') and drift_detector.drift_detected:
+                # During cooldown period, don't try to update stats
+                if drift_detector.samples_since_last_drift < drift_detector.drift_cooldown_period:
+                    return False, {}
+                else:
+                    # Cooldown period over, reset drift flag
+                    drift_detector.drift_detected = False
+
+            try:
+                # Try to extract feature safely
+                if not record or 'features' not in record:
+                    return False, {}
+
+                # Call original update
+                result = original_update(record, *args, **kwargs)
+
+                # If drift detected, set flag
+                is_drift, _ = result
+                if is_drift:
+                    drift_detector.drift_detected = True
+                    drift_detector.samples_since_last_drift = 0
+
+                return result
+            except Exception as e:
+                logger.warning(f"Error in drift detector update: {e}")
+                return False, {}
+
+        # Replace the update method
+        drift_detector.update = update_with_cooldown
+
         # Register drift callback
         drift_detector.register_callback(on_drift_detected)
         
