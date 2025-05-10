@@ -3,9 +3,8 @@
 TinyLCM Autonomous Monitoring Example (Scenario 1)
 --------------------------------------------------
 This example demonstrates autonomous drift monitoring using the InferencePipeline
-from the tinylcm library. It captures frames from a camera, extracts features using
-a TFLiteFeatureExtractor, classifies them with LightweightKNN, and monitors for drift
-using PageHinkleyFeatureMonitor.
+from the tinylcm library. It captures frames from a camera, processes them through 
+the TinyLCM pipeline, and monitors for drift using PageHinkleyFeatureMonitor.
 
 This is designed for a headless Raspberry Pi Zero 2W.
 """
@@ -29,21 +28,18 @@ import numpy as np
 try:
     from tflite_runtime.interpreter import Interpreter as tflite_Interpreter
     TFLITE_AVAILABLE = True
-    tflite = tflite_Interpreter
 except ImportError:
     try:
         import tensorflow as tf
         TFLITE_AVAILABLE = True
-        tflite = tf.lite.Interpreter
     except ImportError:
         TFLITE_AVAILABLE = False
-        tflite = None
 
 # Import utils from parent directory
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.camera_handler import CameraHandler
 from utils.device_id_manager import DeviceIDManager
-from utils.preprocessors import prepare_input_tensor_quantized, resize_image
+from utils.preprocessors import resize_image
 
 # Import tinylcm components
 from tinylcm.core.feature_extractors.tflite import TFLiteFeatureExtractor
@@ -52,6 +48,7 @@ from tinylcm.core.drift_detection.features import PageHinkleyFeatureMonitor
 from tinylcm.core.operational_monitor.monitor import OperationalMonitor
 from tinylcm.core.data_logger.logger import DataLogger
 from tinylcm.core.pipeline import InferencePipeline
+from tinylcm.core.data_structures import FeatureSample
 from tinylcm.client.sync_client import SyncClient
 from tinylcm.utils.logging import setup_logger
 
@@ -59,7 +56,6 @@ from tinylcm.utils.logging import setup_logger
 logger = None
 running = True
 current_frame = None
-current_prediction = None
 config = None
 sync_client = None
 
@@ -153,7 +149,7 @@ def on_drift_detected(drift_info: Dict[str, Any]) -> None:
         logger.info(f"  {key}: {value}")
     
     # Global reference to the sync client and current frame
-    global sync_client, current_frame, current_prediction
+    global sync_client, current_frame
     
     # Save the current frame if drift image saving is enabled
     image_path = None
@@ -165,23 +161,14 @@ def on_drift_detected(drift_info: Dict[str, Any]) -> None:
         cv2.imwrite(str(image_path), current_frame)
         logger.info(f"Saved drift image to {image_path}")
     
-    # If sync client is available, send drift event
+    # If sync client is available, create and send a drift event package
     if sync_client:
         try:
-            # Create metrics package with drift event details
-            drift_metrics = {
-                "detector": detector_name,
-                "reason": reason,
-                "timestamp": time.time(),
-                "current_prediction": current_prediction,
-                "drift_details": metrics
-            }
-            
-            # Send metrics package
-            success = sync_client.send_metrics(drift_metrics, "drift_event")
-            logger.info(f"Drift event sent to TinySphere: {'Success' if success else 'Failed'}")
+            # Send metrics package with drift event details
+            sync_client.synchronize_all()
+            logger.info(f"Synchronized data with TinySphere after drift event")
         except Exception as e:
-            logger.error(f"Failed to send drift event: {e}")
+            logger.error(f"Failed to synchronize after drift event: {e}")
 
 
 def handle_sigterm(signum, frame):
@@ -189,25 +176,6 @@ def handle_sigterm(signum, frame):
     global running
     logger.info("Received termination signal, shutting down...")
     running = False
-
-
-def preprocess_input(image: np.ndarray, target_size: Tuple[int, int]) -> np.ndarray:
-    """Preprocess the input image for the TFLite model.
-    
-    Args:
-        image: Input image
-        target_size: Target size (width, height)
-        
-    Returns:
-        Preprocessed image
-    """
-    # Resize the image to the target size
-    resized = resize_image(image, target_size)
-    
-    # Convert BGR to RGB (TFLite models usually expect RGB)
-    rgb_image = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-    
-    return rgb_image
 
 
 def process_labels(labels_path: str) -> List[str]:
@@ -236,7 +204,7 @@ def process_labels(labels_path: str) -> List[str]:
 
 def main():
     """Main function for the example application."""
-    global running, current_frame, current_prediction, config, sync_client
+    global running, current_frame, config, sync_client
     
     parser = argparse.ArgumentParser(description="TinyLCM Autonomous Monitoring Example (Scenario 1)")
     parser.add_argument("--config", type=str, default="config_scenario1.json",
@@ -300,10 +268,13 @@ def main():
         
         # Initialize some initial samples for the KNN classifier
         # This is necessary even in monitoring-only mode
-        initial_features = np.random.randn(2, feature_extractor.output_dimension)
-        initial_labels = ["red", "green"]
-        initial_timestamps = [time.time() - 100, time.time() - 50]
-        classifier.fit(initial_features, initial_labels, initial_timestamps)
+        feature_dimension = feature_extractor.output_dimension
+        logger.info(f"Feature extractor output dimension: {feature_dimension}")
+        
+        # Generate some initial samples for classifier
+        initial_features = np.random.randn(len(labels), feature_dimension)
+        initial_timestamps = [time.time() - (i*10) for i in range(len(labels))]
+        classifier.fit(initial_features, labels, initial_timestamps)
         
         # Initialize drift detector
         drift_detector_config = tinylcm_config["drift_detectors"][0]  # Use first detector
@@ -346,7 +317,6 @@ def main():
             server_url=sync_config["server_url"],
             api_key=sync_config["api_key"],
             device_id=device_id,
-            sync_interface=None,  # Will be created automatically
             max_retries=sync_config["max_retries"],
             auto_register=sync_config["auto_register"]
         )
@@ -364,24 +334,6 @@ def main():
         try:
             status = sync_client.check_server_status()
             logger.info(f"Successfully connected to TinySphere server: {status}")
-            
-            # Send model to TinySphere
-            model_path = model_config["model_path"]
-            try:
-                # Prepare a model info package for syncing
-                model_info = {
-                    "model_type": "tflite",
-                    "model_name": f"{device_id}_model",
-                    "feature_dimension": feature_extractor.output_dimension,
-                    "classes": labels,
-                    "timestamp": time.time()
-                }
-                
-                # Send model info to TinySphere
-                sync_client.send_metrics(model_info, "model_info")
-                logger.info("Sent model information to TinySphere")
-            except Exception as e:
-                logger.error(f"Failed to send model to TinySphere: {e}")
         except Exception as e:
             logger.warning(f"Could not connect to TinySphere server: {e}")
         
@@ -410,6 +362,9 @@ def main():
         last_drift_check_time = time.time()
         drift_check_interval = 1.0  # Check for drift every 1 second
         
+        last_sync_time = time.time()
+        sync_interval = sync_config["sync_interval_seconds"]
+        
         while running:
             loop_start_time = time.time()
             
@@ -420,23 +375,37 @@ def main():
                 time.sleep(0.1)
                 continue
             
-            # Make a copy of the frame for drift visualization
+            # Store current frame for drift visualization
             current_frame = frame.copy()
             
-            # Preprocess the image for the model
+            # Resize image to target size
             target_size = tuple(camera_config["inference_resolution"])
-            preprocessed_image = preprocess_input(frame, target_size)
+            resized_frame = resize_image(frame, target_size)
             
-            # Create a sample ID
+            # Convert to RGB (TFLite model expects RGB input)
+            rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
+            
+            # Create sample ID
             sample_id = f"{device_id}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
             
-            # Process the image with TinyLCM pipeline
-            result = pipeline.process(preprocessed_image, sample_id=sample_id)
+            # Create FeatureSample with the raw input
+            sample = FeatureSample(
+                sample_id=sample_id,
+                features=None,  # Will be extracted by the pipeline
+                prediction=None,  # Will be assigned by the pipeline
+                timestamp=time.time(),
+                metadata={"input_data": rgb_frame}
+            )
             
-            # Extract prediction and confidence
-            prediction = result.get("prediction", "unknown")
-            confidence = result.get("confidence", 0.0)
-            current_prediction = prediction
+            # Process the sample with TinyLCM pipeline
+            result = pipeline.process(sample)
+            
+            # Extract prediction and confidence from result
+            if result:
+                prediction = result.get("prediction", "unknown")
+                confidence = result.get("confidence", 0.0)
+                if prediction:
+                    logger.debug(f"Frame {frame_count}: Prediction={prediction}, Confidence={confidence:.4f}")
             
             # Update frame counter
             frame_count += 1
@@ -450,15 +419,14 @@ def main():
             if current_time - last_drift_check_time >= drift_check_interval:
                 pipeline.check_autonomous_drifts()
                 last_drift_check_time = current_time
-                
-                # Send operational metrics to TinySphere periodically
+            
+            # Periodically sync with TinySphere
+            if current_time - last_sync_time >= sync_interval:
                 try:
-                    if sync_client and operational_monitor:
-                        metrics = operational_monitor.get_latest_metrics()
-                        if metrics:
-                            sync_client.send_metrics(metrics, "operational")
+                    sync_client.synchronize_all()
+                    last_sync_time = current_time
                 except Exception as e:
-                    logger.warning(f"Failed to send operational metrics: {e}")
+                    logger.warning(f"Failed to synchronize with TinySphere: {e}")
             
             # Sleep to maintain the desired framerate
             elapsed = time.time() - loop_start_time
@@ -480,6 +448,10 @@ def main():
         # Perform final sync with TinySphere
         logger.info("Performing final sync with TinySphere")
         if 'sync_client' in locals() and sync_client:
+            try:
+                sync_client.synchronize_all()
+            except Exception:
+                pass
             sync_client.close()
             logger.info("Sync client closed")
         
