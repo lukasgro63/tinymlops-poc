@@ -83,7 +83,7 @@ class StoneDetector:
         threshold: float = 0.6,
         input_mean: float = 127.5,
         input_std: float = 127.5,
-        feature_layer_index: int = -2
+        feature_layer_index: int = -1  # Changed from -2 to -1 to use the final output layer
     ):
         """Initialize the stone detector.
         

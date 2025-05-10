@@ -147,27 +147,24 @@ class ExtendedSyncClient:
         image_path: Optional[str] = None
     ) -> bool:
         """Create and send a package containing drift event information.
-        
+
         Args:
             detector_name: Name of the drift detector that triggered the event
             reason: Reason for the drift event
             metrics: Metrics associated with the drift event
             sample: FeatureSample that triggered the drift event
             image_path: Path to the image that triggered the drift event (optional)
-            
+
         Returns:
             True if the operation was successful, False otherwise
         """
         try:
-            # Generate a package ID
+            # Generate a package ID with description instead of metadata
+            description = f"Drift event from {detector_name}: {reason}"
             package_id = self.sync_interface.create_package(
+                device_id=self.device_id,
                 package_type="drift_event",
-                metadata={
-                    "device_id": self.device_id,
-                    "timestamp": time.time(),
-                    "detector_name": detector_name,
-                    "reason": reason
-                }
+                description=description
             )
             
             # Create the drift event data
@@ -212,22 +209,20 @@ class ExtendedSyncClient:
     
     def create_and_send_metrics_package(self, metrics: Dict[str, Any]) -> bool:
         """Create and send a package containing system metrics.
-        
+
         Args:
             metrics: System metrics to include in the package
-            
+
         Returns:
             True if the operation was successful, False otherwise
         """
         try:
             # Generate a package ID
+            description = f"System metrics from device {self.device_id}"
             package_id = self.sync_interface.create_package(
+                device_id=self.device_id,
                 package_type="metrics",
-                metadata={
-                    "device_id": self.device_id,
-                    "timestamp": time.time(),
-                    "metrics_type": "system"
-                }
+                description=description
             )
             
             # Add metrics data to the package
