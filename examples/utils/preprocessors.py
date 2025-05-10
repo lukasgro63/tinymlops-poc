@@ -264,8 +264,19 @@ def predict_with_threshold(
             valid_indices.append(i)
             valid_confidences.append(float(conf))
     
-    # Convert indices to labels
-    predicted_labels = [labels[i] if i < len(labels) else f"unknown_{i}" for i in valid_indices]
+    # Convert indices to labels and extract the actual label without the index prefix
+    # Example: "0 red" -> "red"
+    predicted_labels = []
+    for i in valid_indices:
+        if i < len(labels):
+            # Labels are formatted as "0 red", "1 green" - extract just the class name
+            parts = labels[i].split(' ', 1)
+            if len(parts) > 1:
+                predicted_labels.append(parts[1])  # Use "red" instead of "0 red"
+            else:
+                predicted_labels.append(labels[i])  # Fallback to the original label
+        else:
+            predicted_labels.append(f"unknown_{i}")
     
     return predicted_labels, valid_confidences
 

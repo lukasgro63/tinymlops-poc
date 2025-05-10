@@ -251,17 +251,37 @@ def create_directory_structure(config: Dict) -> None:
         debug_dir.mkdir(exist_ok=True)
 
 
-def on_drift_detected(detector_name: str, reason: str, metrics: Dict) -> None:
-    """Callback function for drift detection events."""
+def on_drift_detected(drift_info: Dict[str, Any]) -> None:
+    """Callback function for drift detection events.
+
+    Args:
+        drift_info: Dictionary containing information about the detected drift
+    """
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Extract information from drift info
+    detector_name = drift_info.get("detector", "Unknown")
+
+    # Determine reason based on the detector type
+    if "metric" in drift_info:
+        metric = drift_info["metric"]
+        current_value = drift_info.get("current_value", "unknown")
+        reason = f"{metric} drift detected (current: {current_value})"
+    else:
+        reason = "Drift detected"
+
+    # Log the drift detection
     logger.warning(f"DRIFT DETECTED by {detector_name}: {reason}")
-    
+
+    # Extract metrics from drift info
+    metrics = {k: v for k, v in drift_info.items() if k not in ["detector", "timestamp"]}
+
     for key, value in metrics.items():
         logger.info(f"  {key}: {value}")
-    
+
     # Global reference to the sync client and current sample
     global sync_client, current_sample, current_frame
-    
+
     # Send the drift event to TinySphere if sync client is available
     if sync_client:
         # Save the current frame if drift image saving is enabled
@@ -269,11 +289,11 @@ def on_drift_detected(detector_name: str, reason: str, metrics: Dict) -> None:
         if config["tinylcm"]["features"]["save_drift_images"] and current_frame is not None:
             drift_dir = Path("./drift_images")
             drift_dir.mkdir(exist_ok=True)
-            
+
             image_path = drift_dir / f"drift_{timestamp.replace(' ', '_').replace(':', '-')}_{detector_name}.jpg"
             cv2.imwrite(str(image_path), current_frame)
             logger.info(f"Saved drift image to {image_path}")
-        
+
         # Send the drift event to TinySphere
         success = sync_client.create_and_send_drift_event_package(
             detector_name=detector_name,
@@ -282,7 +302,7 @@ def on_drift_detected(detector_name: str, reason: str, metrics: Dict) -> None:
             sample=current_sample,
             image_path=str(image_path) if image_path else None
         )
-        
+
         logger.info(f"Drift event sent to TinySphere: {'Success' if success else 'Failed'}")
 
 
