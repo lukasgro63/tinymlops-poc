@@ -340,6 +340,7 @@ def main():
             server_url=sync_config["server_url"],
             api_key=sync_config["api_key"],
             device_id=device_id,
+            sync_dir=sync_config.get("sync_dir", "./sync_data"),  # Wichtig: sync_dir Parameter hinzufügen
             max_retries=sync_config["max_retries"],
             auto_register=sync_config["auto_register"]
         )
