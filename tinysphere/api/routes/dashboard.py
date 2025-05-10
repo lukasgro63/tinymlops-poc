@@ -484,9 +484,10 @@ def get_package_timeline(period: str = "week", db: Session = Depends(get_db)):
                             'date': date_str,
                             'models': 0,
                             'metrics': 0,
-                            'data_logs': 0
+                            'data_logs': 0,
+                            'drift_events': 0
                         }
-                    
+
                     # Map package types to chart categories
                     if package_type == 'model':
                         timeline_data[date_str]['models'] += count
@@ -494,6 +495,8 @@ def get_package_timeline(period: str = "week", db: Session = Depends(get_db)):
                         timeline_data[date_str]['metrics'] += count
                     elif package_type == 'data_log':
                         timeline_data[date_str]['data_logs'] += count
+                    elif 'drift' in package_type.lower():
+                        timeline_data[date_str]['drift_events'] += count
                 except Exception as item_err:
                     print(f"Error processing timeline item: {item_err}")
                     continue
@@ -506,7 +509,8 @@ def get_package_timeline(period: str = "week", db: Session = Depends(get_db)):
                         'date': current_date,
                         'models': 0,
                         'metrics': 0,
-                        'data_logs': 0
+                        'data_logs': 0,
+                        'drift_events': 0
                     }
             
             # Convert to list and sort by date
@@ -526,7 +530,8 @@ def get_package_timeline(period: str = "week", db: Session = Depends(get_db)):
                     'date': datetime.now(timezone.utc).strftime('%Y-%m-%d'),
                     'models': 0,
                     'metrics': 0,
-                    'data_logs': 0
+                    'data_logs': 0,
+                    'drift_events': 0
                 }
             ]
             

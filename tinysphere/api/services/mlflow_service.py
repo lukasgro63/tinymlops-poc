@@ -12,7 +12,8 @@ from tinysphere.api.services.notification_service import NotificationService
 from tinysphere.api.services.package_service import (PackageService,
                                                      processing_status_cache)
 from tinysphere.importer.package_processor import PackageImporter
-from tinysphere.importer.transformers import (LogsTransformer,
+from tinysphere.importer.transformers import (DriftTransformer,
+                                              LogsTransformer,
                                               MetricsTransformer,
                                               ModelTransformer)
 from tinysphere.importer.transformers.base import DataTransformer
@@ -27,6 +28,7 @@ class MLflowService:
         self.transformers = [
             ModelTransformer(),
             MetricsTransformer(),
+            DriftTransformer(),
             LogsTransformer()
         ]
         
@@ -205,13 +207,20 @@ class MLflowService:
             if model_files:
                 has_model_files = True
                 logger.info(f"Found {len(model_files)} model files in package")
-            
+
             # Check for metrics files
             metrics_files = [f for f in extracted_files if "metrics" in str(f) and str(f).endswith(".json")]
             if metrics_files:
                 has_metrics_files = True
                 logger.info(f"Found {len(metrics_files)} metrics files in package")
-            
+
+            # Check for drift files
+            has_drift_files = False
+            drift_files = [f for f in extracted_files if "drift" in str(f).lower()]
+            if drift_files:
+                has_drift_files = True
+                logger.info(f"Found {len(drift_files)} drift-related files in package")
+
             # Check for log files
             log_files = []
             for ext in [".csv", ".jsonl"]:
@@ -244,6 +253,9 @@ class MLflowService:
                 elif "Metrics" in transformer_name and has_metrics_files:
                     force_include = True
                     logger.info(f"Forcing inclusion of {transformer_name} due to metrics files")
+                elif "Drift" in transformer_name and has_drift_files:
+                    force_include = True
+                    logger.info(f"Forcing inclusion of {transformer_name} due to drift files")
                 elif "Logs" in transformer_name and has_log_files:
                     force_include = True
                     logger.info(f"Forcing inclusion of {transformer_name} due to log files")

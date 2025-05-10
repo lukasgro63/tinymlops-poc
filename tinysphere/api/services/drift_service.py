@@ -8,6 +8,7 @@ from sqlalchemy import func, desc
 from sqlalchemy.orm import Session
 
 from tinysphere.db.models import Device, DriftEvent, DriftSample, DriftValidation, DriftStatus, DriftType
+from tinysphere.api.models.notification import NotificationCreate
 from tinysphere.api.services.notification_service import NotificationService
 from tinysphere.api.services.device_service import DeviceService
 
@@ -141,15 +142,17 @@ class DriftService:
         # Create notification
         NotificationService.create_notification(
             db=db,
-            message=f"Drift detected on device {device_id} ({drift_type_str})",
-            notification_type="warning",
-            source="drift_event",
-            source_id=event_id,
-            details={
-                "drift_type": drift_type_str,
-                "drift_score": event_data.get("drift_score"),
-                "device_id": device_id
-            }
+            notification=NotificationCreate(
+                message=f"Drift detected on device {device_id} ({drift_type_str})",
+                notification_type=NotificationType.WARNING,
+                source="drift_event",
+                source_id=event_id,
+                details={
+                    "drift_type": drift_type_str,
+                    "drift_score": event_data.get("drift_score"),
+                    "device_id": device_id
+                }
+            )
         )
         
         logger.info(f"Processed drift event {event_id} from device {device_id}")

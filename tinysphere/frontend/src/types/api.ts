@@ -148,6 +148,7 @@ export interface PackageTimelineData {
   models: number;
   metrics: number;
   data_logs: number;
+  drift_events: number;
 }
 
 export interface ModelPerformanceData {
