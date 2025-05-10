@@ -176,35 +176,68 @@ def on_drift_detected(drift_info: Dict[str, Any]) -> None:
             }
 
             # Get sync directory - check if it's available in various ways
-            sync_dir = None
+            sync_dir = "./sync_data"  # Default fallback
+
             if hasattr(sync_client, 'sync_dir'):
                 sync_dir = sync_client.sync_dir
             elif hasattr(sync_client, 'sync_interface') and hasattr(sync_client.sync_interface, 'storage_dir'):
                 sync_dir = sync_client.sync_interface.storage_dir
-            else:
-                # Use default location from config
-                sync_dir = tinylcm_config["sync_client"].get("sync_dir", "./sync_data")
+            elif "sync_client" in config["tinylcm"]:
+                sync_dir = config["tinylcm"]["sync_client"].get("sync_dir", "./sync_data")
 
-            # Write drift data to a temporary file
-            drift_dir = os.path.join(sync_dir, "drift_events")
-            os.makedirs(drift_dir, exist_ok=True)
+            # Include image path if available
+            if image_path:
+                drift_data["image_path"] = str(image_path)
 
-            drift_file = os.path.join(drift_dir, f"drift_event_{timestamp.replace(' ', '_').replace(':', '-')}.json")
-            with open(drift_file, 'w') as f:
+            # Create files in the format expected by SyncClient
+            # Check SyncClient implementation to see where it looks for packages
+            packages_dir = os.path.join(sync_dir, "packages")
+            os.makedirs(packages_dir, exist_ok=True)
+
+            # Create a unique package ID
+            package_id = f"drift_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+
+            # Create the package directory
+            package_dir = os.path.join(packages_dir, package_id)
+            os.makedirs(package_dir, exist_ok=True)
+
+            # Create metadata.json - this is what SyncClient looks for
+            metadata = {
+                "id": package_id,
+                "type": "drift_event",
+                "timestamp": time.time(),
+                "device_id": device_id,  # Global device ID
+                "status": "pending"
+            }
+
+            metadata_file = os.path.join(package_dir, "metadata.json")
+            with open(metadata_file, 'w') as f:
+                json.dump(metadata, f)
+
+            # Create data.json with the drift information
+            data_file = os.path.join(package_dir, "data.json")
+            with open(data_file, 'w') as f:
                 json.dump(drift_data, f)
 
-            # Notify sync client about the file
-            if hasattr(sync_client, 'create_package'):
-                # Use the create_package method if available
-                sync_client.create_package("drift_event", {"file_path": drift_file})
-                logger.info(f"Created drift event package for TinySphere")
-            elif hasattr(sync_client, 'sync_all_pending_packages'):
-                # Some implementations may have this method
-                sync_client.sync_all_pending_packages()
-                logger.info(f"Synced drift event with TinySphere")
-            else:
-                # Try direct API client methods if available
-                logger.info(f"Saved drift information for next sync cycle")
+            # If we have an image, copy it to the package directory
+            if image_path:
+                img_dest = os.path.join(package_dir, "image.jpg")
+                try:
+                    import shutil
+                    shutil.copy(str(image_path), img_dest)
+                except Exception as e:
+                    logger.warning(f"Failed to copy drift image: {e}")
+
+            logger.info(f"Created drift event package: {package_id}")
+
+            # Now try to trigger synchronization
+            try:
+                # Force a sync cycle
+                if hasattr(sync_client, 'sync_all_pending_packages'):
+                    sync_client.sync_all_pending_packages()
+                    logger.info(f"Triggered sync after creating drift event package")
+            except Exception as e:
+                logger.warning(f"Failed to trigger sync: {e}")
         except Exception as e:
             logger.error(f"Failed to save/send drift event: {e}")
 
