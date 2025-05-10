@@ -178,34 +178,39 @@ def get_drift_samples(event_id: str, db: Session = Depends(get_db)):
     event = DriftService.get_drift_event_by_id(db, event_id)
     if not event:
         raise HTTPException(status_code=404, detail="Drift event not found")
-    
+
     result = []
     for sample in event.samples:
         # Find validation status for this sample
         status = "pending"
         true_label = None
-        
+
         for validation in sample.validations:
             if validation.true_label is not None:
                 true_label = validation.true_label
                 status = "validated"
                 break
-        
+
+        # Handle potentially null values to satisfy Pydantic validation
+        prediction = sample.prediction or ""  # Provide empty string if prediction is None
+        confidence = sample.confidence or 0.0  # Provide 0.0 if confidence is None
+        drift_score = sample.drift_score or 0.0  # Provide 0.0 if drift_score is None
+
         sample_dict = {
             "sample_id": sample.sample_id,
             "drift_event_id": sample.drift_event_id,
-            "prediction": sample.prediction,
-            "confidence": sample.confidence,
-            "drift_score": sample.drift_score,
+            "prediction": prediction,
+            "confidence": confidence,
+            "drift_score": drift_score,
             "feature_path": sample.feature_path,
             "raw_data_path": sample.raw_data_path,
-            "timestamp": sample.timestamp,
-            "metadata": sample.metadata,
+            "timestamp": sample.timestamp or datetime.now(),  # Provide current time if timestamp is None
+            "metadata": sample.sample_metadata or {},  # Provide empty dict if metadata is None
             "true_label": true_label,
             "status": status
         }
         result.append(sample_dict)
-    
+
     return result
 
 @router.get("/samples/{sample_id}", response_model=DriftSampleResponse)
@@ -217,27 +222,32 @@ def get_drift_sample(sample_id: str, db: Session = Depends(get_db)):
     sample = db.query(db.models.DriftSample).filter(db.models.DriftSample.sample_id == sample_id).first()
     if not sample:
         raise HTTPException(status_code=404, detail="Drift sample not found")
-    
+
     # Find validation status for this sample
     status = "pending"
     true_label = None
-    
+
     for validation in sample.validations:
         if validation.true_label is not None:
             true_label = validation.true_label
             status = "validated"
             break
-    
+
+    # Handle potentially null values to satisfy Pydantic validation
+    prediction = sample.prediction or ""  # Provide empty string if prediction is None
+    confidence = sample.confidence or 0.0  # Provide 0.0 if confidence is None
+    drift_score = sample.drift_score or 0.0  # Provide 0.0 if drift_score is None
+
     return {
         "sample_id": sample.sample_id,
         "drift_event_id": sample.drift_event_id,
-        "prediction": sample.prediction,
-        "confidence": sample.confidence,
-        "drift_score": sample.drift_score,
+        "prediction": prediction,
+        "confidence": confidence,
+        "drift_score": drift_score,
         "feature_path": sample.feature_path,
         "raw_data_path": sample.raw_data_path,
-        "timestamp": sample.timestamp,
-        "metadata": sample.metadata,
+        "timestamp": sample.timestamp or datetime.now(),
+        "metadata": sample.sample_metadata or {},  # Corrected to use sample_metadata instead of metadata
         "true_label": true_label,
         "status": status
     }

@@ -309,22 +309,28 @@ const DriftEventPage: React.FC = () => {
   useEffect(() => {
     const fetchEventData = async () => {
       if (!eventId) return;
-      
+
       try {
         setLoading(true);
-        
-        // Fetch event details and samples in parallel
-        const [eventData, samplesData] = await Promise.all([
-          getDriftEvent(eventId),
-          getDriftSamples(eventId)
-        ]);
-        
+
+        // Fetch event details first
+        const eventData = await getDriftEvent(eventId);
         setEvent(eventData);
-        setSamples(samplesData);
+
+        try {
+          // Then try to get samples
+          const samplesData = await getDriftSamples(eventId);
+          setSamples(samplesData);
+        } catch (sampleErr) {
+          console.error('Error fetching samples:', sampleErr);
+          // If samples fail, it's not fatal - we can still show event details
+          setSamples([]);
+        }
+
         setError(null);
       } catch (err) {
         console.error('Error fetching drift event data:', err);
-        setError('Failed to load drift event data');
+        setError('Failed to load drift event data. The event may not exist or might have been deleted.');
       } finally {
         setLoading(false);
       }
@@ -437,18 +443,30 @@ const DriftEventPage: React.FC = () => {
           if (eventId) {
             setLoading(true);
             setError(null);
-            Promise.all([
-              getDriftEvent(eventId),
-              getDriftSamples(eventId)
-            ]).then(([eventData, samplesData]) => {
-              setEvent(eventData);
-              setSamples(samplesData);
-            }).catch(err => {
-              console.error('Error fetching drift event data:', err);
-              setError('Failed to load drift event data');
-            }).finally(() => {
-              setLoading(false);
-            });
+
+            // Fetch event first, then samples
+            getDriftEvent(eventId)
+              .then(eventData => {
+                setEvent(eventData);
+
+                // Then try to get samples
+                return getDriftSamples(eventId)
+                  .then(samplesData => {
+                    setSamples(samplesData);
+                  })
+                  .catch(sampleErr => {
+                    console.error('Error fetching samples:', sampleErr);
+                    // If samples fail, it's not fatal
+                    setSamples([]);
+                  });
+              })
+              .catch(err => {
+                console.error('Error fetching drift event data:', err);
+                setError('Failed to load drift event data. The event may not exist or might have been deleted.');
+              })
+              .finally(() => {
+                setLoading(false);
+              });
           }
         }}
         height="70vh"
@@ -459,9 +477,12 @@ const DriftEventPage: React.FC = () => {
   if (!event) {
     return (
       <Box sx={{ p: 3 }}>
-        <Alert severity="warning">Drift event not found</Alert>
-        <Button 
-          variant="outlined" 
+        <Alert severity="warning">Drift event not found or could not be loaded</Alert>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 2, mb: 2 }}>
+          The event might have been deleted or there could be an issue with the server. If this error persists, please contact your administrator.
+        </Typography>
+        <Button
+          variant="outlined"
           onClick={() => navigate('/drift')}
           sx={{ mt: 2 }}
         >
