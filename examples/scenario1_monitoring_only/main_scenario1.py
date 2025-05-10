@@ -499,6 +499,16 @@ def main():
         # Perform initial connection test
         if sync_client.check_connection():
             logger.info("Successfully connected to TinySphere server")
+
+            # Send the model after confirming connection
+            model_config = config["model"]
+            model_path = model_config["model_path"]
+            labels_path = model_config["labels_path"]
+
+            if sync_client.send_model(model_path=model_path, labels_path=labels_path):
+                logger.info(f"Successfully sent model to TinySphere server")
+            else:
+                logger.warning("Failed to send model to TinySphere server - will try again later")
         else:
             logger.warning("Could not connect to TinySphere server - will continue and try again later")
         

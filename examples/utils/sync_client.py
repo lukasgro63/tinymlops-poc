@@ -100,9 +100,6 @@ class ExtendedSyncClient:
         """
         try:
             success = self.client.register_device()
-            if success:
-                # After successful device registration, send the model
-                self.send_model()
             return success
         except TinyLCMConnectionError as e:
             logger.error(f"Device registration failed: {e}")
@@ -187,24 +184,31 @@ class ExtendedSyncClient:
                 }
             }
 
-            # Create a temporary file for metadata and add it to the package
+            # Create a properly named metadata file (model_info.json for the model transformer)
             import tempfile
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp_file:
-                json.dump(metadata, tmp_file)
-                tmp_path = tmp_file.name
+            import os
+
+            # Create a temp directory to store our properly named files
+            temp_dir = tempfile.mkdtemp()
+            metadata_file_path = os.path.join(temp_dir, "model_info.json")
+
+            # Write the data to the proper file
+            with open(metadata_file_path, 'w') as metadata_file:
+                json.dump(metadata, metadata_file)
 
             # Add the metadata file to the package
             success = self.sync_interface.add_file_to_package(
                 package_id=package_id,
-                file_path=tmp_path,
+                file_path=metadata_file_path,
                 file_type="metadata"
             )
 
-            # Clean up the temporary file
+            # Clean up the temporary files
             try:
-                os.remove(tmp_path)
+                os.remove(metadata_file_path)
+                os.rmdir(temp_dir)
             except Exception as e:
-                logger.warning(f"Failed to remove temporary metadata file: {e}")
+                logger.warning(f"Failed to remove temporary metadata files: {e}")
 
             # Finalize the package
             self.sync_interface.finalize_package(package_id)
@@ -302,24 +306,31 @@ class ExtendedSyncClient:
                 }
             }
             
-            # Create a temporary file for drift event data and add it to the package
+            # Create a properly named drift event file
             import tempfile
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp_file:
-                json.dump(drift_data, tmp_file)
-                tmp_path = tmp_file.name
+            import os
+
+            # Create a temp directory to store our properly named files
+            temp_dir = tempfile.mkdtemp()
+            drift_file_path = os.path.join(temp_dir, "drift_event.json")
+
+            # Write the data to the proper file
+            with open(drift_file_path, 'w') as drift_file:
+                json.dump(drift_data, drift_file)
 
             # Add the drift event file to the package
             success = self.sync_interface.add_file_to_package(
                 package_id=package_id,
-                file_path=tmp_path,
+                file_path=drift_file_path,
                 file_type="drift_event"
             )
 
-            # Clean up the temporary file
+            # Clean up the temporary files
             try:
-                os.remove(tmp_path)
+                os.remove(drift_file_path)
+                os.rmdir(temp_dir)
             except Exception as e:
-                logger.warning(f"Failed to remove temporary drift event file: {e}")
+                logger.warning(f"Failed to remove temporary drift files: {e}")
             
             # Add image to the package if provided
             if image_path and os.path.exists(image_path):
@@ -357,24 +368,31 @@ class ExtendedSyncClient:
                 description=description
             )
             
-            # Create a temporary file for metrics data and add it to the package
+            # Create a properly named metrics file (needs to be named metrics.json for the transformer)
             import tempfile
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp_file:
-                json.dump(metrics, tmp_file)
-                tmp_path = tmp_file.name
+            import os
+
+            # Create a temp directory to store our properly named files
+            temp_dir = tempfile.mkdtemp()
+            metrics_file_path = os.path.join(temp_dir, "metrics.json")
+
+            # Write the data to the proper file
+            with open(metrics_file_path, 'w') as metrics_file:
+                json.dump(metrics, metrics_file)
 
             # Add the metrics file to the package
             success = self.sync_interface.add_file_to_package(
                 package_id=package_id,
-                file_path=tmp_path,
+                file_path=metrics_file_path,
                 file_type="metrics"
             )
 
-            # Clean up the temporary file
+            # Clean up the temporary files
             try:
-                os.remove(tmp_path)
+                os.remove(metrics_file_path)
+                os.rmdir(temp_dir)
             except Exception as e:
-                logger.warning(f"Failed to remove temporary metrics file: {e}")
+                logger.warning(f"Failed to remove temporary metrics files: {e}")
             
             # Finalize the package
             self.sync_interface.finalize_package(package_id)
