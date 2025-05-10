@@ -119,6 +119,28 @@ export interface DeviceSummary {
   last_sync_time?: string;
   package_count: number;
   latest_package?: string;
+  mlflow_metrics?: {
+    inference_time?: {
+      avg: number;
+      min: number;
+      max: number;
+      count: number;
+    };
+    cpu_usage?: {
+      avg: number;
+      min: number;
+      max: number;
+      count: number;
+    };
+    memory_usage?: {
+      avg: number;
+      min: number;
+      max: number;
+      count: number;
+    };
+    drift_score?: number[];
+    available_metrics?: string[];
+  };
 }
 
 export interface ModelSummary {

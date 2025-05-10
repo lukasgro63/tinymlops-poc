@@ -309,6 +309,55 @@ const DevicesPage: React.FC = () => {
   const activeCount = useMemo(() => devices.filter(d => d.is_active).length, [devices]);
   const inactiveCount = useMemo(() => devices.length - activeCount, [devices, activeCount]);
 
+  // MLflow Metriken verarbeiten
+  const getAverageMLflowMetric = useCallback((metricType: 'inference_time' | 'cpu_usage' | 'memory_usage'): number => {
+    let sum = 0;
+    let count = 0;
+
+    deviceSummaries.forEach(device => {
+      if (device.mlflow_metrics && device.mlflow_metrics[metricType]) {
+        sum += device.mlflow_metrics[metricType]!.avg * device.mlflow_metrics[metricType]!.count;
+        count += device.mlflow_metrics[metricType]!.count;
+      }
+    });
+
+    return count > 0 ? sum / count : 0;
+  }, [deviceSummaries]);
+
+  const getMLflowMetricCount = useCallback((metricType: 'inference_time' | 'cpu_usage' | 'memory_usage'): number => {
+    let count = 0;
+
+    deviceSummaries.forEach(device => {
+      if (device.mlflow_metrics && device.mlflow_metrics[metricType]) {
+        count += device.mlflow_metrics[metricType]!.count;
+      }
+    });
+
+    return count;
+  }, [deviceSummaries]);
+
+  // Check if any device has MLflow available metrics
+  const anyAvailableMetrics = useMemo(() => {
+    return deviceSummaries.some(device =>
+      device.mlflow_metrics && device.mlflow_metrics.available_metrics &&
+      device.mlflow_metrics.available_metrics.length > 0);
+  }, [deviceSummaries]);
+
+  // Get list of all available metrics
+  const allAvailableMetrics = useMemo(() => {
+    const metrics = new Set<string>();
+
+    deviceSummaries.forEach(device => {
+      if (device.mlflow_metrics && device.mlflow_metrics.available_metrics) {
+        device.mlflow_metrics.available_metrics.forEach(metric => {
+          metrics.add(metric as string);
+        });
+      }
+    });
+
+    return Array.from(metrics);
+  }, [deviceSummaries]);
+
   // Handler für Dialog
   const handleOpenDialog = (device: Device) => {
     setSelectedDevice(device);
@@ -419,11 +468,25 @@ const DevicesPage: React.FC = () => {
         <Box sx={{ flex: '1 1 220px', minWidth: '220px' }}>
           <StatusCard
             title="Avg. Inference Time"
-            value={`${deviceMetrics?.inference_time.avg.toFixed(2) || 0} ms`}
-            secondaryValue={`${deviceMetrics?.inference_time.min.toFixed(2) || 0} - ${deviceMetrics?.inference_time.max.toFixed(2) || 0} ms`}
-            secondaryLabel="Range"
+            value={
+              // Use MLflow metrics as primary value if available
+              deviceSummaries.some(d => d.mlflow_metrics?.inference_time)
+                ? `${getAverageMLflowMetric('inference_time').toFixed(2)} ms`
+                : `${deviceMetrics?.inference_time.avg.toFixed(2) || 0} ms`
+            }
+            secondaryValue={
+              // Show appropriate secondary information
+              deviceSummaries.some(d => d.mlflow_metrics?.inference_time)
+                ? `From MLflow (${getMLflowMetricCount('inference_time')} runs)`
+                : `${deviceMetrics?.inference_time.min.toFixed(2) || 0} - ${deviceMetrics?.inference_time.max.toFixed(2) || 0} ms`
+            }
+            secondaryLabel={deviceSummaries.some(d => d.mlflow_metrics?.inference_time) ? "Source" : "Range"}
             icon={<SpeedIcon style={{ fontSize: 24, color: '#0B2A5A' }} />}
             color="#0B2A5A"
+            tooltip={deviceSummaries.some(d => d.mlflow_metrics?.inference_time)
+              ? `MLflow metrics available: ${allAvailableMetrics.filter(m => m.includes('time') || m.includes('latency')).join(', ')}`
+              : "No MLflow metrics available. Standard device metrics shown."
+            }
           />
         </Box>
 
@@ -431,11 +494,25 @@ const DevicesPage: React.FC = () => {
         <Box sx={{ flex: '1 1 220px', minWidth: '220px' }}>
           <StatusCard
             title="Avg. CPU Usage"
-            value={`${deviceMetrics?.cpu_usage.avg.toFixed(2) || 0}%`}
-            secondaryValue={`${deviceMetrics?.cpu_usage.min.toFixed(2) || 0}% - ${deviceMetrics?.cpu_usage.max.toFixed(2) || 0}%`}
-            secondaryLabel="Range"
+            value={
+              // Use MLflow metrics as primary value if available
+              deviceSummaries.some(d => d.mlflow_metrics?.cpu_usage)
+                ? `${getAverageMLflowMetric('cpu_usage').toFixed(2)}%`
+                : `${deviceMetrics?.cpu_usage.avg.toFixed(2) || 0}%`
+            }
+            secondaryValue={
+              // Show appropriate secondary information
+              deviceSummaries.some(d => d.mlflow_metrics?.cpu_usage)
+                ? `From MLflow (${getMLflowMetricCount('cpu_usage')} runs)`
+                : `${deviceMetrics?.cpu_usage.min.toFixed(2) || 0}% - ${deviceMetrics?.cpu_usage.max.toFixed(2) || 0}%`
+            }
+            secondaryLabel={deviceSummaries.some(d => d.mlflow_metrics?.cpu_usage) ? "Source" : "Range"}
             icon={<MemoryIcon style={{ fontSize: 24, color: '#E5A823' }} />}
             color="#E5A823"
+            tooltip={deviceSummaries.some(d => d.mlflow_metrics?.cpu_usage)
+              ? `MLflow metrics available: ${allAvailableMetrics.filter(m => m.includes('cpu')).join(', ')}`
+              : "No MLflow metrics available. Standard device metrics shown."
+            }
           />
         </Box>
 
@@ -443,11 +520,25 @@ const DevicesPage: React.FC = () => {
         <Box sx={{ flex: '1 1 220px', minWidth: '220px' }}>
           <StatusCard
             title="Avg. Memory Usage"
-            value={`${deviceMetrics?.memory_usage.avg.toFixed(2) || 0}%`}
-            secondaryValue={`${deviceMetrics?.memory_usage.min.toFixed(2) || 0}% - ${deviceMetrics?.memory_usage.max.toFixed(2) || 0}%`}
-            secondaryLabel="Range"
+            value={
+              // Use MLflow metrics as primary value if available
+              deviceSummaries.some(d => d.mlflow_metrics?.memory_usage)
+                ? `${getAverageMLflowMetric('memory_usage').toFixed(2)}%`
+                : `${deviceMetrics?.memory_usage.avg.toFixed(2) || 0}%`
+            }
+            secondaryValue={
+              // Show appropriate secondary information
+              deviceSummaries.some(d => d.mlflow_metrics?.memory_usage)
+                ? `From MLflow (${getMLflowMetricCount('memory_usage')} runs)`
+                : `${deviceMetrics?.memory_usage.min.toFixed(2) || 0}% - ${deviceMetrics?.memory_usage.max.toFixed(2) || 0}%`
+            }
+            secondaryLabel={deviceSummaries.some(d => d.mlflow_metrics?.memory_usage) ? "Source" : "Range"}
             icon={<StorageIcon style={{ fontSize: 24, color: '#4CAF50' }} />}
             color="#4CAF50"
+            tooltip={deviceSummaries.some(d => d.mlflow_metrics?.memory_usage)
+              ? `MLflow metrics available: ${allAvailableMetrics.filter(m => m.includes('memory')).join(', ')}`
+              : "No MLflow metrics available. Standard device metrics shown."
+            }
           />
         </Box>
 
