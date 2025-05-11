@@ -49,7 +49,7 @@ TARGET_IMG_SIZE = (224, 224)  # Inferenzauflösung
 
 # Konfiguration für den LightweightKNN
 KNN_K = 3  # Anzahl der nächsten Nachbarn
-KNN_MAX_SAMPLES = 20  # Da wir nur 20 Samples haben (10 rot, 10 grün)
+KNN_MAX_SAMPLES = 100  # Da wir nur 20 Samples haben (10 rot, 10 grün)
 KNN_DISTANCE_METRIC = "cosine"  # Metrik für den Abstandsvergleich
 KNN_USE_NUMPY = True  # Für die Offline-Erstellung können wir NumPy nutzen
 
@@ -208,7 +208,7 @@ def main():
     # Hole die Size und Klassen vom KNN
     # Verwende die korrekten Methoden für LightweightKNN
     knn_state = knn.get_state()
-    training_size = len(knn_state['samples'])
+    training_size = len(knn_state['X_train'])  # Die korrigierte Zeile - X_train statt samples
     classes = list(set(all_labels))
     
     print(f"Initialer k-NN trainiert mit {training_size} Samples für Klassen: {classes}.")

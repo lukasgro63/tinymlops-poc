@@ -458,12 +458,12 @@ def main():
                     
                     if "classifier" in loaded_state_data and isinstance(loaded_state_data["classifier"], dict):
                         classifier.set_state(loaded_state_data["classifier"])
-                        logger.info(f"LightweightKNN initialisiert mit {classifier.get_training_size()} Samples aus Zustand: {initial_state_path}")
+                        logger.info(f"LightweightKNN initialisiert mit {len(classifier.X_train)} Samples aus Zustand: {initial_state_path}")
                         loaded_initial_state = True
                     elif isinstance(loaded_state_data, dict) and "X_train" in loaded_state_data:
                         # Fallback, falls nur KNN state direkt gespeichert wurde
                         classifier.set_state(loaded_state_data)
-                        logger.info(f"LightweightKNN initialisiert mit {classifier.get_training_size()} Samples aus direktem Zustand: {initial_state_path}")
+                        logger.info(f"LightweightKNN initialisiert mit {len(classifier.X_train)} Samples aus direktem Zustand: {initial_state_path}")
                         loaded_initial_state = True
                     else:
                         logger.error(f"Schlüssel 'classifier' nicht in Zustandsdatei gefunden oder ungültiges Format: {initial_state_path}")
