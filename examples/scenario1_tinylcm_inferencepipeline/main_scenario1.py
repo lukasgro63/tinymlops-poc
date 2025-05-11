@@ -714,15 +714,21 @@ def main():
                 timestamp=time.time(),
                 extract_features=True  # Tell the pipeline to extract features from the input
             )
+
+            # Filter out "negative" class predictions for display if desired
+            if result and result.get("prediction") == "negative":
+                logger.debug(f"Filtered out 'negative' class prediction with confidence: {result.get('confidence', 0.0):.4f}")
             
             # Extract prediction and confidence from result
             if result:
                 prediction = result.get("prediction", "unknown")
                 confidence = result.get("confidence", 0.0)
                 features = result.get("features")
+                confidence_threshold = config["model"]["threshold"]
 
-                # Log more details for better analysis
-                if prediction:
+                # Ignore negative predictions and only process LEGO bricks (red/green) with high confidence
+                if prediction != "negative" and confidence >= confidence_threshold:
+                    # Log more details for better analysis
                     if frame_count % 10 == 0:  # Log every 10th frame to avoid flooding
                         logger.info(f"Frame {frame_count}: Prediction={prediction}, Confidence={confidence:.4f}")
                         if features is not None:
@@ -730,7 +736,7 @@ def main():
                             feature_sample = features[:5]
                             logger.info(f"Feature sample: {feature_sample}")
 
-                    # Save every frame with its prediction for validation
+                    # Save LEGO brick predictions for validation
                     try:
                         # Create directory for prediction images if it doesn't exist
                         pred_dir = Path("./prediction_images")
@@ -745,9 +751,15 @@ def main():
 
                         # Only log occasionally to avoid flooding logs
                         if frame_count % 10 == 0:
-                            logger.info(f"Saved prediction image to {image_path}")
+                            logger.info(f"Saved LEGO brick image to {image_path}")
                     except Exception as e:
                         logger.error(f"Error saving prediction image: {e}")
+                elif prediction == "negative":
+                    # Log negative predictions at debug level
+                    logger.debug(f"Frame {frame_count}: Filtered negative prediction with confidence: {confidence:.4f}")
+                elif confidence < confidence_threshold:
+                    # Log low confidence predictions at debug level
+                    logger.debug(f"Frame {frame_count}: Filtered low confidence prediction {prediction} with confidence: {confidence:.4f}")
             
             # Update frame counter
             frame_count += 1

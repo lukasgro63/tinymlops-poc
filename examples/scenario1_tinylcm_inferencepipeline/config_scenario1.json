@@ -13,7 +13,7 @@
   "model": {
     "model_path": "../assets/model/model.tflite",
     "labels_path": "../assets/model/labels.txt",
-    "threshold": 0.85
+    "threshold": 0.95
   },
   "tinylcm": {
     "feature_extractor": {
@@ -29,7 +29,7 @@
       "max_samples": 100,
       "distance_metric": "cosine",
       "use_numpy": true,
-      "initial_state_path": "../assets/initial_states/knn_initial_state_RG.json"
+      "initial_state_path": "../assets/initial_states/knn_initial_state_RGN.json"
     },
     "drift_detectors": [
       {
