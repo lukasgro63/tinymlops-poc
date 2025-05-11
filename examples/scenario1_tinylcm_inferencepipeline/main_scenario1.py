@@ -612,7 +612,7 @@ def main():
         
         # Perform initial connection test to TinySphere
         try:
-            status = sync_client.check_server_status()
+            status = sync_client.check_connection()
             logger.info(f"Successfully connected to TinySphere server: {status}")
         except Exception as e:
             logger.warning(f"Could not connect to TinySphere server: {e}")
