@@ -20,7 +20,7 @@
       "type": "TFLiteFeatureExtractor",
       "model_path": "../assets/model/model.tflite",
       "feature_layer_index": -1,
-      "normalize_features": false,
+      "normalize_features": true,
       "lazy_loading": false
     },
     "adaptive_classifier": {

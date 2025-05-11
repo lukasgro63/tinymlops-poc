@@ -101,8 +101,10 @@ def extract_features_manually(image, interpreter, input_details, output_details,
     if len(feature_tensor.shape) > 1 and feature_tensor.shape[0] == 1:
         feature_tensor = feature_tensor[0]
 
-    # Keine Normalisierung mehr anwenden, um konsistent mit config_scenario1.json zu sein
-    print(f"Feature-Tensor (ohne Normalisierung): min={feature_tensor.min()}, max={feature_tensor.max()}")
+    # Normalisiere Features um konsistent mit config_scenario1.json zu sein
+    # L2-Normalisierung der Features
+    feature_tensor = feature_tensor / np.linalg.norm(feature_tensor)
+    print(f"Feature-Tensor (mit Normalisierung): min={feature_tensor.min()}, max={feature_tensor.max()}")
 
     return feature_tensor
 
