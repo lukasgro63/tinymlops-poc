@@ -85,8 +85,8 @@ This suggests that either:
 The drift detector is configured with:
 - `delta`: 0.005 (small bias parameter)
 - `lambda_param`: 50 (threshold for detection)
-- `min_samples`: 100 (warm-up sample count)
-- `warmup_samples`: 200 (reference update interval)
+- `min_samples`: 50 (warm-up sample count)
+- `warmup_samples`: 100 (reference update interval)
 
 ## Inference Pipeline
 

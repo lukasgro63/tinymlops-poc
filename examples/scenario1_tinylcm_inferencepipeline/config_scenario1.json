@@ -13,7 +13,7 @@
   "model": {
     "model_path": "../assets/model/model.tflite",
     "labels_path": "../assets/model/labels.txt",
-    "threshold": 0.6
+    "threshold": 0.85
   },
   "tinylcm": {
     "feature_extractor": {
