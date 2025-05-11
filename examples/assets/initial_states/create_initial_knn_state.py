@@ -44,7 +44,7 @@ MODEL_PATH = "examples/assets/model/model.tflite"  # Relativ zum Skript-Ausführ
 LABELS_PATH = "examples/assets/model/labels.txt"  # Relativ zum Skript-Ausführungsort
 
 # Konfiguration für den Feature Extractor
-FEATURE_LAYER_INDEX = -2  # Verwende den vorletzten Layer für reichhaltigere Features
+FEATURE_LAYER_INDEX = -1  # Verwende den Standard-Output-Layer, da das Modell nur einen Layer hat
 TARGET_IMG_SIZE = (224, 224)  # Inferenzauflösung
 
 # Konfiguration für den LightweightKNN
