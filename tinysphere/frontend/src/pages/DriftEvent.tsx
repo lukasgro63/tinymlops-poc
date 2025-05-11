@@ -58,13 +58,20 @@ import {
 } from '../services/api';
 import { DriftEvent as DriftEventType, DriftSample, DriftStatus } from '../types/api';
 
-// Status color mapping
-const statusColors: Record<DriftStatus, string> = {
-  pending: '#ff9800',
-  validated: '#4caf50',
-  rejected: '#f44336',
-  resolved: '#2196f3',
-  ignored: '#9e9e9e'
+// Helper function to get MUI color based on status
+const getStatusColor = (status: DriftStatus): 'success' | 'warning' | 'error' | 'info' | 'default' => {
+  switch (status) {
+    case 'validated':
+      return 'success';
+    case 'pending':
+      return 'warning';
+    case 'rejected':
+      return 'error';
+    case 'resolved':
+      return 'info';
+    case 'ignored':
+      return 'default';
+  }
 };
 
 // Status options
@@ -242,13 +249,15 @@ const StatusUpdateDialog: React.FC<{
                   {statusOptions.map((option) => (
                     <MenuItem key={option.value} value={option.value}>
                       <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Box
+                        <Chip
+                          label=""
+                          size="small"
+                          color={getStatusColor(option.value as DriftStatus)}
                           sx={{
                             width: 16,
                             height: 16,
-                            borderRadius: '50%',
-                            bgcolor: statusColors[option.value as DriftStatus],
-                            mr: 1
+                            mr: 1,
+                            '& .MuiChip-label': { padding: 0 }
                           }}
                         />
                         {option.label}
@@ -538,10 +547,9 @@ const DriftEventPage: React.FC = () => {
               </Typography>
               <Chip
                 label={event.status.charAt(0).toUpperCase() + event.status.slice(1)}
-                sx={{ 
-                  bgcolor: `${statusColors[event.status]}20`,
-                  color: statusColors[event.status]
-                }}
+                size="small"
+                color={getStatusColor(event.status)}
+                sx={getStatusColor(event.status) === 'default' ? { backgroundColor: '#FFA500' } : {}}
               />
             </Stack>
             
@@ -730,11 +738,10 @@ const DriftEventPage: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <Chip
-                        icon={sample.status === 'validated' ? <CheckIcon fontSize="small" /> : <WarningIcon fontSize="small" />}
                         label={sample.status.charAt(0).toUpperCase() + sample.status.slice(1)}
                         size="small"
-                        color={sample.status === 'validated' ? 'success' : 'warning'}
-                        variant="outlined"
+                        color={getStatusColor(sample.status as DriftStatus)}
+                        sx={getStatusColor(sample.status as DriftStatus) === 'default' ? { backgroundColor: '#FFA500' } : {}}
                       />
                     </TableCell>
                     <TableCell>

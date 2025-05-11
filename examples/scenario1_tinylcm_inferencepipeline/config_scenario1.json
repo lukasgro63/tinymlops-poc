@@ -28,7 +28,8 @@
       "k": 5,
       "max_samples": 100,
       "distance_metric": "cosine",
-      "use_numpy": true
+      "use_numpy": true,
+      "initial_state_path": "../assets/initial_states/knn_initial_state_RG.json"
     },
     "drift_detectors": [
       {

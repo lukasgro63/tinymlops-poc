@@ -20,6 +20,28 @@ import React, { useEffect, useState } from 'react';
 import { getPackagesByDevice } from '../../services/api';
 import { Device, Package } from '../../types/api';
 
+// Helper to check if device is active (synced within last 30 minutes)
+const isDeviceActive = (device: Device): boolean => {
+  if (!device.last_sync_time) return false;
+
+  try {
+    // Explicitly handle the Z suffix to ensure UTC parsing
+    const dateStr = device.last_sync_time.endsWith('Z') ? device.last_sync_time : device.last_sync_time + 'Z';
+
+    // Parse the date string as UTC
+    const syncTime = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - syncTime.getTime();
+
+    // Convert to minutes and check against 30-minute threshold
+    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+    return diffMinutes < 30;
+  } catch (e) {
+    console.error("Date parsing error:", e, "for date:", device.last_sync_time);
+    return false;
+  }
+};
+
 interface DeviceDetailsDialogProps {
   device: Device | null;
   open: boolean;
@@ -108,6 +130,17 @@ const DeviceDetailsDialog: React.FC<DeviceDetailsDialogProps> = ({
                   <Typography variant="body1">{device.ip_address || 'N/A'}</Typography>
                 </Box>
                 <Box sx={{ flex: '1 1 200px' }}>
+                  <Typography variant="subtitle2" color="text.secondary">Status</Typography>
+                  <Typography variant="body1">
+                    <Chip
+                      label={device.is_active ? 'Active' : 'Inactive'}
+                      size="small"
+                      color={device.is_active ? 'success' : 'warning'}
+                      sx={device.is_active ? {} : { backgroundColor: '#FFA500' }}
+                    />
+                  </Typography>
+                </Box>
+                <Box sx={{ flex: '1 1 200px' }}>
                   <Typography variant="subtitle2" color="text.secondary">Platform</Typography>
                   <Typography variant="body1">{device.platform || 'Unknown'}</Typography>
                 </Box>
@@ -118,6 +151,15 @@ const DeviceDetailsDialog: React.FC<DeviceDetailsDialogProps> = ({
                 <Box sx={{ flex: '1 1 200px' }}>
                   <Typography variant="subtitle2" color="text.secondary">TinyLCM Version</Typography>
                   <Typography variant="body1">{device.tinylcm_version || 'N/A'}</Typography>
+                </Box>
+                <Box sx={{ flex: '1 1 200px' }}>
+                  <Typography variant="subtitle2" color="text.secondary">Last Sync Time</Typography>
+                  <Typography variant="body1">
+                    {device.last_sync_time
+                      ? new Date(device.last_sync_time).toLocaleString()
+                      : 'Never'
+                    }
+                  </Typography>
                 </Box>
               </Box>
             </Paper>
