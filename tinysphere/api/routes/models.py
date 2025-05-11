@@ -98,27 +98,33 @@ def transition_model_version(
     
 @router.get("/{model_name}/metrics")
 def get_model_metrics(
-    model_name: str, 
+    model_name: str,
     metric: str = "accuracy",
     db: Session = Depends(get_db)
 ):
     """Fetch metrics for all versions of a specific model from MLflow."""
     try:
+        print(f"[DEBUG] get_model_metrics: model_name={model_name}, metric={metric}")
         mlflow_client = mlflow.tracking.MlflowClient()
-        
+
         # Get all versions of the model
+        print(f"[DEBUG] Getting latest versions for model: {model_name}")
         versions = mlflow_client.get_latest_versions(model_name)
-        
+        print(f"[DEBUG] Found {len(versions)} versions for model: {model_name}")
+
         metrics_data = []
         
         for version in versions:
             # Skip if no run ID
             if not version.run_id:
+                print(f"[DEBUG] Skipping version {version.version} - no run ID")
                 continue
-                
+
             try:
                 # Get run data
+                print(f"[DEBUG] Getting run data for run_id: {version.run_id}")
                 run = mlflow_client.get_run(version.run_id)
+                print(f"[DEBUG] Successfully retrieved run data for run_id: {version.run_id}")
                 
                 # Create base version data
                 version_data = {
@@ -131,12 +137,33 @@ def get_model_metrics(
                 
                 # Add all available metrics
                 if hasattr(run, "data") and hasattr(run.data, "metrics"):
-                    version_data["metrics"] = run.data.metrics
-                
+                    metric_keys = list(run.data.metrics.keys())
+                    print(f"[DEBUG] Found metrics for run_id {version.run_id}: {metric_keys}")
+
+                    # Create a copy of the metrics dictionary to avoid any reference issues
+                    metrics_copy = {}
+                    for key, value in run.data.metrics.items():
+                        try:
+                            # Convert to float for consistent handling
+                            metrics_copy[key] = float(value)
+                        except (ValueError, TypeError):
+                            # Skip any metrics that can't be converted to float
+                            print(f"[DEBUG] Skipping non-numeric metric {key}")
+
+                    version_data["metrics"] = metrics_copy
+
+                    # Look specifically for the requested metric
+                    if metric in run.data.metrics:
+                        print(f"[DEBUG] Specifically found requested metric: {metric}={run.data.metrics[metric]}")
+                else:
+                    print(f"[DEBUG] No metrics found for run_id {version.run_id}")
+
                 metrics_data.append(version_data)
+                print(f"[DEBUG] Added metrics data for version {version.version}")
             except Exception as run_err:
                 continue
                 
+        print(f"[DEBUG] Returning metrics data for {len(metrics_data)} versions")
         return metrics_data
     
     except Exception as e:

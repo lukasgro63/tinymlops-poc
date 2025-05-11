@@ -96,8 +96,24 @@ export const getPackageTimeline = async (period: string = 'week'): Promise<Packa
   return response.data;
 };
 
-export const getModelsPerformance = async (metric: string = 'accuracy'): Promise<ModelPerformanceData[]> => {
-  const response = await axios.get<ModelPerformanceData[]>(`${API_BASE_URL}/dashboard/models/performance?metric=${metric}`);
+export const getModelsPerformance = async (
+  metric: string = 'accuracy',
+  days?: number,
+  limit?: number,
+  model_name?: string,
+  tags?: string,
+  include_operational_metrics: boolean = true
+): Promise<ModelPerformanceData[]> => {
+  let url = `${API_BASE_URL}/dashboard/models/performance?metric=${metric}`;
+
+  // Add optional filters if provided
+  if (days !== undefined) url += `&days=${days}`;
+  if (limit !== undefined) url += `&limit=${limit}`;
+  if (model_name) url += `&model_name=${encodeURIComponent(model_name)}`;
+  if (tags) url += `&tags=${encodeURIComponent(tags)}`;
+  if (include_operational_metrics !== undefined) url += `&include_operational_metrics=${include_operational_metrics}`;
+
+  const response = await axios.get<ModelPerformanceData[]>(url);
   return response.data;
 };
 

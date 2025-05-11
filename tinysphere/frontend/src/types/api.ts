@@ -180,6 +180,7 @@ export interface ModelPerformanceData {
   metric_name: string;
   value: number;
   timestamp: number;
+  run_id?: string;
 }
 
 export interface ModelVersionMetrics {
