@@ -117,7 +117,8 @@ const DriftPage: React.FC = () => {
     driftType: '',
     status: '',
     startDate: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
-    endDate: format(new Date(), 'yyyy-MM-dd')
+    // Set end date to tomorrow to account for timezone differences
+    endDate: format(new Date(new Date().getTime() + 24 * 60 * 60 * 1000), 'yyyy-MM-dd')
   });
   
   const [filtersVisible, setFiltersVisible] = useState(false);
@@ -127,9 +128,25 @@ const DriftPage: React.FC = () => {
   const [statsError, setStatsError] = useState<string | null>(null);
   
   // Load drift events
+  // Load initial data when component mounts
   useEffect(() => {
+    console.log("Drift Page: Loading initial data");
     fetchEvents();
-  }, [page, rowsPerPage, filters]);
+
+    // Set up polling interval (every 30 seconds)
+    const interval = setInterval(() => {
+      console.log("Drift Page: Polling for updates");
+      fetchEvents();
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [page, rowsPerPage]);
+
+  // Re-fetch when filters change
+  useEffect(() => {
+    console.log("Drift Page: Filters changed, re-fetching");
+    fetchEvents();
+  }, [filters]);
   
   const fetchEvents = async () => {
     try {
@@ -144,15 +161,39 @@ const DriftPage: React.FC = () => {
       if (filters.deviceId) params.device_id = filters.deviceId;
       if (filters.driftType) params.drift_type = filters.driftType;
       if (filters.status) params.status = filters.status;
-      if (filters.startDate) params.start_date = new Date(filters.startDate).toISOString();
-      if (filters.endDate) params.end_date = new Date(filters.endDate).toISOString();
+      if (filters.startDate) {
+        // For start date, set to beginning of the day in local timezone
+        const startDate = new Date(filters.startDate);
+        startDate.setHours(0, 0, 0, 0);
+        params.start_date = startDate.toISOString();
+      }
+
+      if (filters.endDate) {
+        // For end date, set to end of the day in local timezone
+        const endDate = new Date(filters.endDate);
+        endDate.setHours(23, 59, 59, 999);
+        params.end_date = endDate.toISOString();
+      }
       
-      // Fetch events
-      const data = await getDriftEvents(params);
-      
-      setEvents(data);
-      // In a real application, we'd set totalCount from API response headers or metadata
-      setTotalCount(data.length > rowsPerPage ? 100 : data.length); // Mock total count
+      // Fetch events - Fix: Ensure we get drift events
+      try {
+        const data = await getDriftEvents(params);
+
+        if (Array.isArray(data)) {
+          console.log("Successfully fetched drift events:", data.length);
+          setEvents(data);
+          // In a real application, we'd set totalCount from API response headers or metadata
+          setTotalCount(data.length > rowsPerPage ? 100 : data.length); // Mock total count
+        } else {
+          console.error("Unexpected response format:", data);
+          setEvents([]);
+          setTotalCount(0);
+        }
+      } catch (fetchErr) {
+        console.error("Error in getDriftEvents:", fetchErr);
+        setEvents([]);
+        setTotalCount(0);
+      }
       setError(null);
     } catch (err) {
       console.error('Error fetching drift events:', err);
@@ -187,7 +228,8 @@ const DriftPage: React.FC = () => {
       driftType: '',
       status: '',
       startDate: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
-      endDate: format(new Date(), 'yyyy-MM-dd')
+      // Set end date to tomorrow to account for timezone differences
+      endDate: format(new Date(new Date().getTime() + 24 * 60 * 60 * 1000), 'yyyy-MM-dd')
     });
     setPage(0);
   };
