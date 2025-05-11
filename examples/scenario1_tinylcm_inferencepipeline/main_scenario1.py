@@ -613,9 +613,12 @@ def main():
         # Perform initial connection test to TinySphere
         try:
             status = sync_client.check_connection()
-            logger.info(f"Successfully connected to TinySphere server: {status}")
+            if status:
+                logger.info("Successfully connected to TinySphere server")
+            else:
+                logger.warning("Could not connect to TinySphere server - will continue and try again later")
         except Exception as e:
-            logger.warning(f"Could not connect to TinySphere server: {e}")
+            logger.warning(f"Error checking connection to TinySphere server: {e}")
         
         # Start camera
         camera.start()
@@ -679,8 +682,16 @@ def main():
             if result:
                 prediction = result.get("prediction", "unknown")
                 confidence = result.get("confidence", 0.0)
+                features = result.get("features")
+
+                # Log more details for better analysis
                 if prediction:
-                    logger.debug(f"Frame {frame_count}: Prediction={prediction}, Confidence={confidence:.4f}")
+                    if frame_count % 10 == 0:  # Log every 10th frame to avoid flooding
+                        logger.info(f"Frame {frame_count}: Prediction={prediction}, Confidence={confidence:.4f}")
+                        if features is not None:
+                            # Log first 5 feature values to understand scale
+                            feature_sample = features[:5]
+                            logger.info(f"Feature sample: {feature_sample}")
             
             # Update frame counter
             frame_count += 1
