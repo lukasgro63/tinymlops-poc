@@ -760,12 +760,12 @@ def get_models_performance(
         try:
             # Add detailed logging
             print(f"[DEBUG] get_models_performance: Starting with params: metric={metric}, days={days}, limit={limit}, model_name={model_name}, tags={tags}")
-            
+
             # Set connection timeout to avoid hanging if MLflow is down
             os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] = "10"  # 10 seconds timeout
             mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000")
             print(f"[DEBUG] Using MLflow URI: {mlflow_uri}")
-            
+
             mlflow.set_tracking_uri(mlflow_uri)
             client = mlflow.tracking.MlflowClient()
             print(f"[DEBUG] MLflow client created successfully")
@@ -776,30 +776,31 @@ def get_models_performance(
                 start_time = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000)
                 date_filter = start_time
 
-            # Parse tags filter
-            tag_filters = {}
+            # Parse tags filter from parameter
+            user_tag_filters = {}
             if tags:
                 try:
                     tag_pairs = tags.split(",")
                     for pair in tag_pairs:
                         key, value = pair.strip().split("=")
-                        tag_filters[key.strip()] = value.strip()
+                        user_tag_filters[key.strip()] = value.strip()
                 except Exception as tag_error:
                     print(f"Invalid tag format: {tags}. Use 'key1=value1,key2=value2'")
 
             # Get all registered models or filter by name
+            registered_models = []
             if model_name:
                 try:
                     print(f"[DEBUG] Trying to get registered model: {model_name}")
-                    models = [client.get_registered_model(model_name)]
+                    model = client.get_registered_model(model_name)
+                    registered_models = [model]
                     print(f"[DEBUG] Found registered model: {model_name}")
                 except Exception as m_err:
                     print(f"[DEBUG] Error getting model {model_name}: {m_err}")
-                    models = []
             else:
                 print(f"[DEBUG] Searching for all registered models")
-                models = client.search_registered_models()
-                print(f"[DEBUG] Found {len(models)} registered models")
+                registered_models = client.search_registered_models()
+                print(f"[DEBUG] Found {len(registered_models)} registered models")
 
             # Define operational metrics to include
             operational_metrics = [
@@ -812,19 +813,141 @@ def get_models_performance(
 
             performance_data = []
 
-            # Use the models variable for iteration
-            for model in models:
-                try:
-                    # Skip if model_name filter doesn't match
-                    if model_name and model.name != model_name:
+            # Find all experiments to search through
+            print(f"[DEBUG] Searching for all experiments")
+            all_experiments = mlflow.search_experiments()
+            print(f"[DEBUG] Found {len(all_experiments)} total experiments")
+
+            # Process each registered model
+            for reg_model in registered_models:
+                print(f"[DEBUG] Processing registered model: {reg_model.name}")
+                model_data = []  # Collect data for this model
+
+                # Build search filter for runs with this model tag
+                base_filter_string = f"tags.registered_model_name = '{reg_model.name}'"
+
+                # Add user tags if provided
+                tag_filter_parts = [base_filter_string]
+                for tag_key, tag_value in user_tag_filters.items():
+                    tag_filter_parts.append(f"tags.{tag_key} = '{tag_value}'")
+
+                filter_string = " and ".join(tag_filter_parts)
+                print(f"[DEBUG] Using filter string: {filter_string}")
+
+                # Search all experiments for runs related to this model
+                for experiment in all_experiments:
+                    try:
+                        print(f"[DEBUG] Searching in experiment: {experiment.name} (ID: {experiment.experiment_id})")
+
+                        # Search runs with model tag
+                        runs = mlflow.search_runs(
+                            experiment_ids=[experiment.experiment_id],
+                            filter_string=filter_string,
+                            max_results=100  # Set a reasonable limit
+                        )
+
+                        if runs.empty:
+                            print(f"[DEBUG] No matching runs found in experiment {experiment.name}")
+                            continue
+
+                        print(f"[DEBUG] Found {len(runs)} matching runs in experiment {experiment.name}")
+
+                        # Process each run's metrics
+                        for idx, row in runs.iterrows():
+                            run_id = row.get("run_id", "unknown")
+                            run_timestamp = row.get("start_time", 0)
+                            version_tag = row.get("tags.version", "1")  # Default to version 1 if not specified
+
+                            try:
+                                version_num = int(version_tag)
+                            except (ValueError, TypeError):
+                                version_num = 1
+
+                            stage = row.get("tags.stage", "None")
+
+                            print(f"[DEBUG] Processing run {run_id} with {len([c for c in row.index if c.startswith('metrics.')])} metrics")
+
+                            # Date filtering if required
+                            if date_filter and run_timestamp < date_filter:
+                                print(f"[DEBUG] Skipping run with timestamp {run_timestamp} (before {date_filter})")
+                                continue
+
+                            # Extract all metrics from the run
+                            all_metrics = {}
+                            for col in row.index:
+                                if col.startswith('metrics.'):
+                                    try:
+                                        metric_name = col.replace('metrics.', '')
+                                        metric_value = row[col]
+                                        # Try to convert to float and check for NaN
+                                        try:
+                                            float_value = float(metric_value)
+                                            # Skip NaN values which are not JSON serializable
+                                            if not pd.isna(float_value):
+                                                all_metrics[metric_name] = float_value
+                                            else:
+                                                print(f"[DEBUG] Skipping NaN value for metric {metric_name}")
+                                        except (ValueError, TypeError):
+                                            # For non-numeric values, keep as is if they're serializable
+                                            if isinstance(metric_value, (str, int, bool)) or metric_value is None:
+                                                all_metrics[metric_name] = metric_value
+                                    except Exception as metric_err:
+                                        print(f"[DEBUG] Error getting metric {col}: {metric_err}")
+
+                            print(f"[DEBUG] Found metrics: {list(all_metrics.keys())}")
+
+                            # Check for the main requested metric
+                            if metric in all_metrics:
+                                try:
+                                    # Value should already be filtered for NaN at this point
+                                    value = all_metrics[metric]
+                                    if isinstance(value, (int, float)) and not pd.isna(value):
+                                        print(f"[DEBUG] Found main metric {metric} = {value}")
+                                        model_data.append({
+                                            "model_name": reg_model.name,
+                                            "version": version_num,
+                                            "stage": stage,
+                                            "metric_name": metric,
+                                            "value": value,
+                                            "timestamp": run_timestamp,
+                                            "run_id": run_id
+                                        })
+                                    else:
+                                        print(f"[DEBUG] Skipping non-numeric or NaN value for main metric {metric}")
+                                except Exception as e:
+                                    print(f"Error processing metric {metric} for run {run_id}: {e}")
+
+                            # Include operational metrics if requested
+                            if include_operational_metrics:
+                                for op_metric in operational_metrics:
+                                    if op_metric in all_metrics:
+                                        try:
+                                            # Value should already be filtered for NaN
+                                            value = all_metrics[op_metric]
+                                            if isinstance(value, (int, float)) and not pd.isna(value):
+                                                print(f"[DEBUG] Found operational metric {op_metric} = {value}")
+                                                model_data.append({
+                                                    "model_name": reg_model.name,
+                                                    "version": version_num,
+                                                    "stage": stage,
+                                                    "metric_name": op_metric,
+                                                    "value": value,
+                                                    "timestamp": run_timestamp,
+                                                    "run_id": run_id
+                                                })
+                                            else:
+                                                print(f"[DEBUG] Skipping non-numeric or NaN value for operational metric {op_metric}")
+                                        except Exception as e:
+                                            print(f"Error processing operational metric {op_metric}: {e}")
+                    except Exception as exp_err:
+                        print(f"[DEBUG] Error searching experiment {experiment.name}: {exp_err}")
                         continue
 
-                    # Get latest versions
-                    print(f"[DEBUG] Getting latest versions for model: {model.name}")
-                    versions = client.get_latest_versions(model.name)
-                    print(f"[DEBUG] Found {len(versions)} versions for model: {model.name}")
-
-                    model_data = []  # Collect data for this model
+                # If we have no data from tags search, fall back to direct version search
+                if not model_data:
+                    print(f"[DEBUG] No metrics found via tag search, trying registered model versions")
+                    versions = client.get_latest_versions(reg_model.name)
+                    print(f"[DEBUG] Found {len(versions)} versions for model: {reg_model.name}")
 
                     for version in versions:
                         # Skip if no run ID
@@ -833,152 +956,67 @@ def get_models_performance(
                             continue
 
                         try:
-                            # Get run data using search_runs for full compatibility with the dashboard device metrics
-                            # First try to find the experiment for this model
-                            print(f"[DEBUG] Searching for experiment containing run: {version.run_id}")
+                            # Get run data directly
+                            run = client.get_run(version.run_id)
+                            run_timestamp = run.info.start_time if hasattr(run.info, "start_time") else 0
 
-                            # Option 1: Try to use experiment name based on model name
-                            experiment_name = f"model_{model.name}"
-                            experiment = None
+                            # Extract metrics
+                            if hasattr(run, "data") and hasattr(run.data, "metrics"):
+                                metrics_dict = run.data.metrics
+                                print(f"[DEBUG] Found {len(metrics_dict)} metrics for version {version.version}")
 
-                            try:
-                                # First try with the model name
-                                experiment = mlflow.get_experiment_by_name(experiment_name)
-                            except Exception as exp_err:
-                                print(f"[DEBUG] Error getting experiment by name {experiment_name}: {exp_err}")
+                                # Check for the main requested metric
+                                if metric in metrics_dict:
+                                    try:
+                                        value = metrics_dict[metric]
+                                        if isinstance(value, (int, float)) and not pd.isna(value):
+                                            model_data.append({
+                                                "model_name": reg_model.name,
+                                                "version": version.version,
+                                                "stage": version.current_stage,
+                                                "metric_name": metric,
+                                                "value": value,
+                                                "timestamp": run_timestamp,
+                                                "run_id": version.run_id
+                                            })
+                                        else:
+                                            print(f"[DEBUG] Skipping non-numeric or NaN value for main metric {metric}")
+                                    except Exception as e:
+                                        print(f"Error processing metric {metric}: {e}")
 
-                            # If that didn't work, get experiment from run info first
-                            if not experiment:
-                                try:
-                                    # Get basic run info to get the experiment_id
-                                    run_info = client.get_run(version.run_id)
-                                    experiment_id = run_info.info.experiment_id
-                                    print(f"[DEBUG] Found experiment ID from run: {experiment_id}")
-                                    experiment = mlflow.get_experiment(experiment_id)
-                                except Exception as run_err:
-                                    print(f"[DEBUG] Error getting run info: {run_err}")
-
-                            if experiment:
-                                print(f"[DEBUG] Found experiment: {experiment.name} (ID: {experiment.experiment_id})")
-                                # Search runs in this experiment, filtering for this specific run ID
-                                try:
-                                    # Skip date filtering in search_runs - we'll do it manually after
-                                    runs = mlflow.search_runs(
-                                        experiment_ids=[experiment.experiment_id],
-                                        filter_string=f"run_id = '{version.run_id}'",
-                                        max_results=1
-                                    )
-
-                                    print(f"[DEBUG] Found {len(runs)} runs matching run_id {version.run_id}")
-
-                                    if not runs.empty:
-                                        row = runs.iloc[0]
-                                        run_timestamp = row.get("start_time", 0)
-
-                                        # Log row data for debugging
-                                        print(f"[DEBUG] Row data type: {type(row)}")
-                                        print(f"[DEBUG] Row start_time type: {type(run_timestamp)}")
-                                        print(f"[DEBUG] Row columns: {list(row.index)}")
-
-                                        # Skip date filtering for now to avoid type comparison errors
-                                        if False and date_filter:  # Disabled to bypass the comparison error
-                                            print(f"[DEBUG] Skipping date filter check to avoid timestamp comparison error")
-
-                                        # Skip if run doesn't meet tag filters
-                                        if tag_filters:
-                                            match = True
-                                            for key, value in tag_filters.items():
-                                                tag_col = f"tags.{key}"
-                                                if tag_col not in row or row[tag_col] != value:
-                                                    match = False
-                                                    break
-                                            if not match:
-                                                continue
-
-                                        # Extract metrics from the row (similar to the device metrics code)
-                                        print(f"[DEBUG] Processing metrics for run_id: {version.run_id}")
-
-                                        # Check for all available metrics in the row for better debugging
-                                        all_metrics = {}
-                                        for col in row.index:
-                                            if col.startswith('metrics.'):
-                                                try:
-                                                    metric_name = col.replace('metrics.', '')
-                                                    metric_value = row[col]
-                                                    all_metrics[metric_name] = metric_value
-                                                except Exception as metric_err:
-                                                    print(f"[DEBUG] Error getting metric {col}: {metric_err}")
-
-                                        print(f"[DEBUG] All available metrics in row: {all_metrics}")
-
-                                        # Check for the main requested metric
-                                        metric_column = f"metrics.{metric}"
-                                        if metric_column in row:
+                                # Include operational metrics if requested
+                                if include_operational_metrics:
+                                    for op_metric in operational_metrics:
+                                        if op_metric in metrics_dict:
                                             try:
-                                                value = float(row[metric_column])
-                                                if not pd.isna(value):  # Check for NaN values
-                                                    print(f"[DEBUG] Found main metric {metric} = {value}")
+                                                value = metrics_dict[op_metric]
+                                                if isinstance(value, (int, float)) and not pd.isna(value):
                                                     model_data.append({
-                                                        "model_name": model.name,
+                                                        "model_name": reg_model.name,
                                                         "version": version.version,
                                                         "stage": version.current_stage,
-                                                        "metric_name": metric,
+                                                        "metric_name": op_metric,
                                                         "value": value,
                                                         "timestamp": run_timestamp,
                                                         "run_id": version.run_id
                                                     })
-                                            except (ValueError, TypeError) as e:
-                                                print(f"Error processing metric {metric} for model {model.name}: {e}")
-
-                                        # Include operational metrics if requested
-                                        if include_operational_metrics:
-                                            # Log all available metrics
-                                            metric_columns = [col for col in row.keys() if col.startswith('metrics.')]
-                                            print(f"[DEBUG] Available metrics: {metric_columns}")
-
-                                            for op_metric in operational_metrics:
-                                                op_metric_column = f"metrics.{op_metric}"
-                                                if op_metric_column in row:
-                                                    try:
-                                                        value = float(row[op_metric_column])
-                                                        if not pd.isna(value):  # Check for NaN values
-                                                            print(f"[DEBUG] Found operational metric {op_metric} = {value}")
-                                                            model_data.append({
-                                                                "model_name": model.name,
-                                                                "version": version.version,
-                                                                "stage": version.current_stage,
-                                                                "metric_name": op_metric,
-                                                                "value": value,
-                                                                "timestamp": run_timestamp,
-                                                                "run_id": version.run_id
-                                                            })
-                                                    except (ValueError, TypeError) as e:
-                                                        print(f"Error processing operational metric {op_metric} for model {model.name}: {e}")
-                                    else:
-                                        print(f"[DEBUG] No run found with ID {version.run_id} in experiment {experiment.experiment_id}")
-
-                                except Exception as search_err:
-                                    print(f"[DEBUG] Error searching runs: {search_err}")
-                            else:
-                                print(f"[DEBUG] No experiment found for run_id: {version.run_id}")
-
+                                                else:
+                                                    print(f"[DEBUG] Skipping non-numeric or NaN value for operational metric {op_metric}")
+                                            except Exception as e:
+                                                print(f"Error processing operational metric {op_metric}: {e}")
                         except Exception as run_err:
-                            print(f"Error getting run data for {model.name} version {version.version}: {run_err}")
+                            print(f"Error getting run data for version {version.version}: {run_err}")
                             continue
 
-                    # Sort by version and timestamp
-                    model_data.sort(key=lambda x: (x["version"], x.get("timestamp", 0)))
+                # Sort by version and timestamp
+                model_data.sort(key=lambda x: (x["version"], x.get("timestamp", 0)))
 
-                    # Apply limit if specified
-                    if limit and len(model_data) > limit:
-                        model_data = model_data[-limit:]  # Take the latest ones
+                # Apply limit if specified
+                if limit and len(model_data) > limit:
+                    model_data = model_data[-limit:]  # Take the latest ones
 
-                    print(f"[DEBUG] Collected {len(model_data)} data points for model {model.name}")
-                    performance_data.extend(model_data)
-
-                except Exception as version_err:
-                    print(f"Error getting versions for model {model.name}: {version_err}")
-                    continue
+                print(f"[DEBUG] Collected {len(model_data)} data points for model {reg_model.name}")
+                performance_data.extend(model_data)
 
             print(f"[DEBUG] Returning {len(performance_data)} total performance data points")
             return performance_data

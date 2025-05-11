@@ -222,34 +222,46 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
 
   // Format the tooltip value
   const formatTooltipValue = (value: any) => {
-    if (value === null || value === undefined) return 'N/A';
+    // Handle null, undefined or NaN values
+    if (value === null || value === undefined || Number.isNaN(value)) {
+      return 'N/A';
+    }
 
     const metricToCheck = selectedMetric.toLowerCase();
 
-    // Special formatting based on metric type
-    if (metricToCheck.includes('latency') || metricToCheck.includes('time')) {
-      // Format as milliseconds with 2 decimal places
-      return `${value.toFixed(2)} ms`;
-    } else if (metricToCheck.includes('cpu') || metricToCheck.includes('memory')) {
-      // Format as percentage
-      return `${value.toFixed(1)}%`;
-    } else if (metricToCheck.includes('loss')) {
-      // Format loss with 4 decimal places
-      return value.toFixed(4);
-    } else if (metricToCheck.includes('confidence')) {
-      // Format confidence as percentage
-      return `${(value * 100).toFixed(2)}%`;
-    } else if (metricToCheck === 'total_inferences' || metricToCheck.includes('count')) {
-      // Format counts as integers
-      return Math.round(value);
-    } else if (typeof value === 'number') {
-      // Standard metrics like accuracy are typically between 0-1
-      if (value >= 0 && value <= 1) {
-        return `${(value * 100).toFixed(2)}%`;
-      } else {
-        return value.toFixed(2);
+    try {
+      // Convert to number if string for consistent handling
+      const numValue = typeof value === 'string' ? parseFloat(value) : value;
+
+      // Special formatting based on metric type
+      if (metricToCheck.includes('latency') || metricToCheck.includes('time')) {
+        // Format as milliseconds with 2 decimal places
+        return `${numValue.toFixed(2)} ms`;
+      } else if (metricToCheck.includes('cpu') || metricToCheck.includes('memory')) {
+        // Format as percentage
+        return `${numValue.toFixed(1)}%`;
+      } else if (metricToCheck.includes('loss')) {
+        // Format loss with 4 decimal places
+        return numValue.toFixed(4);
+      } else if (metricToCheck.includes('confidence')) {
+        // Format confidence as percentage
+        return `${(numValue * 100).toFixed(2)}%`;
+      } else if (metricToCheck === 'total_inferences' || metricToCheck.includes('count')) {
+        // Format counts as integers
+        return Math.round(numValue);
+      } else if (typeof numValue === 'number') {
+        // Standard metrics like accuracy are typically between 0-1
+        if (numValue >= 0 && numValue <= 1) {
+          return `${(numValue * 100).toFixed(2)}%`;
+        } else {
+          return numValue.toFixed(2);
+        }
       }
+    } catch (e) {
+      console.warn(`Error formatting value "${value}":`, e);
+      return 'Error';
     }
+
     return value;
   };
 
@@ -427,7 +439,7 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
                 stroke="#00647D"
                 activeDot={{ r: 8 }}
                 name={formatMetricName(selectedMetric)}
-                connectNulls={true}
+                connectNulls={true}  // Skip null/undefined values in line connection
               />
             </LineChart>
           </ResponsiveContainer>

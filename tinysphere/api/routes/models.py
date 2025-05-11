@@ -113,60 +113,180 @@ def get_model_metrics(
         print(f"[DEBUG] Found {len(versions)} versions for model: {model_name}")
 
         metrics_data = []
-        
-        for version in versions:
-            # Skip if no run ID
-            if not version.run_id:
-                print(f"[DEBUG] Skipping version {version.version} - no run ID")
-                continue
 
-            try:
-                # Get run data
-                print(f"[DEBUG] Getting run data for run_id: {version.run_id}")
-                run = mlflow_client.get_run(version.run_id)
-                print(f"[DEBUG] Successfully retrieved run data for run_id: {version.run_id}")
-                
-                # Create base version data
-                version_data = {
-                    "version": version.version,
-                    "stage": version.current_stage,
-                    "run_id": version.run_id,
-                    "created_at": version.creation_timestamp,
-                    "metrics": {}
-                }
-                
-                # Add all available metrics
-                if hasattr(run, "data") and hasattr(run.data, "metrics"):
-                    metric_keys = list(run.data.metrics.keys())
-                    print(f"[DEBUG] Found metrics for run_id {version.run_id}: {metric_keys}")
+        # First, try searching for metrics via tags
+        try:
+            print(f"[DEBUG] Searching for runs with registered_model_name={model_name} tag")
 
-                    # Create a copy of the metrics dictionary to avoid any reference issues
-                    metrics_copy = {}
-                    for key, value in run.data.metrics.items():
+            # Find all experiments
+            all_experiments = mlflow.search_experiments()
+            print(f"[DEBUG] Found {len(all_experiments)} total experiments to search through")
+
+            found_metrics_via_tags = False
+
+            # Search for runs with this model tag
+            for experiment in all_experiments:
+                try:
+                    # Build filter string for registered model name
+                    filter_string = f"tags.registered_model_name = '{model_name}'"
+
+                    # Search for runs with this tag
+                    runs = mlflow.search_runs(
+                        experiment_ids=[experiment.experiment_id],
+                        filter_string=filter_string,
+                        max_results=100  # Set a reasonable limit
+                    )
+
+                    if runs.empty:
+                        continue
+
+                    print(f"[DEBUG] Found {len(runs)} runs with model tag in experiment {experiment.name}")
+
+                    # Process each run
+                    for idx, row in runs.iterrows():
+                        run_id = row.get("run_id", "unknown")
+                        run_timestamp = row.get("start_time", 0)
+                        version_tag = row.get("tags.version", "1")  # Default to version 1 if not specified
+
                         try:
-                            # Convert to float for consistent handling
-                            metrics_copy[key] = float(value)
+                            version_num = int(version_tag)
                         except (ValueError, TypeError):
-                            # Skip any metrics that can't be converted to float
-                            print(f"[DEBUG] Skipping non-numeric metric {key}")
+                            # If we can't parse the version tag, try to match it with a registered version
+                            version_match = next((v for v in versions if v.run_id == run_id), None)
+                            if version_match:
+                                version_num = version_match.version
+                            else:
+                                version_num = 1
 
-                    version_data["metrics"] = metrics_copy
+                        # Get stage from tags or default to "None"
+                        stage = row.get("tags.stage", "None")
 
-                    # Look specifically for the requested metric
-                    if metric in run.data.metrics:
-                        print(f"[DEBUG] Specifically found requested metric: {metric}={run.data.metrics[metric]}")
-                else:
-                    print(f"[DEBUG] No metrics found for run_id {version.run_id}")
+                        # Check the registered versions for matching run_id to get official stage
+                        for version in versions:
+                            if version.run_id == run_id:
+                                stage = version.current_stage
+                                break
 
-                metrics_data.append(version_data)
-                print(f"[DEBUG] Added metrics data for version {version.version}")
-            except Exception as run_err:
-                continue
-                
+                        # Extract all metrics from the run
+                        run_metrics = {}
+                        for col in row.index:
+                            if col.startswith('metrics.'):
+                                try:
+                                    metric_name = col.replace('metrics.', '')
+                                    metric_value = row[col]
+                                    try:
+                                        # Convert to float for consistent handling
+                                        value = float(metric_value)
+                                        # Skip NaN values which are not JSON serializable
+                                        if not pd.isna(value):
+                                            run_metrics[metric_name] = value
+                                    except (ValueError, TypeError):
+                                        # Skip non-numeric metrics
+                                        pass
+                                except Exception as metric_err:
+                                    continue
+
+                        # Create version data
+                        if run_metrics:
+                            found_metrics_via_tags = True
+
+                            # Get creation timestamp either from the run or from the matching version
+                            creation_ts = run_timestamp
+                            version_match = next((v for v in versions if v.run_id == run_id), None)
+                            if version_match and version_match.creation_timestamp:
+                                creation_ts = version_match.creation_timestamp
+
+                            version_data = {
+                                "version": version_num,
+                                "stage": stage,
+                                "run_id": run_id,
+                                "created_at": creation_ts,
+                                "metrics": run_metrics
+                            }
+
+                            metrics_data.append(version_data)
+                            print(f"[DEBUG] Added metrics data for version {version_num} from tagged run")
+                except Exception as exp_err:
+                    print(f"[DEBUG] Error searching experiment {experiment.name}: {exp_err}")
+                    continue
+
+            if found_metrics_via_tags:
+                print(f"[DEBUG] Successfully found metrics data via tags search")
+            else:
+                print(f"[DEBUG] No metrics found via tags search, falling back to direct version lookup")
+        except Exception as tag_err:
+            print(f"[DEBUG] Error during tag-based search: {tag_err}")
+            print("[DEBUG] Falling back to direct version lookup")
+
+        # If we didn't find any metrics via tags or encountered an error, fall back to direct version lookup
+        if not metrics_data:
+            print(f"[DEBUG] Checking registered model versions directly")
+
+            for version in versions:
+                # Skip if no run ID
+                if not version.run_id:
+                    print(f"[DEBUG] Skipping version {version.version} - no run ID")
+                    continue
+
+                try:
+                    # Get run data
+                    print(f"[DEBUG] Getting run data for run_id: {version.run_id}")
+                    run = mlflow_client.get_run(version.run_id)
+                    print(f"[DEBUG] Successfully retrieved run data for run_id: {version.run_id}")
+
+                    # Create base version data
+                    version_data = {
+                        "version": version.version,
+                        "stage": version.current_stage,
+                        "run_id": version.run_id,
+                        "created_at": version.creation_timestamp,
+                        "metrics": {}
+                    }
+
+                    # Add all available metrics
+                    if hasattr(run, "data") and hasattr(run.data, "metrics"):
+                        metric_keys = list(run.data.metrics.keys())
+                        print(f"[DEBUG] Found metrics for run_id {version.run_id}: {metric_keys}")
+
+                        # Create a copy of the metrics dictionary to avoid any reference issues
+                        metrics_copy = {}
+                        for key, value in run.data.metrics.items():
+                            try:
+                                # Convert to float for consistent handling
+                                float_value = float(value)
+                                # Skip NaN values which are not JSON serializable
+                                if not pd.isna(float_value):
+                                    metrics_copy[key] = float_value
+                                else:
+                                    print(f"[DEBUG] Skipping NaN value for metric {key}")
+                            except (ValueError, TypeError):
+                                # Skip any metrics that can't be converted to float
+                                print(f"[DEBUG] Skipping non-numeric metric {key}")
+
+                        version_data["metrics"] = metrics_copy
+
+                        # Look specifically for the requested metric
+                        if metric in run.data.metrics:
+                            print(f"[DEBUG] Specifically found requested metric: {metric}={run.data.metrics[metric]}")
+                    else:
+                        print(f"[DEBUG] No metrics found for run_id {version.run_id}")
+
+                    metrics_data.append(version_data)
+                    print(f"[DEBUG] Added metrics data for version {version.version}")
+                except Exception as run_err:
+                    print(f"[DEBUG] Error getting run data: {run_err}")
+                    continue
+
+        # Sort data by version number for consistency
+        metrics_data.sort(key=lambda x: x["version"])
+
         print(f"[DEBUG] Returning metrics data for {len(metrics_data)} versions")
         return metrics_data
-    
+
     except Exception as e:
+        print(f"[ERROR] Failed to fetch model metrics: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error fetching model metrics: {str(e)}")
 
 @router.post("/compare")
