@@ -158,8 +158,11 @@ def on_drift_detected(drift_info: Dict[str, Any]) -> None:
         drift_dir = Path("./drift_images")
         drift_dir.mkdir(exist_ok=True)
         
+        # Convert BGR to RGB for correct color visualization
+        rgb_frame = cv2.cvtColor(current_frame, cv2.COLOR_BGR2RGB)
+
         image_path = drift_dir / f"drift_{timestamp.replace(' ', '_').replace(':', '-')}_{detector_name}.jpg"
-        cv2.imwrite(str(image_path), current_frame)
+        cv2.imwrite(str(image_path), rgb_frame)
         logger.info(f"Saved drift image to {image_path}")
     
     # If sync client is available, create and send a drift event package
@@ -733,9 +736,12 @@ def main():
                         pred_dir = Path("./prediction_images")
                         pred_dir.mkdir(exist_ok=True)
 
+                        # Convert BGR to RGB for correct color visualization
+                        rgb_frame = cv2.cvtColor(current_frame, cv2.COLOR_BGR2RGB)
+
                         # Save the image with frame number and prediction information
                         image_path = pred_dir / f"frame{frame_count:06d}_{prediction}_{confidence:.2f}.jpg"
-                        cv2.imwrite(str(image_path), current_frame)
+                        cv2.imwrite(str(image_path), rgb_frame)
 
                         # Only log occasionally to avoid flooding logs
                         if frame_count % 10 == 0:
