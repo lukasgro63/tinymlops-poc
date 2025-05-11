@@ -365,7 +365,7 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
         # Distance-based confidence scaling factor
         # - Higher values make confidence drop more quickly with distance
         # - Lower values make confidence more resilient to distance changes
-        confidence_scaling = 2.0  # Tunable parameter
+        confidence_scaling = 10.0  # Increased to make confidence more sensitive to distance
 
         # Track stats for logging
         prediction_stats = {
@@ -449,10 +449,14 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
         else:
             self._prediction_count = n_samples
 
-        if self._prediction_count % 50 < n_samples:
-            avg_distance = sum(prediction_stats["avg_distances"]) / len(prediction_stats["avg_distances"])
-            avg_max_proba = sum(prediction_stats["max_probas"]) / len(prediction_stats["max_probas"])
-            logger.debug(f"KNN confidence stats - Avg distance: {avg_distance:.4f}, Avg max probability: {avg_max_proba:.4f}")
+        # Always log for debugging confidence values
+        avg_distance = sum(prediction_stats["avg_distances"]) / len(prediction_stats["avg_distances"])
+        avg_max_proba = sum(prediction_stats["max_probas"]) / len(prediction_stats["max_probas"])
+
+        # Log at INFO level to ensure it appears in logs
+        logger.info(f"KNN ENHANCED CONFIDENCE STATS (v2) - Avg distance: {avg_distance:.6f}, Avg max probability: {avg_max_proba:.6f}")
+        if n_samples == 1:  # Only show detailed probas for single predictions to avoid log spam
+            logger.info(f"DETAILED PROBAS: {probas[0] if self.use_numpy else probas[0]}")
 
         # Update performance metrics
         self._total_prediction_time += time.time() - start_time
@@ -489,8 +493,17 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
             # Sort by distance only
             distances.sort(key=lambda x: x[1])
         
-        # Return the k nearest neighbors
-        return [(idx, dist) for idx, dist, _ in distances[:self.k]]
+        # Get the k nearest neighbors
+        nearest_neighbors = [(idx, dist) for idx, dist, _ in distances[:self.k]]
+
+        # Log detailed information about the nearest neighbors for debugging
+        debug_str = "NEAREST NEIGHBORS DEBUG:\n"
+        for i, (idx, dist) in enumerate(nearest_neighbors):
+            label = self.y_train[idx]
+            debug_str += f"  Neighbor {i+1}: Label={label}, Distance={dist:.6f}\n"
+        logger.info(debug_str)
+
+        return nearest_neighbors
     
     def _calculate_distance(self, a: np.ndarray, b: np.ndarray) -> float:
         """Calculate the distance between two feature vectors.

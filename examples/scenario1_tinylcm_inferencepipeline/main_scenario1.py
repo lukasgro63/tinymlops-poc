@@ -442,10 +442,16 @@ def main():
         knn_config = tinylcm_config["adaptive_classifier"]
         classifier = LightweightKNN(
             k=knn_config["k"],
-            max_samples=knn_config["max_samples"], 
+            max_samples=knn_config["max_samples"],
             distance_metric=knn_config["distance_metric"],
             use_numpy=knn_config["use_numpy"]
         )
+
+        # Log KNN classifier information
+        logger.info(f"KNN INIT INFO: KNN class type = {type(classifier).__name__}")
+        logger.info(f"KNN INIT INFO: KNN class module = {type(classifier).__module__}")
+        logger.info(f"KNN INIT INFO: KNN predict_proba method ID = {id(classifier.predict_proba)}")
+        logger.info(f"KNN INIT INFO: Distance metric = {knn_config['distance_metric']}")
         
         # Lade den initialen KNN-Zustand, falls vorhanden
         initial_state_path_str = knn_config.get("initial_state_path")
@@ -462,11 +468,25 @@ def main():
                     if "classifier" in loaded_state_data and isinstance(loaded_state_data["classifier"], dict):
                         classifier.set_state(loaded_state_data["classifier"])
                         logger.info(f"LightweightKNN initialisiert mit {len(classifier.X_train)} Samples aus Zustand: {initial_state_path}")
+
+                        # Log KNN info after loading state to check if methods changed
+                        logger.info(f"KNN AFTER LOAD: KNN class type = {type(classifier).__name__}")
+                        logger.info(f"KNN AFTER LOAD: KNN predict_proba method ID = {id(classifier.predict_proba)}")
+                        logger.info(f"KNN AFTER LOAD: Classes = {sorted(list(classifier._classes))}")
+                        logger.info(f"KNN AFTER LOAD: Sample count = {len(classifier.X_train)}")
+
                         loaded_initial_state = True
                     elif isinstance(loaded_state_data, dict) and "X_train" in loaded_state_data:
                         # Fallback, falls nur KNN state direkt gespeichert wurde
                         classifier.set_state(loaded_state_data)
                         logger.info(f"LightweightKNN initialisiert mit {len(classifier.X_train)} Samples aus direktem Zustand: {initial_state_path}")
+
+                        # Log KNN info after loading state to check if methods changed (fallback case)
+                        logger.info(f"KNN AFTER LOAD (FALLBACK): KNN class type = {type(classifier).__name__}")
+                        logger.info(f"KNN AFTER LOAD (FALLBACK): KNN predict_proba method ID = {id(classifier.predict_proba)}")
+                        logger.info(f"KNN AFTER LOAD (FALLBACK): Classes = {sorted(list(classifier._classes))}")
+                        logger.info(f"KNN AFTER LOAD (FALLBACK): Sample count = {len(classifier.X_train)}")
+
                         loaded_initial_state = True
                     else:
                         logger.error(f"Schlüssel 'classifier' nicht in Zustandsdatei gefunden oder ungültiges Format: {initial_state_path}")
@@ -707,11 +727,30 @@ def main():
 
             # Process the frame directly with TinyLCM pipeline
             # The pipeline will use the preprocessor function to convert BGR to RGB
+
+            # Add direct debugging of confidence value computation
+            timestamp = time.time()
+
+            # Extract features manually to verify they're correct
+            if frame_count % 20 == 0:  # Only do this occasionally to avoid log spam
+                try:
+                    test_features = feature_extractor.extract_features(resized_frame)
+                    logger.info(f"MANUAL DEBUG: Raw features shape = {test_features.shape}")
+                    logger.info(f"MANUAL DEBUG: Raw features sample = {test_features[:3]}")
+
+                    # Test direct prediction and confidence calculation
+                    logger.info("MANUAL DEBUG: About to call classifier.predict_proba directly")
+                    test_probas = classifier.predict_proba(np.array([test_features]))
+                    logger.info(f"MANUAL DEBUG: Raw probas from direct call = {test_probas[0]}")
+                except Exception as e:
+                    logger.error(f"MANUAL DEBUG: Error in direct feature extraction or prediction: {str(e)}")
+
+            # Proceed with normal pipeline processing
             result = pipeline.process(
                 input_data=resized_frame,
                 label=None,  # No ground truth label available
                 sample_id=sample_id,
-                timestamp=time.time(),
+                timestamp=timestamp,
                 extract_features=True  # Tell the pipeline to extract features from the input
             )
 
@@ -725,6 +764,14 @@ def main():
                 confidence = result.get("confidence", 0.0)
                 features = result.get("features")
                 confidence_threshold = config["model"]["threshold"]
+
+                # Debug output for confidence values - always log these
+                logger.info(f"MAIN DEBUG: Result confidence: {confidence}, Prediction: {prediction}")
+
+                # Add raw probabilities if available in the result
+                probabilities = result.get("probabilities")
+                if probabilities is not None:
+                    logger.info(f"MAIN DEBUG: Raw probabilities: {probabilities}")
 
                 # Ignore negative predictions and only process LEGO bricks (red/green) with high confidence
                 if prediction != "negative" and confidence >= confidence_threshold:

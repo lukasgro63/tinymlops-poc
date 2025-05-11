@@ -206,9 +206,14 @@ class InferencePipeline:
         # Get prediction probabilities if available
         probas = None
         try:
+            logger.info("PIPELINE DEBUG: About to call predict_proba")
             probas = self.classifier.predict_proba(np.array([features]))
-            confidence = np.max(probas[0]) if probas is not None else None
-        except Exception:
+            raw_probas = probas[0] if probas is not None else None
+            confidence = np.max(raw_probas) if raw_probas is not None else None
+            logger.info(f"PIPELINE DEBUG: Raw probas from KNN: {raw_probas}")
+            logger.info(f"PIPELINE DEBUG: Calculated confidence: {confidence}")
+        except Exception as e:
+            logger.error(f"PIPELINE DEBUG: Exception in predict_proba: {str(e)}")
             confidence = None
         
         # Create feature sample

@@ -2,11 +2,11 @@
   "device": {
     "name": "Raspberry Pi Zero 2W",
     "description": "TinyLCM Autonomous Monitoring with InferencePipeline Demo",
-    "log_level": "INFO"
+    "log_level": "DEBUG"
   },
   "camera": {
     "resolution": [640, 480],
-    "framerate": 1,
+    "framerate": 10,
     "rotation": 0,
     "inference_resolution": [224, 224]
   },
@@ -70,7 +70,7 @@
     }
   },
   "application": {
-    "inference_interval_ms": 1000,
+    "inference_interval_ms": 100,
     "display_frames": false,
     "save_debug_frames": false,
     "debug_output_dir": "./debug"
