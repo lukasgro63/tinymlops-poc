@@ -81,14 +81,16 @@ class ExtendedSyncClient:
     
     def check_connection(self) -> bool:
         """Check connection to the TinySphere server.
-        
+
         Returns:
             True if connected, False otherwise
         """
         try:
-            status = self.client.check_server_status()
-            logger.info(f"Server connection status: {status}")
-            return True
+            # Don't use check_server_status which may not be available
+            # Use the connection_manager directly which is guaranteed to be there
+            connected = self.client.connection_manager.connect()
+            logger.info(f"Server connection status: {'Connected' if connected else 'Disconnected'}")
+            return connected
         except TinyLCMConnectionError as e:
             logger.warning(f"Server connection check failed: {e}")
             return False
