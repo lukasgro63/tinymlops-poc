@@ -27,7 +27,7 @@
       "type": "LightweightKNN",
       "k": 3,
       "max_samples": 100,
-      "distance_metric": "cosine",
+      "distance_metric": "euclidean",
       "use_numpy": true,
       "initial_state_path": "../assets/initial_states/knn_initial_state_RN.json"
     },

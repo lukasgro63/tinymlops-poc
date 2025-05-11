@@ -50,7 +50,7 @@ TARGET_IMG_SIZE = (224, 224)  # Inferenzauflösung
 # Konfiguration für den LightweightKNN
 KNN_K = 3  # Anzahl der nächsten Nachbarn
 KNN_MAX_SAMPLES = 100  # Da wir nur 20 Samples haben (10 rot, 10 grün)
-KNN_DISTANCE_METRIC = "cosine"  # Metrik für den Abstandsvergleich
+KNN_DISTANCE_METRIC = "euclidean"  # Metrik für den Abstandsvergleich
 KNN_USE_NUMPY = True  # Für die Offline-Erstellung können wir NumPy nutzen
 
 # Speicherort für den initialen k-NN Zustand
