@@ -10,7 +10,6 @@ This is designed for a headless Raspberry Pi Zero 2W.
 """
 
 import argparse
-import cv2
 import json
 import logging
 import os
@@ -22,6 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import cv2
 import numpy as np
 
 # Try to import tflite_runtime (for Raspberry Pi) or fall back to TensorFlow's interpreter
@@ -40,16 +40,17 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.camera_handler import CameraHandler
 from utils.device_id_manager import DeviceIDManager
 from utils.preprocessors import resize_image
+from utils.sync_client import \
+    ExtendedSyncClient  # Use the extended version with additional features
 
+from tinylcm.core.classifiers.knn import LightweightKNN
+from tinylcm.core.data_logger.logger import DataLogger
+from tinylcm.core.data_structures import FeatureSample
+from tinylcm.core.drift_detection.features import PageHinkleyFeatureMonitor
 # Import tinylcm components
 from tinylcm.core.feature_extractors.tflite import TFLiteFeatureExtractor
-from tinylcm.core.classifiers.knn import LightweightKNN
-from tinylcm.core.drift_detection.features import PageHinkleyFeatureMonitor
 from tinylcm.core.operational_monitor.monitor import OperationalMonitor
-from tinylcm.core.data_logger.logger import DataLogger
 from tinylcm.core.pipeline import InferencePipeline
-from tinylcm.core.data_structures import FeatureSample
-from utils.sync_client import ExtendedSyncClient  # Use the extended version with additional features
 from tinylcm.utils.logging import setup_logger
 
 # Global variables
@@ -443,20 +444,49 @@ def main():
             use_numpy=knn_config["use_numpy"]
         )
         
-        # Initialize some initial samples for the KNN classifier
-        # This is necessary even in monitoring-only mode
+        # Lade den initialen KNN-Zustand, falls vorhanden
+        initial_state_path_str = knn_config.get("initial_state_path")
+        loaded_initial_state = False
+        
+        if initial_state_path_str:
+            initial_state_path = Path(initial_state_path_str)
+            if initial_state_path.exists():
+                logger.info(f"Versuche, initialen k-NN Zustand zu laden von: {initial_state_path}")
+                try:
+                    with open(initial_state_path, 'r') as f:
+                        loaded_state_data = json.load(f)
+                    
+                    if "classifier" in loaded_state_data and isinstance(loaded_state_data["classifier"], dict):
+                        classifier.set_state(loaded_state_data["classifier"])
+                        logger.info(f"LightweightKNN initialisiert mit {classifier.get_training_size()} Samples aus Zustand: {initial_state_path}")
+                        loaded_initial_state = True
+                    elif isinstance(loaded_state_data, dict) and "X_train" in loaded_state_data:
+                        # Fallback, falls nur KNN state direkt gespeichert wurde
+                        classifier.set_state(loaded_state_data)
+                        logger.info(f"LightweightKNN initialisiert mit {classifier.get_training_size()} Samples aus direktem Zustand: {initial_state_path}")
+                        loaded_initial_state = True
+                    else:
+                        logger.error(f"Schlüssel 'classifier' nicht in Zustandsdatei gefunden oder ungültiges Format: {initial_state_path}")
+                except Exception as e:
+                    logger.error(f"Fehler beim Laden des initialen k-NN Zustands von {initial_state_path}: {e}")
+            else:
+                logger.warning(f"Initiale k-NN Zustandsdatei nicht gefunden: {initial_state_path}")
+        
+        # Nur wenn kein initialer Zustand geladen wurde, verwenden wir zufällige Daten als Fallback
+        if not loaded_initial_state:
+            logger.warning("Kein initialer k-NN Zustand geladen. Verwende zufällige Daten als Fallback.")
+            
+            # First extract features from a test image to determine dimension
+            # Create a small test image for feature extraction
+            test_image = np.zeros((224, 224, 3), dtype=np.uint8)
+            features = feature_extractor.extract_features(test_image)
+            feature_dimension = features.shape[0] if features.ndim == 1 else features.shape[1]
+            logger.info(f"Feature extractor output dimension: {feature_dimension}")
 
-        # First extract features from a test image to determine dimension
-        # Create a small test image for feature extraction
-        test_image = np.zeros((224, 224, 3), dtype=np.uint8)
-        features = feature_extractor.extract_features(test_image)
-        feature_dimension = features.shape[0] if features.ndim == 1 else features.shape[1]
-        logger.info(f"Feature extractor output dimension: {feature_dimension}")
-
-        # Generate some initial samples for classifier
-        initial_features = np.random.randn(len(labels), feature_dimension)
-        initial_timestamps = [time.time() - (i*10) for i in range(len(labels))]
-        classifier.fit(initial_features, labels, initial_timestamps)
+            # Generate some initial samples for classifier
+            initial_features = np.random.randn(len(labels), feature_dimension)
+            initial_timestamps = [time.time() - (i*10) for i in range(len(labels))]
+            classifier.fit(initial_features, labels, initial_timestamps)
         
         # Initialize drift detector
         drift_detector_config = tinylcm_config["drift_detectors"][0]  # Use first detector
