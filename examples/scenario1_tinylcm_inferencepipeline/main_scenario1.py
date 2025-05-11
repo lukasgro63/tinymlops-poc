@@ -681,6 +681,39 @@ def main():
             collect_system_metrics=monitor_config.get("track_system_metrics", True),
             system_metrics_interval=monitor_config.get("report_interval_seconds", 30)
         )
+
+        # Verify operational monitor configuration
+        logger.info(f"Operational monitor initialized with:")
+        logger.info(f"- collect_system_metrics: {monitor_config.get('track_system_metrics', True)}")
+        logger.info(f"- system_metrics_interval: {monitor_config.get('report_interval_seconds', 30)}")
+
+        # Make sure the system metrics collection is running
+        # Try to restart collection if the monitor has the methods
+        if hasattr(operational_monitor, '_start_system_metrics_collection'):
+            try:
+                operational_monitor._start_system_metrics_collection()
+                logger.info("Explicitly started system metrics collection thread")
+            except Exception as e:
+                logger.warning(f"Failed to explicitly start system metrics thread: {e}")
+
+        # Track basic system metrics manually if needed
+        if monitor_config.get("track_system_metrics", True):
+            try:
+                # If psutil is available, collect basic metrics
+                import psutil
+                basic_metrics = {
+                    "timestamp": time.time(),
+                    "cpu_percent": psutil.cpu_percent(interval=0.1),
+                    "memory_percent": psutil.virtual_memory().percent
+                }
+                if hasattr(operational_monitor, 'track_system_metrics'):
+                    operational_monitor.track_system_metrics(basic_metrics)
+                    logger.info("Added initial system metrics to operational monitor")
+            except ImportError:
+                logger.warning("psutil not available, cannot add basic metrics")
+        logger.info(f"Operational monitor initialized with:")
+        logger.info(f"- collect_system_metrics: {monitor_config.get('track_system_metrics', True)}")
+        logger.info(f"- system_metrics_interval: {monitor_config.get('report_interval_seconds', 30)}")
         
         # Initialize data logger if enabled
         logger_config = tinylcm_config["data_logger"]
@@ -721,6 +754,13 @@ def main():
                 logger.warning("Could not connect to TinySphere server - will continue and try again later")
         except Exception as e:
             logger.warning(f"Error checking connection to TinySphere server: {e}")
+
+        # Manually collect system metrics once to verify they're working
+        try:
+            system_metrics = operational_monitor.get_system_metrics()
+            logger.info(f"Initial system metrics: {system_metrics}")
+        except Exception as e:
+            logger.error(f"Failed to collect initial system metrics: {e}", exc_info=True)
         
         # Start camera
         camera.start()
@@ -873,11 +913,16 @@ def main():
                     if operational_monitor:
                         try:
                             metrics = operational_monitor.get_current_metrics()
+                            # Add detailed log to debug the metrics collection
+                            logger.info(f"Collected metrics keys: {list(metrics.keys())}")
+                            logger.info(f"System metrics included: {'system' in metrics}")
+
                             # Send metrics to TinySphere
-                            logger.debug("Sending metrics to TinySphere")
-                            sync_client.create_and_send_metrics_package(metrics)
+                            logger.info("Sending metrics to TinySphere")
+                            success = sync_client.create_and_send_metrics_package(metrics)
+                            logger.info(f"Metrics package sent: {'Success' if success else 'Failed'}")
                         except Exception as e:
-                            logger.error(f"Error getting metrics: {e}")
+                            logger.error(f"Error getting or sending metrics: {e}", exc_info=True)
 
                     # Sync all pending packages
                     logger.debug("Syncing pending packages with TinySphere")

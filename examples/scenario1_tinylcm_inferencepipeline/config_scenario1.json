@@ -54,12 +54,12 @@
       "track_system_metrics": true,
       "track_inference_time": true, 
       "track_memory_usage": true,
-      "report_interval_seconds": 60
+      "report_interval_seconds": 30
     },
     "sync_client": {
       "server_url": "http://192.168.0.67:8000",
       "api_key": "tinylcm-demo-key",
-      "sync_interval_seconds": 60,
+      "sync_interval_seconds": 30,
       "max_retries": 3,
       "auto_register": true,
       "sync_dir": "./sync_data"
