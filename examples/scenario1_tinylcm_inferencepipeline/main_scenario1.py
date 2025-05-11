@@ -516,12 +516,46 @@ def main():
 
             # Get the feature at the specified index
             try:
-                return float(features.flatten()[feature_index])
+                feature_value = float(features.flatten()[feature_index])
+
+                # Log some feature statistics occasionally to understand the scale issue
+                if hasattr(safe_feature_extractor, 'feature_count'):
+                    safe_feature_extractor.feature_count += 1
+                else:
+                    safe_feature_extractor.feature_count = 1
+
+                if safe_feature_extractor.feature_count % 50 == 0:
+                    # Calculate some statistics about the features
+                    flat_features = features.flatten()
+                    try:
+                        stats = {
+                            'min': float(np.min(flat_features)),
+                            'max': float(np.max(flat_features)),
+                            'mean': float(np.mean(flat_features)),
+                            'std': float(np.std(flat_features)),
+                            'selected_value': feature_value,
+                            'dtype': str(features.dtype)
+                        }
+                        logger.info(f"Feature statistics: {stats}")
+                    except Exception as e:
+                        logger.error(f"Error calculating feature statistics: {e}")
+
+                return feature_value
             except:
                 return 0.0
 
+        # Alternative feature statistic that uses normalized feature values
+        def normalized_feature_extractor(features):
+            """Extract feature and normalize to reduce extreme values."""
+            raw_value = safe_feature_extractor(features)
+            # Normalize to a more reasonable range for drift detection
+            # The value 1e14 is based on the observed magnitude in logs
+            normalized_value = raw_value / 1e14
+            return normalized_value
+
+        # Use the normalized feature extractor to avoid extreme values in drift detection
         drift_detector = PageHinkleyFeatureMonitor(
-            feature_statistic_fn=safe_feature_extractor,
+            feature_statistic_fn=normalized_feature_extractor,  # Use normalized values
             delta=drift_detector_config["delta"],
             lambda_threshold=drift_detector_config["lambda_param"],
             warm_up_samples=drift_detector_config["min_samples"],
@@ -692,6 +726,22 @@ def main():
                             # Log first 5 feature values to understand scale
                             feature_sample = features[:5]
                             logger.info(f"Feature sample: {feature_sample}")
+
+                    # Save every frame with its prediction for validation
+                    try:
+                        # Create directory for prediction images if it doesn't exist
+                        pred_dir = Path("./prediction_images")
+                        pred_dir.mkdir(exist_ok=True)
+
+                        # Save the image with frame number and prediction information
+                        image_path = pred_dir / f"frame{frame_count:06d}_{prediction}_{confidence:.2f}.jpg"
+                        cv2.imwrite(str(image_path), current_frame)
+
+                        # Only log occasionally to avoid flooding logs
+                        if frame_count % 10 == 0:
+                            logger.info(f"Saved prediction image to {image_path}")
+                    except Exception as e:
+                        logger.error(f"Error saving prediction image: {e}")
             
             # Update frame counter
             frame_count += 1
