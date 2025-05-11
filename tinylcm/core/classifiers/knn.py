@@ -294,27 +294,34 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
     
     def predict_proba(self, features: np.ndarray) -> np.ndarray:
         """Predict probability distributions over classes for the provided features.
-        
+
         IMPORTANT: This is a synchronous, blocking operation. Similar to predict(),
         the execution time depends on the number of training samples, the dimensionality
         of the feature vectors, and whether NumPy acceleration is enabled (use_numpy).
-        
+
         This method is more computationally intensive than predict() as it needs
         to calculate probabilities for each class.
-        
+
+        The confidence calculation is enhanced to consider distance information:
+        - Traditional KNN just counts class votes among neighbors
+        - This implementation scales votes by distance, so samples that are further away
+          result in lower confidence scores, even if the predicted class is the same
+        - This is important for drift detection, as it allows confidence to drop
+          when new samples drift away from the training distribution
+
         Args:
             features: Matrix of feature vectors, shape (n_samples, n_features)
-            
+
         Returns:
             Matrix of class probabilities, shape (n_samples, n_classes)
         """
         start_time = time.time()
-        
+
         if not self.X_train:
             logger.warning("Classifier has not been trained yet - returning uniform probabilities")
             # Handle the case where classifier has not been trained yet
             # Return a probability distribution with a single "unknown" class with prob 1.0
-            
+
             # Determine the number of samples in the input
             if self.use_numpy and isinstance(features, np.ndarray):
                 if len(features.shape) == 1:
@@ -326,67 +333,131 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
                     n_samples = len(features)
                 else:
                     n_samples = 1
-            
+
             # Create an array with a single class probability
             if self.use_numpy:
                 return np.ones((n_samples, 1))
             else:
                 return [[1.0] for _ in range(n_samples)]
-        
+
         # Ensure classes are ordered consistently
         classes = sorted(list(self._classes))
-        
+
         # Ensure features is a numpy array if we're using numpy
         if self.use_numpy and not isinstance(features, np.ndarray):
             features = np.array(features)
-        
+
         # Handle case where features is a single sample
         if self.use_numpy and len(features.shape) == 1:
             features = np.expand_dims(features, axis=0)
         elif not self.use_numpy and not isinstance(features[0], (list, np.ndarray)):
             features = [features]
-        
+
         # Initialize probabilities array
         n_samples = len(features)
         n_classes = len(classes)
-        
+
         if self.use_numpy:
             probas = np.zeros((n_samples, n_classes))
         else:
             probas = [[0.0 for _ in range(n_classes)] for _ in range(n_samples)]
-        
+
+        # Distance-based confidence scaling factor
+        # - Higher values make confidence drop more quickly with distance
+        # - Lower values make confidence more resilient to distance changes
+        confidence_scaling = 2.0  # Tunable parameter
+
+        # Track stats for logging
+        prediction_stats = {
+            "avg_distances": [],
+            "max_probas": []
+        }
+
         # Compute probabilities for each sample
         for i, feature in enumerate(features):
             # Find k nearest neighbors
             neighbors = self._find_neighbors(feature)
-            
-            # Count class occurrences among neighbors
-            if self.weight_by_distance:
-                # Weight by inverse distance
-                class_weights = {c: 0.0 for c in classes}
-                total_weight = 0.0
-                
-                for neighbor, distance in neighbors:
-                    weight = 1.0 / (distance + 1e-6)  # Avoid division by zero
-                    class_weights[self.y_train[neighbor]] += weight
-                    total_weight += weight
-                
-                # Convert to probabilities
-                if total_weight > 0:
-                    for j, c in enumerate(classes):
-                        probas[i][j] = class_weights[c] / total_weight
+
+            if not neighbors:
+                # No neighbors found (shouldn't happen unless k > num samples)
+                # Return uniform distribution
+                for j in range(n_classes):
+                    probas[i][j] = 1.0 / n_classes
+                continue
+
+            # Calculate average distance to neighbors for diagnostic purposes
+            avg_distance = sum(dist for _, dist in neighbors) / len(neighbors)
+            prediction_stats["avg_distances"].append(avg_distance)
+
+            # Enhanced confidence calculation:
+            # 1. Get vote counts for each class
+            # 2. Calculate average distance for samples of each class
+            # 3. Scale confidence based on both vote count and distance
+
+            # Count votes and distances by class
+            class_stats = {}
+            for neighbor_idx, distance in neighbors:
+                label = self.y_train[neighbor_idx]
+                if label not in class_stats:
+                    class_stats[label] = {"count": 0, "total_distance": 0.0}
+                class_stats[label]["count"] += 1
+                class_stats[label]["total_distance"] += distance
+
+            # Calculate adjusted probabilities
+            total_adjusted_vote = 0.0
+            adjusted_votes = {}
+
+            for label, vote_info in class_stats.items():
+                # Base vote probability
+                vote_prob = vote_info["count"] / self.k
+
+                # Average distance for this class
+                class_avg_distance = vote_info["total_distance"] / vote_info["count"]
+
+                # Distance factor: higher distances = lower confidence
+                # Use a smooth decay function (sigmoid-like)
+                distance_factor = 1.0 / (1.0 + confidence_scaling * class_avg_distance)
+
+                # Final adjusted vote includes both vote count and distance
+                adjusted_vote = vote_prob * distance_factor
+                adjusted_votes[label] = adjusted_vote
+                total_adjusted_vote += adjusted_vote
+
+            # Normalize to get probabilities
+            if total_adjusted_vote > 0:
+                for j, c in enumerate(classes):
+                    if c in adjusted_votes:
+                        probas[i][j] = adjusted_votes[c] / total_adjusted_vote
+                    else:
+                        probas[i][j] = 0.0
             else:
-                # Simple vote counting
+                # Fallback to simple vote counting if adjustment fails
                 votes = Counter([self.y_train[neighbor[0]] for neighbor in neighbors])
-                
-                # Convert to probabilities
                 for j, c in enumerate(classes):
                     probas[i][j] = votes.get(c, 0) / self.k
-        
+
+            # Track max probability for logging
+            if self.use_numpy:
+                max_proba = np.max(probas[i])
+            else:
+                max_proba = max(probas[i])
+            prediction_stats["max_probas"].append(max_proba)
+
+        # Periodically log stats
+        if hasattr(self, '_prediction_count'):
+            self._prediction_count += n_samples
+        else:
+            self._prediction_count = n_samples
+
+        if self._prediction_count % 50 < n_samples:
+            avg_distance = sum(prediction_stats["avg_distances"]) / len(prediction_stats["avg_distances"])
+            avg_max_proba = sum(prediction_stats["max_probas"]) / len(prediction_stats["max_probas"])
+            logger.debug(f"KNN confidence stats - Avg distance: {avg_distance:.4f}, Avg max probability: {avg_max_proba:.4f}")
+
         # Update performance metrics
         self._total_prediction_time += time.time() - start_time
         self._total_predictions += len(features)
-        
+
         return np.array(probas) if self.use_numpy else probas
     
     def _find_neighbors(self, feature: np.ndarray) -> List[Tuple[int, float]]:
