@@ -80,29 +80,37 @@ const PackageUploadChart: React.FC<PackageUploadChartProps> = ({
             <YAxis />
             <Tooltip />
             <Legend />
-            <Area 
-              type="monotone" 
-              dataKey="models" 
-              stackId="1" 
-              stroke="#00647D" 
-              fill="#00647D" 
+            <Area
+              type="monotone"
+              dataKey="models"
+              stackId="1"
+              stroke="#00647D"
+              fill="#00647D"
               name="Models"
             />
-            <Area 
-              type="monotone" 
-              dataKey="metrics" 
-              stackId="1" 
-              stroke="#E5A823" 
-              fill="#E5A823" 
+            <Area
+              type="monotone"
+              dataKey="metrics"
+              stackId="1"
+              stroke="#E5A823"
+              fill="#E5A823"
               name="Metrics"
             />
-            <Area 
-              type="monotone" 
-              dataKey="data_logs" 
-              stackId="1" 
-              stroke="#4CAF50" 
-              fill="#4CAF50" 
+            <Area
+              type="monotone"
+              dataKey="data_logs"
+              stackId="1"
+              stroke="#4CAF50"
+              fill="#4CAF50"
               name="Data Logs"
+            />
+            <Area
+              type="monotone"
+              dataKey="drift_events"
+              stackId="1"
+              stroke="#F44336"
+              fill="#F44336"
+              name="Drift Events"
             />
           </AreaChart>
         </ResponsiveContainer>

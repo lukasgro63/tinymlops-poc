@@ -34,5 +34,6 @@ class InvalidInputError(TinyLCMError):
 class SyncError(TinyLCMError):
     pass
 
-class ConnectionError(TinyLCMError):
+class TinyLCMConnectionError(TinyLCMError):
+    """Custom connection error to avoid conflict with built-in ConnectionError."""
     pass

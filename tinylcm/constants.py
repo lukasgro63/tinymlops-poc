@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Dict, Any, Final
 
-VERSION: Final[str] = "0.1.0"
+VERSION: Final[str] = "0.2.0"
 
 class ModelFormat(str, Enum):
     TFLITE = "tflite"
@@ -79,6 +79,7 @@ FILE_FORMAT_JPEG: Final[str] = FileFormat.JPEG.value
 
 DEFAULT_BASE_DIR: Final[str] = "tinylcm_data"
 DEFAULT_INFERENCE_DIR: Final[str] = f"{DEFAULT_BASE_DIR}/inference_logs"
+DEFAULT_OPERATION_DIR: Final[str] = f"{DEFAULT_BASE_DIR}/operation_logs"  # For OperationalMonitor
 DEFAULT_DATA_DIR: Final[str] = f"{DEFAULT_BASE_DIR}/data_logs"
 DEFAULT_SYNC_DIR: Final[str] = f"{DEFAULT_BASE_DIR}/sync"
 DEFAULT_LOG_DIR: Final[str] = f"{DEFAULT_BASE_DIR}/logs"
@@ -105,6 +106,15 @@ DEFAULT_CONFIG: Final[Dict[str, Dict[str, Any]]] = {
         "base_dir": DEFAULT_BASE_DIR,
         "max_storage_bytes": DEFAULT_MAX_STORAGE,
         "cleanup_threshold": 0.9  # Cleanup when storage is 90% full
+    },
+    "operational_monitor": {
+        "storage_dir": DEFAULT_OPERATION_DIR,
+        "log_interval": DEFAULT_LOG_INTERVAL,
+        "memory_window_size": DEFAULT_MEMORY_ENTRIES,
+        "confidence_threshold": 0.3,  # Alert on confidence below this
+        "latency_threshold_ms": 100,  # Alert on latency above this (ms)
+        "collect_system_metrics": True,
+        "system_metrics_interval": 10.0  # Seconds between system metric collections
     },
     "inference_monitor": {
         "storage_dir": DEFAULT_INFERENCE_DIR,

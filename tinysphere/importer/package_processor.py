@@ -17,34 +17,35 @@ from typing import Any, Dict, List, Optional, Protocol, Set, TypeVar, Union
 from sqlalchemy.orm import Session
 
 from tinysphere.db.models import Device, DeviceMetric
+from tinysphere.importer.drift_processor import DriftProcessor
 
 T = TypeVar('T')
 
 
 class ProcessorPlugin(Protocol):
     """Protocol defining the interface for package content processors."""
-    
+
     def can_process(self, content_path: Path, metadata: Dict[str, Any]) -> bool:
         """
         Determine if this processor can handle the given content.
-        
+
         Args:
             content_path: Path to the extracted package content
             metadata: Package metadata
-            
+
         Returns:
             True if this processor can handle the content, False otherwise
         """
         ...
-    
+
     def process(self, content_path: Path, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process the package content.
-        
+
         Args:
             content_path: Path to the extracted package content
             metadata: Package metadata
-            
+
         Returns:
             Dictionary with processing results
         """
@@ -257,7 +258,7 @@ class PackageImporter:
     def __init__(self, extract_dir: str = "extracted_packages"):
         """
         Initialize a new package importer.
-        
+
         Args:
             extract_dir: Directory where packages will be extracted
         """
@@ -265,6 +266,7 @@ class PackageImporter:
         self.processors: List[ProcessorPlugin] = [
             MetricsProcessor(),
             ModelProcessor(),
+            DriftProcessor(),
             DataLogProcessor()
         ]
         self.logger = logging.getLogger(__name__)
@@ -399,11 +401,11 @@ class PackageImporter:
     def _determine_package_type(self, extract_dir: Path, original_type: str) -> str:
         """
         Determines a more accurate package type based on content inspection.
-        
+
         Args:
             extract_dir: Directory containing extracted package contents
             original_type: Original package type from metadata
-            
+
         Returns:
             Refined package type
         """
@@ -411,25 +413,43 @@ class PackageImporter:
         model_files = []
         for ext in [".tflite", ".onnx", ".pt", ".pkl"]:
             model_files.extend(list(extract_dir.glob(f"**/*{ext}")))
-        
+
         # Check for metrics files
         metrics_files = list(extract_dir.glob("**/metrics*.json"))
-        
+
+        # Check for drift event files
+        drift_files = list(extract_dir.glob("**/drift*.json"))
+        drift_files.extend(list(extract_dir.glob("**/drift*.jsonl")))
+
         # Check for log files
         log_files = list(extract_dir.glob("**/*.csv"))
         log_files.extend(list(extract_dir.glob("**/*.jsonl")))
-        
+
         # Determine content types present
         has_model = len(model_files) > 0
         has_metrics = len(metrics_files) > 0
+        has_drift = len(drift_files) > 0
         has_logs = len(log_files) > 0
-        
+
         # If original type already includes underscores (combined type), keep it
         if "_" in original_type:
             return original_type
-        
+
+        # If the original type contains drift, prioritize it
+        if "drift" in original_type.lower():
+            return "drift_event"
+
         # Set the package type based on content
-        if has_model and has_metrics and has_logs:
+        if has_drift:
+            if has_model and has_metrics:
+                return "drift_model_metrics"
+            elif has_model:
+                return "drift_model"
+            elif has_metrics:
+                return "drift_metrics"
+            else:
+                return "drift_event"
+        elif has_model and has_metrics and has_logs:
             return "model_metrics_logs"
         elif has_model and has_metrics:
             return "model_metrics"
@@ -443,7 +463,7 @@ class PackageImporter:
             return "metrics"
         elif has_logs:
             return "data_log"
-        
+
         # Default fallback to original type
         return original_type
     

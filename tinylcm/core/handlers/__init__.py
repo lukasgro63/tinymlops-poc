@@ -1,4 +1,4 @@
-# Adaptive handlers for different update strategies
+# Adaptive handlers for model adaptation
 
 from tinylcm.core.handlers.base import BaseAdaptiveHandler as AdaptiveHandler
 from tinylcm.core.handlers.passive import PassiveHandler

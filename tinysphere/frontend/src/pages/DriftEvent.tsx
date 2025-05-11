@@ -58,13 +58,20 @@ import {
 } from '../services/api';
 import { DriftEvent as DriftEventType, DriftSample, DriftStatus } from '../types/api';
 
-// Status color mapping
-const statusColors: Record<DriftStatus, string> = {
-  pending: '#ff9800',
-  validated: '#4caf50',
-  rejected: '#f44336',
-  resolved: '#2196f3',
-  ignored: '#9e9e9e'
+// Helper function to get MUI color based on status
+const getStatusColor = (status: DriftStatus): 'success' | 'warning' | 'error' | 'info' | 'default' => {
+  switch (status) {
+    case 'validated':
+      return 'success';
+    case 'pending':
+      return 'warning';
+    case 'rejected':
+      return 'error';
+    case 'resolved':
+      return 'info';
+    case 'ignored':
+      return 'default';
+  }
 };
 
 // Status options
@@ -242,13 +249,15 @@ const StatusUpdateDialog: React.FC<{
                   {statusOptions.map((option) => (
                     <MenuItem key={option.value} value={option.value}>
                       <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Box
+                        <Chip
+                          label=""
+                          size="small"
+                          color={getStatusColor(option.value as DriftStatus)}
                           sx={{
                             width: 16,
                             height: 16,
-                            borderRadius: '50%',
-                            bgcolor: statusColors[option.value as DriftStatus],
-                            mr: 1
+                            mr: 1,
+                            '& .MuiChip-label': { padding: 0 }
                           }}
                         />
                         {option.label}
@@ -309,22 +318,28 @@ const DriftEventPage: React.FC = () => {
   useEffect(() => {
     const fetchEventData = async () => {
       if (!eventId) return;
-      
+
       try {
         setLoading(true);
-        
-        // Fetch event details and samples in parallel
-        const [eventData, samplesData] = await Promise.all([
-          getDriftEvent(eventId),
-          getDriftSamples(eventId)
-        ]);
-        
+
+        // Fetch event details first
+        const eventData = await getDriftEvent(eventId);
         setEvent(eventData);
-        setSamples(samplesData);
+
+        try {
+          // Then try to get samples
+          const samplesData = await getDriftSamples(eventId);
+          setSamples(samplesData);
+        } catch (sampleErr) {
+          console.error('Error fetching samples:', sampleErr);
+          // If samples fail, it's not fatal - we can still show event details
+          setSamples([]);
+        }
+
         setError(null);
       } catch (err) {
         console.error('Error fetching drift event data:', err);
-        setError('Failed to load drift event data');
+        setError('Failed to load drift event data. The event may not exist or might have been deleted.');
       } finally {
         setLoading(false);
       }
@@ -437,18 +452,30 @@ const DriftEventPage: React.FC = () => {
           if (eventId) {
             setLoading(true);
             setError(null);
-            Promise.all([
-              getDriftEvent(eventId),
-              getDriftSamples(eventId)
-            ]).then(([eventData, samplesData]) => {
-              setEvent(eventData);
-              setSamples(samplesData);
-            }).catch(err => {
-              console.error('Error fetching drift event data:', err);
-              setError('Failed to load drift event data');
-            }).finally(() => {
-              setLoading(false);
-            });
+
+            // Fetch event first, then samples
+            getDriftEvent(eventId)
+              .then(eventData => {
+                setEvent(eventData);
+
+                // Then try to get samples
+                return getDriftSamples(eventId)
+                  .then(samplesData => {
+                    setSamples(samplesData);
+                  })
+                  .catch(sampleErr => {
+                    console.error('Error fetching samples:', sampleErr);
+                    // If samples fail, it's not fatal
+                    setSamples([]);
+                  });
+              })
+              .catch(err => {
+                console.error('Error fetching drift event data:', err);
+                setError('Failed to load drift event data. The event may not exist or might have been deleted.');
+              })
+              .finally(() => {
+                setLoading(false);
+              });
           }
         }}
         height="70vh"
@@ -459,9 +486,12 @@ const DriftEventPage: React.FC = () => {
   if (!event) {
     return (
       <Box sx={{ p: 3 }}>
-        <Alert severity="warning">Drift event not found</Alert>
-        <Button 
-          variant="outlined" 
+        <Alert severity="warning">Drift event not found or could not be loaded</Alert>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 2, mb: 2 }}>
+          The event might have been deleted or there could be an issue with the server. If this error persists, please contact your administrator.
+        </Typography>
+        <Button
+          variant="outlined"
           onClick={() => navigate('/drift')}
           sx={{ mt: 2 }}
         >
@@ -517,10 +547,9 @@ const DriftEventPage: React.FC = () => {
               </Typography>
               <Chip
                 label={event.status.charAt(0).toUpperCase() + event.status.slice(1)}
-                sx={{ 
-                  bgcolor: `${statusColors[event.status]}20`,
-                  color: statusColors[event.status]
-                }}
+                size="small"
+                color={getStatusColor(event.status)}
+                sx={getStatusColor(event.status) === 'default' ? { backgroundColor: '#FFA500' } : {}}
               />
             </Stack>
             
@@ -709,11 +738,10 @@ const DriftEventPage: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <Chip
-                        icon={sample.status === 'validated' ? <CheckIcon fontSize="small" /> : <WarningIcon fontSize="small" />}
                         label={sample.status.charAt(0).toUpperCase() + sample.status.slice(1)}
                         size="small"
-                        color={sample.status === 'validated' ? 'success' : 'warning'}
-                        variant="outlined"
+                        color={getStatusColor(sample.status as DriftStatus)}
+                        sx={getStatusColor(sample.status as DriftStatus) === 'default' ? { backgroundColor: '#FFA500' } : {}}
                       />
                     </TableCell>
                     <TableCell>

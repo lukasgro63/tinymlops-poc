@@ -65,11 +65,38 @@ class AutonomousDriftDetector(DriftDetector):
     """Base class for autonomous drift detectors that don't require labels.
     
     This class extends the basic DriftDetector interface with specific methods
-    for autonomous drift detection and callback registration.
+    for autonomous drift detection, callback registration, and reference statistics
+    management. It implements the warm-up, rolling update, and pausing logic for
+    the reference statistics.
     """
     
-    def __init__(self):
-        """Initialize the autonomous drift detector."""
+    def __init__(
+        self,
+        warm_up_samples: int = 100,
+        reference_update_interval: int = 50,
+        reference_update_factor: float = 0.05,
+        pause_reference_update_during_drift: bool = True,
+    ):
+        """Initialize the autonomous drift detector.
+        
+        Args:
+            warm_up_samples: Number of samples to collect during the warm-up phase
+            reference_update_interval: Number of samples between reference updates
+            reference_update_factor: Factor for updating reference (β)
+            pause_reference_update_during_drift: Whether to pause updating during detected drift
+        """
+        self.warm_up_samples = warm_up_samples
+        self.reference_update_interval = reference_update_interval
+        self.reference_update_factor = reference_update_factor
+        self.pause_reference_update_during_drift = pause_reference_update_during_drift
+        
+        # State flags
+        self.in_warm_up_phase = True
+        self.samples_processed = 0
+        self.drift_detected = False
+        self.samples_since_last_update = 0
+        
+        # Callback registration
         self.callbacks = []
     
     def register_callback(self, callback: Callable[[Dict[str, Any]], None]) -> None:
@@ -77,7 +104,7 @@ class AutonomousDriftDetector(DriftDetector):
         
         Args:
             callback: Function to call when drift is detected. It receives a dictionary
-                     with information about the detected drift.
+                    with information about the detected drift.
         """
         self.callbacks.append(callback)
     
@@ -95,3 +122,88 @@ class AutonomousDriftDetector(DriftDetector):
                 from tinylcm.utils.logging import setup_logger
                 logger = setup_logger(__name__)
                 logger.error(f"Error in drift callback: {str(e)}")
+    
+    def should_update_reference(self) -> bool:
+        """Determine if reference statistics should be updated.
+        
+        Returns:
+            True if reference should be updated, False otherwise
+        """
+        # Don't update during warm-up phase
+        if self.in_warm_up_phase:
+            return False
+        
+        # If configured to pause during drift and drift is detected, don't update
+        if self.pause_reference_update_during_drift and self.drift_detected:
+            return False
+        
+        # Check if it's time for a periodic update
+        return self.samples_since_last_update >= self.reference_update_interval
+    
+    def _update_reference_statistics(self, new_stats: Any, ref_stats: Any) -> Any:
+        """Update reference statistics using rolling update formula.
+        
+        Uses the formula: μ_ref_t ← β·μ_ref_{t-1} + (1−β)·x̄_batch
+        
+        Args:
+            new_stats: New statistics from recent batch
+            ref_stats: Current reference statistics
+            
+        Returns:
+            Updated reference statistics
+        """
+        # This method should be implemented by subclasses based on their specific statistics
+        raise NotImplementedError("Subclasses must implement _update_reference_statistics")
+    
+    def _process_sample(self, record: Any) -> None:
+        """Process a new sample and update internal state.
+        
+        This method should be called at the beginning of the update method in subclasses
+        to handle the common logic for warm-up phase and reference updates.
+        
+        Args:
+            record: The new data point
+        """
+        self.samples_processed += 1
+        self.samples_since_last_update += 1
+        
+        # Handle warm-up phase
+        if self.in_warm_up_phase and self.samples_processed >= self.warm_up_samples:
+            self.in_warm_up_phase = False
+            from tinylcm.utils.logging import setup_logger
+            logger = setup_logger(__name__)
+            logger.debug(f"Warm-up phase completed after {self.samples_processed} samples")
+    
+    def _get_base_state(self) -> Dict[str, Any]:
+        """Get the base state for the autonomous drift detector.
+        
+        Returns:
+            Dictionary with base state information
+        """
+        return {
+            "warm_up_samples": self.warm_up_samples,
+            "reference_update_interval": self.reference_update_interval,
+            "reference_update_factor": self.reference_update_factor,
+            "pause_reference_update_during_drift": self.pause_reference_update_during_drift,
+            "in_warm_up_phase": self.in_warm_up_phase,
+            "samples_processed": self.samples_processed,
+            "drift_detected": self.drift_detected,
+            "samples_since_last_update": self.samples_since_last_update
+        }
+    
+    def _set_base_state(self, state: Dict[str, Any]) -> None:
+        """Set the base state for the autonomous drift detector.
+        
+        Args:
+            state: Dictionary with base state information
+        """
+        self.warm_up_samples = state.get("warm_up_samples", self.warm_up_samples)
+        self.reference_update_interval = state.get("reference_update_interval", self.reference_update_interval)
+        self.reference_update_factor = state.get("reference_update_factor", self.reference_update_factor)
+        self.pause_reference_update_during_drift = state.get(
+            "pause_reference_update_during_drift", self.pause_reference_update_during_drift
+        )
+        self.in_warm_up_phase = state.get("in_warm_up_phase", self.in_warm_up_phase)
+        self.samples_processed = state.get("samples_processed", self.samples_processed)
+        self.drift_detected = state.get("drift_detected", self.drift_detected)
+        self.samples_since_last_update = state.get("samples_since_last_update", self.samples_since_last_update)

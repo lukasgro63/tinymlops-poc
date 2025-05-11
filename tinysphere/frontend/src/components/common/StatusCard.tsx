@@ -1,5 +1,6 @@
 // src/components/common/StatusCard.tsx
-import { Box, Paper, Typography } from '@mui/material';
+import { Box, Paper, Typography, Tooltip } from '@mui/material';
+import InfoIcon from '@mui/icons-material/Info';
 import React from 'react';
 
 interface StatusCardProps {
@@ -10,6 +11,7 @@ interface StatusCardProps {
   icon: React.ReactNode;
   color?: string;
   onClick?: () => void;
+  tooltip?: string;
 }
 
 const StatusCard: React.FC<StatusCardProps> = ({
@@ -19,7 +21,8 @@ const StatusCard: React.FC<StatusCardProps> = ({
   secondaryLabel,
   icon,
   color = '#00647D',
-  onClick
+  onClick,
+  tooltip
 }) => {
   return (
     <Paper
@@ -39,13 +42,20 @@ const StatusCard: React.FC<StatusCardProps> = ({
     >
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <Box>
-          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-            {title}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+              {title}
+            </Typography>
+            {tooltip && (
+              <Tooltip title={tooltip}>
+                <InfoIcon fontSize="small" sx={{ ml: 0.5, fontSize: 16, color: 'text.secondary' }} />
+              </Tooltip>
+            )}
+          </Box>
           <Typography variant="h4" sx={{ mt: 1, fontWeight: 'medium' }}>
             {value}
           </Typography>
-          
+
           {secondaryValue && (
             <Typography variant="caption" color="text.secondary">
               {secondaryLabel || 'Total'}: {secondaryValue}

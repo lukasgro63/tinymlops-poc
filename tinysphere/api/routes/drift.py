@@ -1,8 +1,12 @@
 # api/routes/drift.py
+import json
+import logging
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+logger = logging.getLogger(__name__)
+
+from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile, Form
 from sqlalchemy.orm import Session
 
 from tinysphere.api.dependencies.db import get_db
@@ -174,34 +178,39 @@ def get_drift_samples(event_id: str, db: Session = Depends(get_db)):
     event = DriftService.get_drift_event_by_id(db, event_id)
     if not event:
         raise HTTPException(status_code=404, detail="Drift event not found")
-    
+
     result = []
     for sample in event.samples:
         # Find validation status for this sample
         status = "pending"
         true_label = None
-        
+
         for validation in sample.validations:
             if validation.true_label is not None:
                 true_label = validation.true_label
                 status = "validated"
                 break
-        
+
+        # Handle potentially null values to satisfy Pydantic validation
+        prediction = sample.prediction or ""  # Provide empty string if prediction is None
+        confidence = sample.confidence or 0.0  # Provide 0.0 if confidence is None
+        drift_score = sample.drift_score or 0.0  # Provide 0.0 if drift_score is None
+
         sample_dict = {
             "sample_id": sample.sample_id,
             "drift_event_id": sample.drift_event_id,
-            "prediction": sample.prediction,
-            "confidence": sample.confidence,
-            "drift_score": sample.drift_score,
+            "prediction": prediction,
+            "confidence": confidence,
+            "drift_score": drift_score,
             "feature_path": sample.feature_path,
             "raw_data_path": sample.raw_data_path,
-            "timestamp": sample.timestamp,
-            "metadata": sample.metadata,
+            "timestamp": sample.timestamp or datetime.now(),  # Provide current time if timestamp is None
+            "metadata": sample.sample_metadata or {},  # Provide empty dict if metadata is None
             "true_label": true_label,
             "status": status
         }
         result.append(sample_dict)
-    
+
     return result
 
 @router.get("/samples/{sample_id}", response_model=DriftSampleResponse)
@@ -213,27 +222,32 @@ def get_drift_sample(sample_id: str, db: Session = Depends(get_db)):
     sample = db.query(db.models.DriftSample).filter(db.models.DriftSample.sample_id == sample_id).first()
     if not sample:
         raise HTTPException(status_code=404, detail="Drift sample not found")
-    
+
     # Find validation status for this sample
     status = "pending"
     true_label = None
-    
+
     for validation in sample.validations:
         if validation.true_label is not None:
             true_label = validation.true_label
             status = "validated"
             break
-    
+
+    # Handle potentially null values to satisfy Pydantic validation
+    prediction = sample.prediction or ""  # Provide empty string if prediction is None
+    confidence = sample.confidence or 0.0  # Provide 0.0 if confidence is None
+    drift_score = sample.drift_score or 0.0  # Provide 0.0 if drift_score is None
+
     return {
         "sample_id": sample.sample_id,
         "drift_event_id": sample.drift_event_id,
-        "prediction": sample.prediction,
-        "confidence": sample.confidence,
-        "drift_score": sample.drift_score,
+        "prediction": prediction,
+        "confidence": confidence,
+        "drift_score": drift_score,
         "feature_path": sample.feature_path,
         "raw_data_path": sample.raw_data_path,
-        "timestamp": sample.timestamp,
-        "metadata": sample.metadata,
+        "timestamp": sample.timestamp or datetime.now(),
+        "metadata": sample.sample_metadata or {},  # Corrected to use sample_metadata instead of metadata
         "true_label": true_label,
         "status": status
     }
@@ -316,5 +330,110 @@ def get_device_drift_metrics(device_id: str, db: Session = Depends(get_db)):
     device = DeviceService.get_device_by_id(db, device_id)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
-    
+
     return DriftService.get_device_drift_metrics(db, device_id)
+
+@router.post("/events/package")
+async def create_drift_event_with_data(
+    device_id: str = Form(...),
+    detector_name: str = Form(...),
+    drift_score: float = Form(None),
+    description: str = Form(None),
+    drift_type: str = Form("UNKNOWN"),
+    feature_file: Optional[UploadFile] = File(None),
+    image_file: Optional[UploadFile] = File(None),
+    metadata: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Create a drift event with optional feature and image data.
+
+    Args:
+        device_id: ID of the device reporting drift
+        detector_name: Name of the detector that triggered the event
+        drift_score: Score/magnitude of the drift
+        description: Description of the drift event
+        drift_type: Type of drift (CONFIDENCE, FEATURE, CONCEPT, etc.)
+        feature_file: Optional file containing feature data
+        image_file: Optional image file associated with the drift
+        metadata: Optional JSON string containing additional metadata
+
+    Returns:
+        Created drift event
+    """
+    # Check if device exists or register it
+    device = DeviceService.get_device_by_id(db, device_id)
+    if not device:
+        # Auto-register the device
+        DeviceService.register_device(db, {"device_id": device_id})
+
+    # Parse metadata if provided
+    event_metadata = {}
+    if metadata:
+        try:
+            event_metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid metadata JSON")
+
+    # Create event data
+    event_data = {
+        "device_id": device_id,
+        "detector_name": detector_name,
+        "drift_score": drift_score,
+        "description": description,
+        "drift_type": drift_type,
+        "metadata": event_metadata,
+        "timestamp": datetime.now()
+    }
+
+    # Process the drift event
+    event = DriftService.process_drift_event(db, device_id, event_data)
+
+    # Handle feature file if provided
+    if feature_file:
+        try:
+            # Save feature file
+            feature_data = await feature_file.read()
+            feature_path = f"drift_features/{event.event_id}_{feature_file.filename}"
+
+            # Process as sample
+            sample_data = {
+                "feature_path": feature_path,
+                "drift_score": drift_score,
+                "metadata": {
+                    "filename": feature_file.filename
+                }
+            }
+
+            DriftService.add_drift_sample(db, event.event_id, sample_data)
+        except Exception as e:
+            logger.error(f"Error processing feature file: {e}")
+
+    # Handle image file if provided
+    if image_file:
+        try:
+            # Save image file
+            image_data = await image_file.read()
+            image_path = f"drift_images/{event.event_id}_{image_file.filename}"
+
+            # Update the event with image info
+            event.event_metadata = event.event_metadata or {}
+            event.event_metadata["image_path"] = image_path
+            db.commit()
+        except Exception as e:
+            logger.error(f"Error processing image file: {e}")
+
+    # Return the created event
+    return {
+        "event_id": event.event_id,
+        "device_id": event.device_id,
+        "drift_type": event.drift_type.value,
+        "drift_score": event.drift_score,
+        "detector_name": event.detector_name,
+        "description": event.description,
+        "status": event.status.value,
+        "timestamp": event.timestamp,
+        "received_at": event.received_at,
+        "sample_count": len(event.samples),
+        "validation_count": len(event.validations)
+    }

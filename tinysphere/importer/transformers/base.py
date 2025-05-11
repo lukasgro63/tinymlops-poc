@@ -14,8 +14,8 @@ class DataTransformer(ABC):
     
     @staticmethod
     def get_appropriate_transformer(package_type: str, files: List[Path]) -> Optional['DataTransformer']:
-        from importer.transformers import (LogsTransformer, MetricsTransformer,
-                                           ModelTransformer)
+        from tinysphere.importer.transformers import (LogsTransformer, MetricsTransformer,
+                                           ModelTransformer, DriftTransformer)
 
         # The order here defines the priority when multiple transformers match
         # especially important for "components" packages that may contain multiple types
@@ -24,6 +24,8 @@ class DataTransformer(ABC):
             ModelTransformer(),
             # Metrics files have second priority
             MetricsTransformer(),
+            # Drift events have third priority
+            DriftTransformer(),
             # Log files have lowest priority
             LogsTransformer()
         ]
@@ -43,14 +45,16 @@ class DataTransformer(ABC):
     @staticmethod
     def get_all_appropriate_transformers(package_type: str, files: List[Path]) -> List['DataTransformer']:
         """Findet alle Transformer, die das Paket verarbeiten können."""
-        from importer.transformers import (LogsTransformer, MetricsTransformer,
-                                           ModelTransformer)
-        
+        from tinysphere.importer.transformers import (LogsTransformer, MetricsTransformer,
+                                           ModelTransformer, DriftTransformer)
+
         transformers = [
             # Model files have highest priority
             ModelTransformer(),
             # Metrics files have second priority
             MetricsTransformer(),
+            # Drift events have third priority
+            DriftTransformer(),
             # Log files have lowest priority
             LogsTransformer()
         ]

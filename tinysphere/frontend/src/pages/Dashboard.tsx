@@ -9,10 +9,10 @@ import TimelineIcon from '@mui/icons-material/Timeline';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { Box, Typography } from '@mui/material';
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ErrorDisplay from '../components/common/ErrorDisplay';
 
 // Components
-import DriftStatisticsCard from '../components/common/DriftStatisticsCard';
 import ModelPerformanceChart from '../components/common/ModelPerformanceChart';
 import PackageUploadChart from '../components/common/PackageUploadChart';
 import RecentActivitiesList from '../components/common/RecentActivitiesList';
@@ -40,6 +40,8 @@ import {
 } from '../types/api';
 
 const Dashboard: React.FC = () => {
+  const navigate = useNavigate();
+
   // State for dashboard data
   const [systemStatus, setSystemStatus] = useState<any>(null);
   const [deviceSummaries, setDeviceSummaries] = useState<DeviceSummary[]>([]);
@@ -242,25 +244,15 @@ const Dashboard: React.FC = () => {
       </Box>
       
       {/* Drift Detection Row */}
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, mb: 3 }}>
-        {/* Drift Statistics */}
-        <Box sx={{ flex: '1 1 500px', minWidth: '400px' }}>
-          <DriftStatisticsCard
-            title="Drift Detection Statistics"
-            days={14}
-          />
-        </Box>
-        
+      <Box sx={{ mb: 3 }}>
         {/* Recent Drift Events */}
-        <Box sx={{ flex: '1 1 500px', minWidth: '400px' }}>
-          <RecentDriftEventsTable
-            title="Recent Drift Events"
-            limit={5}
-            onViewEvent={(eventId) => {
-              window.location.href = `/drift/${eventId}`;
-            }}
-          />
-        </Box>
+        <RecentDriftEventsTable
+          title="Recent Drift Events"
+          limit={8}
+          onViewEvent={(eventId) => {
+            navigate(`/drift/${eventId}`);
+          }}
+        />
       </Box>
     </Box>
   );

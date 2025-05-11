@@ -46,13 +46,20 @@ import { getDriftEvents } from '../services/api';
 import { DriftEvent, DriftType, DriftStatus } from '../types/api';
 import DriftStatisticsCard from '../components/common/DriftStatisticsCard';
 
-// Status color mapping
-const statusColors: Record<DriftStatus, string> = {
-  pending: '#ff9800',
-  validated: '#4caf50',
-  rejected: '#f44336',
-  resolved: '#2196f3',
-  ignored: '#9e9e9e'
+// Helper function to get MUI color based on status
+const getStatusColor = (status: DriftStatus): 'success' | 'warning' | 'error' | 'info' | 'default' => {
+  switch (status) {
+    case 'validated':
+      return 'success';
+    case 'pending':
+      return 'warning';
+    case 'rejected':
+      return 'error';
+    case 'resolved':
+      return 'info';
+    case 'ignored':
+      return 'default';
+  }
 };
 
 // Drift type icon mapping
@@ -397,15 +404,10 @@ const DriftPage: React.FC = () => {
                       </TableCell>
                       <TableCell>
                         <Chip
-                          icon={<StatusIcon status={event.status} />}
                           label={event.status.charAt(0).toUpperCase() + event.status.slice(1)}
                           size="small"
-                          sx={{ 
-                            backgroundColor: `${statusColors[event.status]}20`,
-                            color: statusColors[event.status],
-                            borderColor: statusColors[event.status]
-                          }}
-                          variant="outlined"
+                          color={getStatusColor(event.status)}
+                          sx={getStatusColor(event.status) === 'default' ? { backgroundColor: '#FFA500' } : {}}
                         />
                       </TableCell>
                       <TableCell>

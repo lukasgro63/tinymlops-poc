@@ -46,7 +46,8 @@ from tinylcm.utils.errors import (
     DataLoggerError,
     MonitoringError,
     InvalidInputError,
-    SyncError
+    SyncError,
+    TinyLCMConnectionError
 )
 
 __all__ = [
@@ -94,5 +95,5 @@ __all__ = [
     "MonitoringError", 
     "InvalidInputError",
     "SyncError",
-    "ConnectionError"
+    "TinyLCMConnectionError"
 ]

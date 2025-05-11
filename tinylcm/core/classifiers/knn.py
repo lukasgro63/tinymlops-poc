@@ -6,6 +6,7 @@ import math
 from enum import Enum
 
 from tinylcm.core.classifiers.base import BaseAdaptiveClassifier
+from tinylcm.core.base import AdaptiveComponent
 from tinylcm.utils.logging import setup_logger
 
 logger = setup_logger(__name__)
@@ -13,23 +14,25 @@ logger = setup_logger(__name__)
 
 class DistanceMetric(str, Enum):
     """Enumeration of supported distance metrics."""
-    EUCLIDEAN = "euclidean"
-    MANHATTAN = "manhattan"
-    COSINE = "cosine"
+    EUCLIDEAN = "euclidean"  # d(a,b) = sqrt(sum((a_i - b_i)^2))
+    MANHATTAN = "manhattan"  # d(a,b) = sum(|a_i - b_i|)
+    COSINE = "cosine"        # d(a,b) = 1 - (a·b)/(||a||·||b||)
 
 
-class LightweightKNN(BaseAdaptiveClassifier):
+class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
     """A lightweight k-Nearest Neighbors classifier optimized for resource-constrained devices.
     
-    This implementation can operate with or without NumPy for maximum compatibility
-    and performance on edge devices like Raspberry Pi Zero.
+    This implementation is specifically designed for edge devices like Raspberry Pi Zero,
+    with options to operate without NumPy for maximum compatibility with restricted
+    environments.
     
     Features:
     - Multiple distance metrics: euclidean, manhattan, cosine
-    - Optional NumPy acceleration
+    - Optional NumPy acceleration (`use_numpy=False` for pure Python)
     - Sample timestamps for tie-breaking (prioritize newer samples)
     - Maximum sample limit to prevent memory growth
-    - Incremental learning
+    - Incremental learning with efficient single-sample addition
+    - Sample-level management for adaptive memory usage
     """
     
     def __init__(
@@ -38,7 +41,8 @@ class LightweightKNN(BaseAdaptiveClassifier):
         distance_metric: Union[str, DistanceMetric] = DistanceMetric.EUCLIDEAN,
         max_samples: int = 100,
         use_numpy: bool = True,
-        weight_by_distance: bool = False
+        weight_by_distance: bool = False,
+        tie_break_by_time: bool = True
     ):
         """Initialize the k-NN classifier.
         
@@ -48,12 +52,23 @@ class LightweightKNN(BaseAdaptiveClassifier):
             max_samples: Maximum number of training samples to store
             use_numpy: Whether to use NumPy for calculations (faster but uses more memory)
             weight_by_distance: Whether to weight votes by inverse distance
+            tie_break_by_time: Whether to break ties by preferring more recent samples
         """
         self.k = k
+        
+        # Convert string to enum if needed
+        if isinstance(distance_metric, str):
+            try:
+                distance_metric = DistanceMetric(distance_metric.lower())
+            except ValueError:
+                logger.warning(f"Unknown distance metric: {distance_metric}, using euclidean instead")
+                distance_metric = DistanceMetric.EUCLIDEAN
+                
         self.distance_metric = distance_metric
         self.max_samples = max_samples
         self.use_numpy = use_numpy
         self.weight_by_distance = weight_by_distance
+        self.tie_break_by_time = tie_break_by_time
         
         # Training data
         self.X_train = []  # Feature vectors
@@ -61,12 +76,16 @@ class LightweightKNN(BaseAdaptiveClassifier):
         self.timestamps = []  # Timestamps for each sample (for tie-breaking)
         self._classes = set()  # Set of unique classes
         
+        # Performance metrics
+        self._total_prediction_time = 0.0
+        self._total_predictions = 0
+        
         logger.debug(
             f"Initialized LightweightKNN with k={k}, "
-            f"metric={distance_metric}, max_samples={max_samples}"
+            f"metric={distance_metric}, max_samples={max_samples}, use_numpy={use_numpy}"
         )
     
-    def fit(self, features: np.ndarray, labels: List[Any]) -> None:
+    def fit(self, features: np.ndarray, labels: List[Any], timestamps: Optional[List[float]] = None) -> None:
         """Train the classifier on the provided data.
         
         This overwrites any existing training data.
@@ -74,9 +93,13 @@ class LightweightKNN(BaseAdaptiveClassifier):
         Args:
             features: Matrix of feature vectors, shape (n_samples, n_features)
             labels: List of corresponding labels
+            timestamps: Optional list of timestamps for each sample
         """
         if len(features) != len(labels):
             raise ValueError(f"Number of features ({len(features)}) and labels ({len(labels)}) must match")
+            
+        if timestamps is not None and len(timestamps) != len(features):
+            raise ValueError(f"Number of timestamps ({len(timestamps)}) must match number of samples")
             
         # Clear existing data
         self.X_train = []
@@ -84,16 +107,53 @@ class LightweightKNN(BaseAdaptiveClassifier):
         self.timestamps = []
         self._classes = set()
         
-        # Generate timestamps for new data
-        current_time = time.time()
-        timestamps = [current_time] * len(labels)
+        # Generate timestamps for new data if not provided
+        if timestamps is None:
+            current_time = time.time()
+            timestamps = [current_time] * len(labels)
         
         # Add new data
         self._add_samples(features, labels, timestamps)
         
         logger.debug(f"Fitted {len(self.X_train)} samples with {len(self._classes)} classes")
     
-    def incremental_fit(self, features: np.ndarray, labels: List[Any]) -> None:
+    def add_sample(self, feature: np.ndarray, label: Any, timestamp: Optional[float] = None) -> None:
+        """Add a single sample to the classifier.
+        
+        This is more efficient than calling incremental_fit for a single sample.
+        
+        Args:
+            feature: Feature vector, shape (n_features,)
+            label: Label for the sample
+            timestamp: Optional timestamp for the sample
+        """
+        # Update set of unique classes
+        self._classes.add(label)
+        
+        # Use current time if timestamp not provided
+        if timestamp is None:
+            timestamp = time.time()
+        
+        # If we're using NumPy, convert feature to numpy array if not already
+        if self.use_numpy and not isinstance(feature, np.ndarray):
+            feature = np.array(feature)
+        
+        # Check if we're at max capacity
+        if len(self.X_train) >= self.max_samples:
+            # Find oldest sample
+            oldest_idx = self.timestamps.index(min(self.timestamps))
+            
+            # Replace oldest with new sample
+            self.X_train[oldest_idx] = feature
+            self.y_train[oldest_idx] = label
+            self.timestamps[oldest_idx] = timestamp
+        else:
+            # Add new sample
+            self.X_train.append(feature)
+            self.y_train.append(label)
+            self.timestamps.append(timestamp)
+    
+    def incremental_fit(self, features: np.ndarray, labels: List[Any], timestamps: Optional[List[float]] = None) -> None:
         """Incrementally train the classifier on new data.
         
         This preserves existing training data and adds new samples.
@@ -103,13 +163,18 @@ class LightweightKNN(BaseAdaptiveClassifier):
         Args:
             features: Matrix of feature vectors, shape (n_samples, n_features)
             labels: List of corresponding labels
+            timestamps: Optional list of timestamps for each sample
         """
         if len(features) != len(labels):
             raise ValueError(f"Number of features ({len(features)}) and labels ({len(labels)}) must match")
             
-        # Generate timestamps for new data
-        current_time = time.time()
-        timestamps = [current_time] * len(labels)
+        if timestamps is not None and len(timestamps) != len(features):
+            raise ValueError(f"Number of timestamps ({len(timestamps)}) must match number of samples")
+            
+        # Generate timestamps for new data if not provided
+        if timestamps is None:
+            current_time = time.time()
+            timestamps = [current_time] * len(labels)
         
         # Add new data
         self._add_samples(features, labels, timestamps)
@@ -167,10 +232,11 @@ class LightweightKNN(BaseAdaptiveClassifier):
         Returns:
             List of predicted labels
         """
+        start_time = time.time()
+        
         if not self.X_train:
             logger.warning("Classifier has not been trained yet - returning default predictions")
-            # Instead of raising an exception, return a default prediction
-            # If we're using numpy, we can determine how many samples were provided
+            # Return a default prediction to avoid raising an exception
             if self.use_numpy and isinstance(features, np.ndarray):
                 if len(features.shape) == 1:
                     # Single sample
@@ -220,29 +286,42 @@ class LightweightKNN(BaseAdaptiveClassifier):
             
             predictions.append(predicted_class)
         
+        # Update performance metrics
+        self._total_prediction_time += time.time() - start_time
+        self._total_predictions += len(features)
+        
         return predictions
     
     def predict_proba(self, features: np.ndarray) -> np.ndarray:
         """Predict probability distributions over classes for the provided features.
-        
+
         IMPORTANT: This is a synchronous, blocking operation. Similar to predict(),
         the execution time depends on the number of training samples, the dimensionality
         of the feature vectors, and whether NumPy acceleration is enabled (use_numpy).
-        
+
         This method is more computationally intensive than predict() as it needs
         to calculate probabilities for each class.
-        
+
+        The confidence calculation is enhanced to consider distance information:
+        - Traditional KNN just counts class votes among neighbors
+        - This implementation scales votes by distance, so samples that are further away
+          result in lower confidence scores, even if the predicted class is the same
+        - This is important for drift detection, as it allows confidence to drop
+          when new samples drift away from the training distribution
+
         Args:
             features: Matrix of feature vectors, shape (n_samples, n_features)
-            
+
         Returns:
             Matrix of class probabilities, shape (n_samples, n_classes)
         """
+        start_time = time.time()
+
         if not self.X_train:
             logger.warning("Classifier has not been trained yet - returning uniform probabilities")
             # Handle the case where classifier has not been trained yet
             # Return a probability distribution with a single "unknown" class with prob 1.0
-            
+
             # Determine the number of samples in the input
             if self.use_numpy and isinstance(features, np.ndarray):
                 if len(features.shape) == 1:
@@ -254,63 +333,135 @@ class LightweightKNN(BaseAdaptiveClassifier):
                     n_samples = len(features)
                 else:
                     n_samples = 1
-            
+
             # Create an array with a single class probability
             if self.use_numpy:
                 return np.ones((n_samples, 1))
             else:
                 return [[1.0] for _ in range(n_samples)]
-        
+
         # Ensure classes are ordered consistently
         classes = sorted(list(self._classes))
-        
+
         # Ensure features is a numpy array if we're using numpy
         if self.use_numpy and not isinstance(features, np.ndarray):
             features = np.array(features)
-        
+
         # Handle case where features is a single sample
         if self.use_numpy and len(features.shape) == 1:
             features = np.expand_dims(features, axis=0)
         elif not self.use_numpy and not isinstance(features[0], (list, np.ndarray)):
             features = [features]
-        
+
         # Initialize probabilities array
         n_samples = len(features)
         n_classes = len(classes)
-        
+
         if self.use_numpy:
             probas = np.zeros((n_samples, n_classes))
         else:
             probas = [[0.0 for _ in range(n_classes)] for _ in range(n_samples)]
-        
+
+        # Distance-based confidence scaling factor
+        # - Higher values make confidence drop more quickly with distance
+        # - Lower values make confidence more resilient to distance changes
+        confidence_scaling = 10.0  # Increased to make confidence more sensitive to distance
+
+        # Track stats for logging
+        prediction_stats = {
+            "avg_distances": [],
+            "max_probas": []
+        }
+
         # Compute probabilities for each sample
         for i, feature in enumerate(features):
             # Find k nearest neighbors
             neighbors = self._find_neighbors(feature)
-            
-            # Count class occurrences among neighbors
-            if self.weight_by_distance:
-                # Weight by inverse distance
-                class_weights = {c: 0.0 for c in classes}
-                total_weight = 0.0
-                
-                for neighbor, distance in neighbors:
-                    weight = 1.0 / (distance + 1e-6)  # Avoid division by zero
-                    class_weights[self.y_train[neighbor]] += weight
-                    total_weight += weight
-                
-                # Convert to probabilities
-                if total_weight > 0:
-                    for j, c in enumerate(classes):
-                        probas[i][j] = class_weights[c] / total_weight
+
+            if not neighbors:
+                # No neighbors found (shouldn't happen unless k > num samples)
+                # Return uniform distribution
+                for j in range(n_classes):
+                    probas[i][j] = 1.0 / n_classes
+                continue
+
+            # Calculate average distance to neighbors for diagnostic purposes
+            avg_distance = sum(dist for _, dist in neighbors) / len(neighbors)
+            prediction_stats["avg_distances"].append(avg_distance)
+
+            # Enhanced confidence calculation:
+            # 1. Get vote counts for each class
+            # 2. Calculate average distance for samples of each class
+            # 3. Scale confidence based on both vote count and distance
+
+            # Count votes and distances by class
+            class_stats = {}
+            for neighbor_idx, distance in neighbors:
+                label = self.y_train[neighbor_idx]
+                if label not in class_stats:
+                    class_stats[label] = {"count": 0, "total_distance": 0.0}
+                class_stats[label]["count"] += 1
+                class_stats[label]["total_distance"] += distance
+
+            # Calculate adjusted probabilities
+            total_adjusted_vote = 0.0
+            adjusted_votes = {}
+
+            for label, vote_info in class_stats.items():
+                # Base vote probability
+                vote_prob = vote_info["count"] / self.k
+
+                # Average distance for this class
+                class_avg_distance = vote_info["total_distance"] / vote_info["count"]
+
+                # Distance factor: higher distances = lower confidence
+                # Use a smooth decay function (sigmoid-like)
+                distance_factor = 1.0 / (1.0 + confidence_scaling * class_avg_distance)
+
+                # Final adjusted vote includes both vote count and distance
+                adjusted_vote = vote_prob * distance_factor
+                adjusted_votes[label] = adjusted_vote
+                total_adjusted_vote += adjusted_vote
+
+            # Normalize to get probabilities
+            if total_adjusted_vote > 0:
+                for j, c in enumerate(classes):
+                    if c in adjusted_votes:
+                        probas[i][j] = adjusted_votes[c] / total_adjusted_vote
+                    else:
+                        probas[i][j] = 0.0
             else:
-                # Simple vote counting
+                # Fallback to simple vote counting if adjustment fails
                 votes = Counter([self.y_train[neighbor[0]] for neighbor in neighbors])
-                
-                # Convert to probabilities
                 for j, c in enumerate(classes):
                     probas[i][j] = votes.get(c, 0) / self.k
-        
+
+            # Track max probability for logging
+            if self.use_numpy:
+                max_proba = np.max(probas[i])
+            else:
+                max_proba = max(probas[i])
+            prediction_stats["max_probas"].append(max_proba)
+
+        # Periodically log stats
+        if hasattr(self, '_prediction_count'):
+            self._prediction_count += n_samples
+        else:
+            self._prediction_count = n_samples
+
+        # Always log for debugging confidence values
+        avg_distance = sum(prediction_stats["avg_distances"]) / len(prediction_stats["avg_distances"])
+        avg_max_proba = sum(prediction_stats["max_probas"]) / len(prediction_stats["max_probas"])
+
+        # Log at INFO level to ensure it appears in logs
+        logger.info(f"KNN ENHANCED CONFIDENCE STATS (v2) - Avg distance: {avg_distance:.6f}, Avg max probability: {avg_max_proba:.6f}")
+        if n_samples == 1:  # Only show detailed probas for single predictions to avoid log spam
+            logger.info(f"DETAILED PROBAS: {probas[0] if self.use_numpy else probas[0]}")
+
+        # Update performance metrics
+        self._total_prediction_time += time.time() - start_time
+        self._total_predictions += len(features)
+
         return np.array(probas) if self.use_numpy else probas
     
     def _find_neighbors(self, feature: np.ndarray) -> List[Tuple[int, float]]:
@@ -335,13 +486,30 @@ class LightweightKNN(BaseAdaptiveClassifier):
             distances.append((i, distance, self.timestamps[i]))
         
         # Sort by distance (ascending)
-        distances.sort(key=lambda x: (x[1], -x[2]))  # Sort by distance, then by -timestamp
+        if self.tie_break_by_time:
+            # Sort by distance, then by -timestamp (more recent first)
+            distances.sort(key=lambda x: (x[1], -x[2]))
+        else:
+            # Sort by distance only
+            distances.sort(key=lambda x: x[1])
         
-        # Return the k nearest neighbors
-        return [(idx, dist) for idx, dist, _ in distances[:self.k]]
+        # Get the k nearest neighbors
+        nearest_neighbors = [(idx, dist) for idx, dist, _ in distances[:self.k]]
+
+        # Log detailed information about the nearest neighbors for debugging
+        debug_str = "NEAREST NEIGHBORS DEBUG:\n"
+        for i, (idx, dist) in enumerate(nearest_neighbors):
+            label = self.y_train[idx]
+            debug_str += f"  Neighbor {i+1}: Label={label}, Distance={dist:.6f}\n"
+        logger.info(debug_str)
+
+        return nearest_neighbors
     
     def _calculate_distance(self, a: np.ndarray, b: np.ndarray) -> float:
         """Calculate the distance between two feature vectors.
+        
+        This method dispatches to the appropriate distance function based on
+        the selected distance metric.
         
         Args:
             a: First feature vector
@@ -362,6 +530,9 @@ class LightweightKNN(BaseAdaptiveClassifier):
     def _euclidean_distance(self, a: np.ndarray, b: np.ndarray) -> float:
         """Calculate the Euclidean distance between two vectors.
         
+        Euclidean distance is defined as:
+        d(a,b) = sqrt(sum((a_i - b_i)^2))
+        
         Args:
             a: First vector
             b: Second vector
@@ -372,10 +543,14 @@ class LightweightKNN(BaseAdaptiveClassifier):
         if self.use_numpy:
             return np.sqrt(np.sum((a - b) ** 2))
         else:
+            # Pure Python implementation (optimized for edge devices without NumPy)
             return math.sqrt(sum((a_i - b_i) ** 2 for a_i, b_i in zip(a, b)))
     
     def _manhattan_distance(self, a: np.ndarray, b: np.ndarray) -> float:
         """Calculate the Manhattan distance between two vectors.
+        
+        Manhattan distance is defined as:
+        d(a,b) = sum(|a_i - b_i|)
         
         Args:
             a: First vector
@@ -387,12 +562,14 @@ class LightweightKNN(BaseAdaptiveClassifier):
         if self.use_numpy:
             return np.sum(np.abs(a - b))
         else:
+            # Pure Python implementation (optimized for edge devices without NumPy)
             return sum(abs(a_i - b_i) for a_i, b_i in zip(a, b))
     
     def _cosine_distance(self, a: np.ndarray, b: np.ndarray) -> float:
         """Calculate the cosine distance between two vectors.
         
-        Cosine distance = 1 - cosine similarity
+        Cosine distance is defined as:
+        d(a,b) = 1 - (a·b)/(||a||·||b||)
         
         Args:
             a: First vector
@@ -417,6 +594,8 @@ class LightweightKNN(BaseAdaptiveClassifier):
             else:
                 cosine_similarity = 0.0
         else:
+            # Pure Python implementation (optimized for edge devices without NumPy)
+            
             # Calculate dot product
             dot_product = sum(a_i * b_i for a_i, b_i in zip(a, b))
             
@@ -435,6 +614,27 @@ class LightweightKNN(BaseAdaptiveClassifier):
         # Convert to cosine distance
         return 1.0 - cosine_similarity
     
+    def get_performance_metrics(self) -> Dict[str, float]:
+        """Get performance metrics for this classifier.
+        
+        Returns:
+            Dictionary containing performance metrics:
+            - total_prediction_time: Total time spent in prediction
+            - total_predictions: Number of predictions performed
+            - avg_prediction_time: Average time per prediction
+        """
+        avg_time = 0.0
+        if self._total_predictions > 0:
+            avg_time = self._total_prediction_time / self._total_predictions
+            
+        return {
+            "total_prediction_time": self._total_prediction_time,
+            "total_predictions": self._total_predictions,
+            "avg_prediction_time": avg_time,
+            "sample_count": len(self.X_train),
+            "class_count": len(self._classes)
+        }
+    
     def get_state(self) -> Dict[str, Any]:
         """Get the current state of the classifier.
         
@@ -447,14 +647,19 @@ class LightweightKNN(BaseAdaptiveClassifier):
         return {
             "type": "LightweightKNN",
             "k": self.k,
-            "distance_metric": self.distance_metric,
+            "distance_metric": self.distance_metric.value,
             "max_samples": self.max_samples,
             "use_numpy": self.use_numpy,
             "weight_by_distance": self.weight_by_distance,
+            "tie_break_by_time": self.tie_break_by_time,
             "X_train": X_train_serialized,
             "y_train": self.y_train,
             "timestamps": self.timestamps,
-            "classes": list(self._classes)
+            "classes": list(self._classes),
+            "metrics": {
+                "total_prediction_time": self._total_prediction_time,
+                "total_predictions": self._total_predictions
+            }
         }
     
     def set_state(self, state: Dict[str, Any]) -> None:
@@ -464,10 +669,21 @@ class LightweightKNN(BaseAdaptiveClassifier):
             state: Previously saved state dictionary
         """
         self.k = state.get("k", self.k)
-        self.distance_metric = state.get("distance_metric", self.distance_metric)
+        
+        # Handle distance metric (which might be a string or enum)
+        metric = state.get("distance_metric", self.distance_metric)
+        if isinstance(metric, str):
+            try:
+                self.distance_metric = DistanceMetric(metric.lower())
+            except ValueError:
+                logger.warning(f"Unknown distance metric in state: {metric}, using current setting")
+        else:
+            self.distance_metric = metric
+            
         self.max_samples = state.get("max_samples", self.max_samples)
         self.use_numpy = state.get("use_numpy", self.use_numpy)
         self.weight_by_distance = state.get("weight_by_distance", self.weight_by_distance)
+        self.tie_break_by_time = state.get("tie_break_by_time", self.tie_break_by_time)
         
         # Restore training data
         X_train = state.get("X_train", [])
@@ -482,3 +698,32 @@ class LightweightKNN(BaseAdaptiveClassifier):
         
         # Restore classes
         self._classes = set(state.get("classes", []))
+        
+        # Restore metrics if available
+        metrics = state.get("metrics", {})
+        self._total_prediction_time = metrics.get("total_prediction_time", 0.0)
+        self._total_predictions = metrics.get("total_predictions", 0)
+    
+    def get_samples(self) -> Tuple[List[Any], List[Any], List[float]]:
+        """Get the current training samples.
+        
+        Returns:
+            Tuple of (features, labels, timestamps)
+        """
+        return self.X_train, self.y_train, self.timestamps
+    
+    def get_classes(self) -> List[Any]:
+        """Get the current list of classes.
+        
+        Returns:
+            List of unique classes
+        """
+        return sorted(list(self._classes))
+    
+    def clear(self) -> None:
+        """Clear all training samples."""
+        self.X_train = []
+        self.y_train = []
+        self.timestamps = []
+        self._classes = set()
+        logger.debug("Cleared all training samples from classifier")

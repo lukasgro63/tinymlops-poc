@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 import mlflow
+import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -108,19 +109,194 @@ def get_devices_summary(db: Session = Depends(get_db)):
                     if dt is None:
                         return None
                     return dt.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
-            
+
             devices = DeviceService.get_all_devices(db)
-            
+
+            # Try to get MLflow data for each device
+            mlflow_metrics = {}
+            try:
+                # Connect to MLflow
+                mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+                mlflow.set_tracking_uri(mlflow_uri)
+                from mlflow.tracking import MlflowClient
+                client = MlflowClient()
+
+                # For each device, try to find MLflow experiments and metrics
+                for device in devices:
+                    try:
+                        # Search for experiments related to this device
+                        experiment_name = f"device_{device.device_id}"
+                        experiment = mlflow.get_experiment_by_name(experiment_name)
+
+                        if experiment:
+                            # Search runs in this experiment, limit to 5 most recent runs
+                            runs = mlflow.search_runs(
+                                experiment_ids=[experiment.experiment_id],
+                                max_results=5,  # Limit to 5 most recent runs
+                                order_by=["start_time DESC"]  # Sort by start time descending (newest first)
+                            )
+
+                            if not runs.empty:
+                                # Extract metrics we care about
+                                inference_metrics = []
+                                cpu_metrics = []
+                                memory_metrics = []
+
+                                # Debug information has been removed now that we understand the DataFrame structure
+
+                                for _, row in runs.iterrows():
+                                    # Look for specific metrics with their actual names in MLflow
+                                    try:
+                                        # Map MLflow metric names to our internal categories
+                                        # Get metrics from the actual DataFrame structure
+                                        # MLflow typically stores metrics in columns with 'metrics.' prefix
+
+                                        # Inference time metrics - check for metrics in column names
+                                        for metric_name in ["latency_mean_ms", "inference_time_ms", "latency_ms", "inference_time"]:
+                                            metric_column = f"metrics.{metric_name}"
+                                            if metric_column in row:
+                                                try:
+                                                    value = float(row[metric_column])
+                                                    if not pd.isna(value):  # Check for NaN values
+                                                        inference_metrics.append(value)
+                                                        break
+                                                except (ValueError, TypeError) as e:
+                                                    print(f"Error converting {metric_name} value: {e}")
+                                                    continue
+
+                                        # CPU usage metrics
+                                        for metric_name in ["system_cpu_percent_avg", "cpu_usage_percent", "cpu_usage", "cpu_percent"]:
+                                            metric_column = f"metrics.{metric_name}"
+                                            if metric_column in row:
+                                                try:
+                                                    value = float(row[metric_column])
+                                                    if not pd.isna(value):  # Check for NaN values
+                                                        cpu_metrics.append(value)
+                                                        break
+                                                except (ValueError, TypeError) as e:
+                                                    print(f"Error converting {metric_name} value: {e}")
+                                                    continue
+
+                                        # Memory usage metrics
+                                        for metric_name in ["system_memory_percent_avg", "memory_usage_percent", "memory_usage", "memory_percent"]:
+                                            metric_column = f"metrics.{metric_name}"
+                                            if metric_column in row:
+                                                try:
+                                                    value = float(row[metric_column])
+                                                    if not pd.isna(value):  # Check for NaN values
+                                                        memory_metrics.append(value)
+                                                        break
+                                                except (ValueError, TypeError) as e:
+                                                    print(f"Error converting {metric_name} value: {e}")
+                                                    continue
+
+                                        # Also look for drift score to highlight drift issues
+                                        for metric_name in ["drift_score", "drift_magnitude", "concept_drift", "distribution_shift"]:
+                                            metric_column = f"metrics.{metric_name}"
+                                            if metric_column in row:
+                                                try:
+                                                    if device.device_id not in mlflow_metrics:
+                                                        mlflow_metrics[device.device_id] = {}
+
+                                                    if "drift_score" not in mlflow_metrics[device.device_id]:
+                                                        mlflow_metrics[device.device_id]["drift_score"] = []
+
+                                                    value = float(row[metric_column])
+                                                    if not pd.isna(value):  # Check for NaN values
+                                                        mlflow_metrics[device.device_id]["drift_score"].append(value)
+                                                    break
+                                                except (ValueError, TypeError) as e:
+                                                    print(f"Error converting {metric_name} value: {e}")
+                                                    continue
+                                    except:
+                                        # Skip errors in individual metrics
+                                        continue
+
+                                # Log available metrics for debugging
+                                try:
+                                    if device.device_id not in mlflow_metrics:
+                                        mlflow_metrics[device.device_id] = {}
+
+                                    if "available_metrics" not in mlflow_metrics[device.device_id]:
+                                        mlflow_metrics[device.device_id]["available_metrics"] = set()
+
+                                    # Store unique metric names found in all runs
+                                    # Extract metrics from column names that start with "metrics."
+                                    for col in row.keys():
+                                        if col.startswith('metrics.'):
+                                            try:
+                                                # Strip the "metrics." prefix to get just the metric name
+                                                metric_name = col.replace('metrics.', '')
+                                                mlflow_metrics[device.device_id]["available_metrics"].add(metric_name)
+                                            except Exception as col_err:
+                                                print(f"Error processing column {col}: {col_err}")
+                                except Exception as metrics_err:
+                                    print(f"Error processing available metrics for device {device.device_id}: {metrics_err}")
+
+                                # Compute averages if we have data
+                                device_metrics = {}
+
+                                # Safely calculate metrics statistics with proper error handling
+                                try:
+                                    if inference_metrics:
+                                        device_metrics["inference_time"] = {
+                                            "avg": sum(inference_metrics) / len(inference_metrics),
+                                            "min": min(inference_metrics),
+                                            "max": max(inference_metrics),
+                                            "count": len(inference_metrics)
+                                        }
+                                except Exception as e:
+                                    print(f"Error calculating inference time metrics: {e}")
+
+                                try:
+                                    if cpu_metrics:
+                                        device_metrics["cpu_usage"] = {
+                                            "avg": sum(cpu_metrics) / len(cpu_metrics),
+                                            "min": min(cpu_metrics),
+                                            "max": max(cpu_metrics),
+                                            "count": len(cpu_metrics)
+                                        }
+                                except Exception as e:
+                                    print(f"Error calculating CPU usage metrics: {e}")
+
+                                try:
+                                    if memory_metrics:
+                                        device_metrics["memory_usage"] = {
+                                            "avg": sum(memory_metrics) / len(memory_metrics),
+                                            "min": min(memory_metrics),
+                                            "max": max(memory_metrics),
+                                            "count": len(memory_metrics)
+                                        }
+                                except Exception as e:
+                                    print(f"Error calculating memory usage metrics: {e}")
+
+                                if device_metrics:
+                                    mlflow_metrics[device.device_id] = {
+                                        **mlflow_metrics.get(device.device_id, {}),
+                                        **device_metrics
+                                    }
+
+                                    # Convert set to list for JSON serialization
+                                    if "available_metrics" in mlflow_metrics[device.device_id] and isinstance(mlflow_metrics[device.device_id]["available_metrics"], set):
+                                        mlflow_metrics[device.device_id]["available_metrics"] = list(mlflow_metrics[device.device_id]["available_metrics"])
+                    except Exception as exp_err:
+                        # Skip this device's MLflow data if there's an error
+                        print(f"Error getting MLflow data for device {device.device_id}: {exp_err}")
+                        continue
+            except Exception as mlflow_err:
+                print(f"Error connecting to MLflow: {mlflow_err}")
+                # Continue without MLflow data
+
             device_summaries = []
             for device in devices:
                 try:
                     packages = PackageService.get_packages_by_device(db, device.device_id)
-                    
+
                     latest_package = None
                     if packages:
                         latest_package = max([p.uploaded_at for p in packages])
-                    
-                    device_summaries.append({
+
+                    summary = {
                         "device_id": device.device_id,
                         "hostname": device.hostname,
                         "platform": device.platform,
@@ -128,12 +304,18 @@ def get_devices_summary(db: Session = Depends(get_db)):
                         "last_sync_time": format_datetime(device.last_sync_time),
                         "package_count": len(packages),
                         "latest_package": format_datetime(latest_package)
-                    })
+                    }
+
+                    # Add MLflow metrics if available
+                    if device.device_id in mlflow_metrics:
+                        summary["mlflow_metrics"] = mlflow_metrics[device.device_id]
+
+                    device_summaries.append(summary)
                 except Exception as device_err:
                     # Log error but continue with next device
                     print(f"Error processing device {device.device_id}: {device_err}")
                     continue
-            
+
             return device_summaries
         except Exception as db_err:
             # Return empty list if database operation fails
@@ -245,14 +427,23 @@ def get_device_models(device_id: str, db: Session = Depends(get_db)):
                         versions = []
                         for version in latest_versions:
                             try:
-                                # Run abrufen, um Metriken zu bekommen
-                                run = mlflow_client.get_run(version.run_id) if version.run_id else None
-                                
+                                # Get run metrics as DataFrame
+                                metrics_dict = {}
+                                if version.run_id:
+                                    run_data = mlflow.search_runs(run_ids=[version.run_id])
+
+                                    if not run_data.empty:
+                                        # Extract metrics from the DataFrame columns
+                                        for col in run_data.iloc[0].keys():
+                                            if col.startswith('metrics.'):
+                                                metric_name = col.replace('metrics.', '')
+                                                metrics_dict[metric_name] = float(run_data.iloc[0][col])
+
                                 versions.append({
                                     "version": version.version,
                                     "stage": version.current_stage,
                                     "run_id": version.run_id,
-                                    "metrics": run.data.metrics if run and hasattr(run, "data") else {},
+                                    "metrics": metrics_dict,
                                     "creation_timestamp": version.creation_timestamp,
                                     "last_updated_timestamp": version.last_updated_timestamp
                                 })
@@ -484,9 +675,10 @@ def get_package_timeline(period: str = "week", db: Session = Depends(get_db)):
                             'date': date_str,
                             'models': 0,
                             'metrics': 0,
-                            'data_logs': 0
+                            'data_logs': 0,
+                            'drift_events': 0
                         }
-                    
+
                     # Map package types to chart categories
                     if package_type == 'model':
                         timeline_data[date_str]['models'] += count
@@ -494,6 +686,8 @@ def get_package_timeline(period: str = "week", db: Session = Depends(get_db)):
                         timeline_data[date_str]['metrics'] += count
                     elif package_type == 'data_log':
                         timeline_data[date_str]['data_logs'] += count
+                    elif 'drift' in package_type.lower():
+                        timeline_data[date_str]['drift_events'] += count
                 except Exception as item_err:
                     print(f"Error processing timeline item: {item_err}")
                     continue
@@ -506,7 +700,8 @@ def get_package_timeline(period: str = "week", db: Session = Depends(get_db)):
                         'date': current_date,
                         'models': 0,
                         'metrics': 0,
-                        'data_logs': 0
+                        'data_logs': 0,
+                        'drift_events': 0
                     }
             
             # Convert to list and sort by date
@@ -526,7 +721,8 @@ def get_package_timeline(period: str = "week", db: Session = Depends(get_db)):
                     'date': datetime.now(timezone.utc).strftime('%Y-%m-%d'),
                     'models': 0,
                     'metrics': 0,
-                    'data_logs': 0
+                    'data_logs': 0,
+                    'drift_events': 0
                 }
             ]
             
@@ -567,16 +763,25 @@ def get_models_performance(metric: str = "accuracy", db: Session = Depends(get_d
                             # Get run data
                             run = client.get_run(version.run_id)
                             
-                            # Check if the run has the requested metric
-                            if metric in run.data.metrics:
-                                performance_data.append({
-                                    "model_name": model.name,
-                                    "version": version.version,
-                                    "stage": version.current_stage,
-                                    "metric_name": metric,
-                                    "value": run.data.metrics[metric],
-                                    "timestamp": run.info.start_time
-                                })
+                            # Get the run data as DataFrame
+                            run_data = mlflow.search_runs(run_ids=[run.info.run_id])
+
+                            if not run_data.empty:
+                                metric_column = f"metrics.{metric}"
+                                if metric_column in run_data.iloc[0]:
+                                    try:
+                                        value = float(run_data.iloc[0][metric_column])
+                                        if not pd.isna(value):  # Check for NaN values
+                                            performance_data.append({
+                                                "model_name": model.name,
+                                                "version": version.version,
+                                                "stage": version.current_stage,
+                                                "metric_name": metric,
+                                                "value": value,
+                                                "timestamp": run.info.start_time
+                                            })
+                                    except (ValueError, TypeError) as e:
+                                        print(f"Error processing metric {metric} for model {model.name}: {e}")
                         except Exception as run_err:
                             print(f"Error getting run data for {model.name} version {version.version}: {run_err}")
                             continue

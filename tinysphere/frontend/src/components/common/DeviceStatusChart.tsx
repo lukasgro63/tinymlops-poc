@@ -7,8 +7,8 @@ interface DeviceStatusChartProps {
   inactiveCount: number;
 }
 
-const ACTIVE_COLOR = '#4CAF50';
-const INACTIVE_COLOR = '#F44336';
+const ACTIVE_COLOR = '#4CAF50';  // Green
+const INACTIVE_COLOR = '#FFA500';  // Orange
 
 const DeviceStatusChart: React.FC<DeviceStatusChartProps> = ({ activeCount, inactiveCount }) => {
   const data = [

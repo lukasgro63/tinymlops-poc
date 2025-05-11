@@ -8,25 +8,33 @@ from tinylcm.core.data_structures import FeatureSample, AdaptationEvent
 from tinylcm.core.classifiers.base import BaseAdaptiveClassifier
 from tinylcm.core.handlers.base import BaseAdaptiveHandler
 from tinylcm.core.drift_detection.cusum import AccuracyCUSUM
-from tinylcm.core.condensing import CondensingAlgorithm
 from tinylcm.utils.logging import setup_logger
+
+# Import condensing functionality if available
+try:
+    from tinylcm.core.condensing import CondensingAlgorithm
+    CONDENSING_AVAILABLE = True
+except ImportError:
+    CONDENSING_AVAILABLE = False
 
 logger = setup_logger(__name__)
 
 
 class HybridHandler(BaseAdaptiveHandler):
-    """Hybrid adaptation handler implementing Hybrid Tiny kNN (Algorithm 5).
+    """Unified handler for both heuristic and validated feedback.
     
-    This handler combines passive and active adaptation strategies:
-    - Passively updates on misclassifications like PassiveHandler
-    - Actively monitors for drift using CUSUM like ActiveHandler
-    - When drift is detected, filters the training set to keep only recent samples
-    - Optionally applies condensing to further reduce the training set size
+    The HybridHandler processes both potential labels from on-device heuristics
+    and validated labels from external sources. It combines:
     
-    Use this when:
-    - You want both incremental updates and drift detection
-    - You have labeled samples available
-    - You need to handle both gradual and abrupt concept drift
+    1. Passive Update Logic: Adds misclassified samples to the training set
+       and updates the classifier incrementally.
+       
+    2. Active Update Logic: For validated labels only, uses CUSUM to detect
+       significant accuracy drops, then filters out pre-drift samples and
+       retrains the classifier.
+       
+    This approach allows the device to adapt autonomously using heuristics while
+    still benefiting from external validation when available.
     """
     
     def __init__(
@@ -36,12 +44,12 @@ class HybridHandler(BaseAdaptiveHandler):
         batch_size: int = 30,
         baseline_accuracy: float = 0.9,
         cusum_threshold: float = 5.0,
-        cusum_delta: float = 0.25,
-        enable_condensing: bool = False,
-        condensing_method: str = "class_balanced",
+        cusum_delta: float = 0.1,
         use_numpy: bool = True,
         metrics_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-        adaptation_callback: Optional[Callable[[AdaptationEvent], None]] = None
+        adaptation_callback: Optional[Callable[[AdaptationEvent], None]] = None,
+        enable_condensing: bool = False,
+        condensing_method: str = "class_balanced"
     ):
         """Initialize the hybrid handler.
         
@@ -52,8 +60,6 @@ class HybridHandler(BaseAdaptiveHandler):
             baseline_accuracy: Expected accuracy of the classifier
             cusum_threshold: Detection threshold for the CUSUM algorithm
             cusum_delta: Expected magnitude of accuracy drop
-            enable_condensing: Whether to apply condensing after drift
-            condensing_method: Method to use for condensing ("class_balanced", "distance_based", "random")
             use_numpy: Whether to use NumPy for calculations
             metrics_callback: Optional callback for reporting metrics
             adaptation_callback: Optional callback for adaptation events
@@ -61,260 +67,331 @@ class HybridHandler(BaseAdaptiveHandler):
         super().__init__(classifier, max_samples, metrics_callback, adaptation_callback)
         
         self.batch_size = batch_size
-        self.enable_condensing = enable_condensing
-        self.condensing_method = condensing_method
         self.use_numpy = use_numpy
         
-        # Set up CUSUM detector
-        self.drift_detector = AccuracyCUSUM(
+        # Set up CUSUM detector for validated labels
+        self.accuracy_cusum = AccuracyCUSUM(
             baseline_accuracy=baseline_accuracy,
             threshold=cusum_threshold,
             drift_magnitude=cusum_delta,
             use_numpy=use_numpy
         )
         
-        # Set up accuracy buffer
-        self.accuracy_buffer = deque(maxlen=batch_size)
-        
-        # Training buffer - stores FeatureSample objects
+        # Training buffer - stores (features, label, timestamp) tuples
         self.training_samples = deque(maxlen=max_samples)
-    
-    def process_sample(self, sample: FeatureSample) -> Optional[AdaptationEvent]:
-        """Process a new sample according to the hybrid adaptation strategy.
         
-        This implements Algorithm 5 (Hybrid Tiny kNN):
-        1. If the sample is misclassified, add it to the training buffer (passive)
-        2. If the sample has a label, add its result to the accuracy buffer
-        3. When the buffer is full, calculate accuracy and update the CUSUM detector
-        4. If drift is detected:
-           a. Identify the drift time
-           b. Filter the training buffer to keep only samples after the drift time
-           c. Optionally apply condensing to further reduce the training set size
-           d. Train the classifier on the filtered samples
+        # Buffer for tracking accuracy of validated samples
+        self.validated_samples = []
+        
+        # Condensing configuration
+        self.enable_condensing = enable_condensing and CONDENSING_AVAILABLE
+        self.condensing_method = condensing_method
+        
+        if self.enable_condensing and not CONDENSING_AVAILABLE:
+            logger.warning("Condensing enabled but CondensingAlgorithm not available. Disabling condensing.")
+            self.enable_condensing = False
+    
+    def provide_feedback(
+        self,
+        features: np.ndarray,
+        label: Any,
+        is_validated_label: bool = False,
+        sample_id: Optional[str] = None,
+        timestamp: Optional[float] = None
+    ) -> Optional[AdaptationEvent]:
+        """Process feedback according to the hybrid adaptation strategy.
+        
+        This method implements the core functionality of the HybridHandler:
+        1. Makes an internal prediction using the classifier
+        2. For all feedback (validated or not):
+           - If prediction != label, adds to training samples and updates the classifier
+        3. For validated labels only:
+           - Updates the CUSUM detector with accuracy
+           - If drift is detected, filters out pre-drift samples and retrains
         
         Args:
-            sample: A feature sample with extraction results and metadata
+            features: Feature vector
+            label: Suggested label (potential or validated)
+            is_validated_label: Whether this is an externally validated label
+            sample_id: Optional unique identifier for the sample
+            timestamp: Optional timestamp (defaults to current time)
             
         Returns:
             AdaptationEvent if adaptation occurred, None otherwise
         """
-        # Update counters
-        self.n_samples_processed += 1
-        
-        # Check if the sample has a label (supervised)
-        if sample.label is None:
-            # Cannot adapt without a label
-            logger.debug("Sample has no label, skipping adaptation")
+        if not self.adaptation_enabled:
+            logger.debug("Adaptation is disabled, skipping feedback")
             return None
         
-        # Check if the sample has a prediction
-        if sample.prediction is None:
-            # Try to predict using the classifier
-            predictions = self.classifier.predict(np.array([sample.features]))
-            sample.prediction = predictions[0]
+        # Use current time if timestamp not provided
+        if timestamp is None:
+            timestamp = time.time()
+            
+        # Make internal prediction
+        internal_prediction = self.classifier.predict(np.array([features]))[0]
         
-        # Check if the prediction is correct
-        is_correct = not sample.is_misclassified()
-        if not is_correct:
-            self.n_samples_misclassified += 1
-        
-        # Add accuracy result to buffer (1 for correct, 0 for incorrect)
-        self.accuracy_buffer.append(is_correct)
-        
-        # Passive adaptation: If misclassified and adaptation is enabled, add to training buffer
+        # Track whether any adaptation occurred
         passive_adaptation = False
-        if sample.is_misclassified() and self.adaptation_enabled:
-            # Add the sample to the training buffer
-            self.training_samples.append(sample)
-            passive_adaptation = True
-        
-        # Active adaptation: Check for drift
         active_adaptation = False
-        drift_event = None
         
-        # If accuracy buffer is full, update the drift detector
-        if len(self.accuracy_buffer) == self.batch_size:
-            # Calculate accuracy for the current batch
-            accuracy = sum(self.accuracy_buffer) / self.batch_size
+        # Passive Update Logic (for all feedback)
+        if internal_prediction != label:
+            # Add to training buffer
+            self.training_samples.append((features, label, timestamp))
             
-            # Update the CUSUM detector
-            drift_detected, drift_point_index = self.drift_detector.update(accuracy)
+            # Get performance before adaptation
+            performance_before = self._get_current_performance()
             
-            # Clear the accuracy buffer for the next batch
-            self.accuracy_buffer.clear()
+            # Extract features, labels, and timestamps for training
+            training_data = self._extract_training_data()
             
-            # Report metrics
-            metrics = {
-                "batch_accuracy": accuracy,
-                "cumulative_accuracy": 1.0 - (self.n_samples_misclassified / self.n_samples_processed),
-                "drift_detected": drift_detected,
-                "n_samples": self.n_samples_processed,
-                "n_training_samples": len(self.training_samples)
-            }
-            self.report_metrics(metrics)
+            # Train the classifier
+            if training_data:
+                X, y, _ = training_data
+                self.classifier.fit(X, y)
             
-            logger.debug(
-                f"Batch accuracy: {accuracy:.4f}, "
-                f"cumulative accuracy: {metrics['cumulative_accuracy']:.4f}"
-            )
-            
-            # If drift is detected and adaptation is enabled
-            if drift_detected and self.adaptation_enabled:
-                # Estimate the drift point in terms of samples
-                drift_time = self.drift_detector.estimate_drift_timing(self.batch_size)
-                
-                # Get performance before adaptation
-                performance_before = {
-                    "accuracy": 1.0 - (self.n_samples_misclassified / self.n_samples_processed),
-                    "n_samples": self.n_samples_processed,
-                    "batch_accuracy": accuracy,
-                    "n_training_samples": len(self.training_samples)
-                }
-                
-                # Filter training samples based on the drift time
-                # Keep only samples that were added after the drift point
-                filtered_samples = []
-                removed_count = 0
-                
-                for s in self.training_samples:
-                    if s.timestamp >= drift_time:
-                        filtered_samples.append(s)
-                    else:
-                        removed_count += 1
-                
-                # If we have enough samples after filtering
-                if len(filtered_samples) > 0:
-                    # If condensing is enabled, apply it
-                    if self.enable_condensing and len(filtered_samples) > 3:
-                        # Extract features, labels, and timestamps
-                        features = np.array([s.features for s in filtered_samples])
-                        labels = [s.label for s in filtered_samples]
-                        timestamps = [s.timestamp for s in filtered_samples]
-                        
-                        # Apply condensing algorithm
-                        condensed_features, condensed_labels, condensed_timestamps = CondensingAlgorithm.condense_samples(
-                            features, labels, self.max_samples, self.condensing_method, self.use_numpy, timestamps
-                        )
-                        
-                        # Create new filtered samples list
-                        condensed_filtered_samples = []
-                        for i in range(len(condensed_labels)):
-                            # Create a FeatureSample with the condensed data
-                            condensed_sample = FeatureSample(
-                                features=condensed_features[i],
-                                label=condensed_labels[i],
-                                timestamp=condensed_timestamps[i]
-                            )
-                            condensed_filtered_samples.append(condensed_sample)
-                        
-                        removed_count += (len(filtered_samples) - len(condensed_filtered_samples))
-                        filtered_samples = condensed_filtered_samples
-                        
-                        logger.debug(
-                            f"Condensing reduced training set: "
-                            f"{len(features)} -> {len(condensed_features)} samples"
-                        )
-                    
-                    # Update the training buffer with the filtered samples
-                    self.training_samples = deque(filtered_samples, maxlen=self.max_samples)
-                    
-                    # Extract features and labels for training
-                    features = np.array([s.features for s in self.training_samples])
-                    labels = [s.label for s in self.training_samples]
-                    
-                    # Train the classifier on the filtered samples
-                    self.classifier.fit(features, labels)
-                    
-                    # Increment adaptation counter
-                    self.n_adaptations += 1
-                    
-                    # Reset the drift detector
-                    self.drift_detector.reset()
-                    
-                    # Get performance after adaptation
-                    performance_after = {
-                        "accuracy": 1.0 - (self.n_samples_misclassified / self.n_samples_processed),
-                        "n_samples": self.n_samples_processed,
-                        "n_training_samples": len(self.training_samples)
-                    }
-                    
-                    # Create adaptation event
-                    drift_event = AdaptationEvent(
-                        event_type="hybrid_active",
-                        samples_added=0,
-                        samples_removed=removed_count,
-                        drift_detected=True,
-                        drift_point_index=drift_point_index,
-                        performance_before=performance_before,
-                        performance_after=performance_after,
-                        metadata={
-                            "drift_time": drift_time,
-                            "batch_accuracy": accuracy,
-                            "condensing_applied": self.enable_condensing,
-                            "condensing_method": self.condensing_method if self.enable_condensing else None
-                        }
-                    )
-                    
-                    # Report adaptation event
-                    self.report_adaptation(drift_event)
-                    
-                    active_adaptation = True
-                    
-                    logger.info(
-                        f"Hybrid (active) adaptation: trained with {len(self.training_samples)} samples "
-                        f"after drift at point {drift_time} (batch accuracy: {accuracy:.4f})"
-                    )
-        
-        # If we performed any adaptation, train the classifier
-        if passive_adaptation and not active_adaptation:
-            # For passive adaptation without drift detection
-            # Get performance before adaptation (only if this is the first adaptation)
-            performance_before = {
-                "accuracy": 1.0 - (self.n_samples_misclassified / self.n_samples_processed),
-                "n_samples": self.n_samples_processed,
-                "n_training_samples": len(self.training_samples)
-            }
-            
-            # Extract features and labels from training buffer
-            features = np.array([s.features for s in self.training_samples])
-            labels = [s.label for s in self.training_samples]
-            
-            # Train the classifier on the entire buffer
-            self.classifier.fit(features, labels)
-            
-            # Increment adaptation counter
+            # Update stats
             self.n_adaptations += 1
+            passive_adaptation = True
             
             # Get performance after adaptation
-            performance_after = {
-                "accuracy": 1.0 - (self.n_samples_misclassified / self.n_samples_processed),
-                "n_samples": self.n_samples_processed,
-                "n_training_samples": len(self.training_samples)
-            }
+            performance_after = self._get_current_performance()
             
-            # Create adaptation event
-            event = AdaptationEvent(
+            logger.debug(
+                f"Passive adaptation: added sample with {'' if is_validated_label else 'potential '}label '{label}', "
+                f"training set size: {len(self.training_samples)}"
+            )
+        
+        # Active Update Logic (for validated labels only)
+        active_event = None
+        if is_validated_label:
+            # Track validation result (1 for correct, 0 for incorrect)
+            is_correct = (internal_prediction == label)
+            self.validated_samples.append((is_correct, timestamp))
+            
+            # If we have enough samples, check for drift
+            if len(self.validated_samples) >= self.batch_size:
+                # Calculate accuracy for this batch
+                batch_accuracy = sum(correct for correct, _ in self.validated_samples[-self.batch_size:]) / self.batch_size
+                
+                # Update CUSUM detector
+                drift_detected, drift_point = self.accuracy_cusum.update({"accuracy": batch_accuracy})
+                
+                # If drift detected, filter training samples and retrain
+                if drift_detected:
+                    # Get estimated drift time
+                    if drift_point is not None:
+                        drift_time = self.validated_samples[-(self.batch_size - drift_point)][1]
+                    else:
+                        drift_time = timestamp - 3600  # Default to 1 hour ago
+                    
+                    # Filter out samples before the drift time
+                    filtered_samples = deque(
+                        [(f, l, ts) for f, l, ts in self.training_samples if ts >= drift_time],
+                        maxlen=self.max_samples
+                    )
+                    
+                    # Calculate how many samples were removed
+                    removed_count = len(self.training_samples) - len(filtered_samples)
+                    
+                    # Update training samples
+                    self.training_samples = filtered_samples
+                    
+                    # Get performance before adaptation
+                    performance_before = self._get_current_performance()
+                    
+                    # Extract features, labels, and timestamps for training
+                    training_data = self._extract_training_data()
+                    
+                    # Retrain the classifier if we have enough samples
+                    if training_data and len(training_data[0]) > 0:
+                        X, y, _ = training_data
+                        self.classifier.fit(X, y)
+                        
+                        # Update stats
+                        self.n_adaptations += 1
+                        active_adaptation = True
+                        
+                        # Get performance after adaptation
+                        performance_after = self._get_current_performance()
+                        
+                        # Create an adaptation event
+                        active_event = AdaptationEvent(
+                            event_type="hybrid_active_drift",
+                            timestamp=timestamp,
+                            samples_added=0,
+                            samples_removed=removed_count,
+                            drift_detected=True,
+                            drift_point_index=drift_point,
+                            performance_before=performance_before,
+                            performance_after=performance_after,
+                            metadata={
+                                "drift_time": drift_time,
+                                "batch_accuracy": batch_accuracy,
+                                "is_validated": True,
+                                "cusum_value": self.accuracy_cusum.state.cumsum
+                            }
+                        )
+                        
+                        # Report adaptation event
+                        self.report_adaptation(active_event)
+                        
+                        # Reset CUSUM detector
+                        self.accuracy_cusum.reset()
+                        
+                        logger.info(
+                            f"Active adaptation: filtered {removed_count} samples before drift time, "
+                            f"retrained with {len(filtered_samples)} samples (batch accuracy: {batch_accuracy:.4f})"
+                        )
+        
+        # Create and return adaptation event for passive adaptation (if not already handled by active)
+        if passive_adaptation and not active_adaptation:
+            passive_event = AdaptationEvent(
                 event_type="hybrid_passive",
+                timestamp=timestamp,
                 samples_added=1,
                 samples_removed=0,
                 drift_detected=False,
                 performance_before=performance_before,
-                performance_after=performance_after
+                performance_after=performance_after,
+                metadata={
+                    "is_validated": is_validated_label,
+                    "potential_label": None if is_validated_label else label
+                }
             )
             
             # Report adaptation event
-            self.report_adaptation(event)
+            self.report_adaptation(passive_event)
             
-            logger.debug(
-                f"Hybrid (passive) adaptation: added 1 sample, "
-                f"training set size: {len(self.training_samples)}, "
-                f"current accuracy: {performance_after['accuracy']:.4f}"
+            return passive_event
+        
+        return active_event
+    
+    def _extract_training_data(self) -> Optional[Tuple[np.ndarray, List[Any], List[float]]]:
+        """Extract features, labels, and timestamps from training samples.
+        
+        Returns:
+            Tuple of (features_array, labels_list, timestamps_list) or None if empty
+        """
+        if not self.training_samples:
+            return None
+        
+        # Extract features, labels, and timestamps
+        features = []
+        labels = []
+        timestamps = []
+        
+        for f, l, ts in self.training_samples:
+            features.append(f)
+            labels.append(l)
+            timestamps.append(ts)
+        
+        # Convert features to numpy array
+        features_array = np.array(features)
+        
+        return features_array, labels, timestamps
+    
+    def _get_current_performance(self) -> Dict[str, Any]:
+        """Get current performance metrics.
+        
+        Returns:
+            Dictionary with performance metrics
+        """
+        # Validation accuracy (if available)
+        if self.validated_samples:
+            recent_samples = min(len(self.validated_samples), 100)
+            recent_results = [correct for correct, _ in self.validated_samples[-recent_samples:]]
+            validation_accuracy = sum(recent_results) / len(recent_results) if recent_results else 0.0
+        else:
+            validation_accuracy = None
+        
+        return {
+            "n_training_samples": len(self.training_samples),
+            "n_adaptations": self.n_adaptations,
+            "validation_accuracy": validation_accuracy
+        }
+    
+    def get_training_samples(self) -> List[Tuple[np.ndarray, Any, float]]:
+        """Get the current training samples.
+        
+        Returns:
+            List of (features, label, timestamp) tuples
+        """
+        return list(self.training_samples)
+    
+    def clear_training_samples(self) -> None:
+        """Clear the training samples buffer."""
+        self.training_samples.clear()
+        logger.debug("Cleared training samples buffer")
+        
+    def _apply_condensing(self) -> None:
+        """Apply condensing to the training samples if enabled.
+        
+        This reduces the number of training samples while trying to
+        maintain the decision boundaries and class distribution.
+        """
+        if not CONDENSING_AVAILABLE or not self.enable_condensing:
+            return
+            
+        # Skip if too few samples
+        if len(self.training_samples) < 10:
+            logger.debug("Too few samples for condensing, skipping")
+            return
+            
+        logger.debug(f"Applying condensing with method '{self.condensing_method}'")
+        
+        # Extract data from training samples
+        X, y, timestamps = self._extract_training_data()
+        
+        try:
+            # Apply condensing
+            X_condensed, y_condensed, timestamps_condensed = CondensingAlgorithm.condense_samples(
+                features=X,
+                labels=y,
+                max_size=self.max_samples,
+                method=self.condensing_method,
+                use_numpy=self.use_numpy,
+                timestamps=timestamps
             )
             
-            return event
+            # Create new training samples deque
+            new_samples = deque(maxlen=self.max_samples)
+            for i in range(len(X_condensed)):
+                new_samples.append((X_condensed[i], y_condensed[i], timestamps_condensed[i]))
+                
+            # Replace training samples with condensed version
+            old_count = len(self.training_samples)
+            self.training_samples = new_samples
+            new_count = len(self.training_samples)
+            
+            logger.info(f"Condensed training samples from {old_count} to {new_count} using '{self.condensing_method}'")
+            
+        except Exception as e:
+            logger.error(f"Error during sample condensing: {str(e)}")
+            
+    def _extract_training_data(self) -> Tuple[np.ndarray, List[Any], List[float]]:
+        """Extract features, labels, and timestamps from training samples.
         
-        # Return the drift event if it occurred
-        return drift_event
+        Returns:
+            Tuple of (features_array, labels_list, timestamps_list)
+        """
+        if not self.training_samples:
+            return np.array([]), [], []
+            
+        features = []
+        labels = []
+        timestamps = []
+        
+        for f, l, ts in self.training_samples:
+            features.append(f)
+            labels.append(l)
+            timestamps.append(ts)
+            
+        # Convert features to numpy array if needed
+        if self.use_numpy and not isinstance(features[0], np.ndarray):
+            features = np.array(features)
+            
+        return features, labels, timestamps
     
     def get_state(self) -> Dict[str, Any]:
         """Get the current state of the handler.
@@ -324,29 +401,37 @@ class HybridHandler(BaseAdaptiveHandler):
         """
         base_state = super().get_state()
         
-        # Serialize training samples
-        training_samples = []
-        for sample in self.training_samples:
-            training_samples.append(sample.to_dict())
-        
-        # Serialize accuracy buffer
-        accuracy_buffer = list(self.accuracy_buffer)
+        # For serialization, store only the raw values
+        serializable_training_samples = []
+        for features, label, timestamp in self.training_samples:
+            if isinstance(features, np.ndarray):
+                features_list = features.tolist()
+            else:
+                features_list = features
+            
+            serializable_training_samples.append({
+                "features": features_list,
+                "label": label,
+                "timestamp": timestamp
+            })
         
         # Get drift detector state
-        drift_detector_state = self.drift_detector.get_state()
+        drift_detector_state = None
+        if hasattr(self.accuracy_cusum, "get_state"):
+            drift_detector_state = self.accuracy_cusum.get_state()
         
+        # Create handler-specific state
         handler_state = {
-            "type": "HybridHandler",
             "batch_size": self.batch_size,
-            "enable_condensing": self.enable_condensing,
-            "condensing_method": self.condensing_method,
             "use_numpy": self.use_numpy,
-            "training_samples": training_samples,
-            "accuracy_buffer": accuracy_buffer,
-            "drift_detector": drift_detector_state
+            "training_samples": serializable_training_samples,
+            "validated_samples": self.validated_samples,
+            "accuracy_cusum": drift_detector_state,
+            "enable_condensing": self.enable_condensing,
+            "condensing_method": self.condensing_method
         }
         
-        # Combine base and handler-specific state
+        # Combine states
         return {**base_state, **handler_state}
     
     def set_state(self, state: Dict[str, Any]) -> None:
@@ -360,31 +445,38 @@ class HybridHandler(BaseAdaptiveHandler):
         
         # Restore handler-specific state
         self.batch_size = state.get("batch_size", self.batch_size)
+        self.use_numpy = state.get("use_numpy", self.use_numpy)
         self.enable_condensing = state.get("enable_condensing", self.enable_condensing)
         self.condensing_method = state.get("condensing_method", self.condensing_method)
-        self.use_numpy = state.get("use_numpy", self.use_numpy)
         
         # Restore training samples
         self.training_samples = deque(maxlen=self.max_samples)
         
-        training_samples = state.get("training_samples", [])
-        for sample_dict in training_samples:
-            sample = FeatureSample.from_dict(sample_dict)
-            self.training_samples.append(sample)
+        for sample in state.get("training_samples", []):
+            features = sample.get("features")
+            if features is not None and self.use_numpy:
+                features = np.array(features)
+            
+            label = sample.get("label")
+            timestamp = sample.get("timestamp")
+            
+            self.training_samples.append((features, label, timestamp))
         
-        # Restore accuracy buffer
-        self.accuracy_buffer = deque(maxlen=self.batch_size)
-        
-        accuracy_buffer = state.get("accuracy_buffer", [])
-        for result in accuracy_buffer:
-            self.accuracy_buffer.append(result)
+        # Restore validated samples
+        self.validated_samples = state.get("validated_samples", [])
         
         # Restore drift detector
-        drift_detector_state = state.get("drift_detector", {})
-        self.drift_detector.set_state(drift_detector_state)
+        if hasattr(self.accuracy_cusum, "set_state"):
+            drift_detector_state = state.get("accuracy_cusum", {})
+            if drift_detector_state:
+                self.accuracy_cusum.set_state(drift_detector_state)
         
-        # If we have training samples, re-fit the classifier
-        if len(self.training_samples) > 0:
-            features = np.array([s.features for s in self.training_samples])
-            labels = [s.label for s in self.training_samples]
-            self.classifier.fit(features, labels)
+        # Apply condensing if enabled
+        if self.enable_condensing and CONDENSING_AVAILABLE:
+            self._apply_condensing()
+        
+        # Train the classifier with the restored samples
+        training_data = self._extract_training_data()
+        if training_data and len(training_data[0]) > 0:
+            X, y, _ = training_data
+            self.classifier.fit(X, y)

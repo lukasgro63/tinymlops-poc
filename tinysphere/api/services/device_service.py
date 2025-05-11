@@ -8,15 +8,62 @@ from sqlalchemy.orm import Session
 from tinysphere.api.models.device import DeviceCreate, DeviceUpdate
 from tinysphere.db.models import Device, DeviceMetric, Package
 
+# Define the inactive threshold (30 minutes)
+INACTIVE_THRESHOLD_MINUTES = 30
+
 
 class DeviceService:
     @staticmethod
     def get_all_devices(db: Session, skip: int = 0, limit: int = 100) -> List[Device]:
-        return db.query(Device).offset(skip).limit(limit).all()
+        devices = db.query(Device).offset(skip).limit(limit).all()
+
+        # Update device activity status based on last_sync_time
+        current_time = datetime.now(timezone.utc)
+        inactive_threshold = current_time - timedelta(minutes=INACTIVE_THRESHOLD_MINUTES)
+
+        for device in devices:
+            # Mark device as inactive if last_sync_time is more than 30 minutes ago or None
+            if device.last_sync_time is None:
+                device.is_active = False
+            else:
+                # Ensure both datetimes are timezone-aware for comparison
+                if device.last_sync_time.tzinfo is None:
+                    # If the device time is naive, make it timezone-aware with UTC
+                    device_sync_time = device.last_sync_time.replace(tzinfo=timezone.utc)
+                else:
+                    device_sync_time = device.last_sync_time
+
+                # Now compare with the same timezone awareness
+                if device_sync_time < inactive_threshold:
+                    device.is_active = False
+
+        return devices
     
     @staticmethod
     def get_device_by_id(db: Session, device_id: str) -> Optional[Device]:
-        return db.query(Device).filter(Device.device_id == device_id).first()
+        device = db.query(Device).filter(Device.device_id == device_id).first()
+
+        if device:
+            # Update device activity status based on last_sync_time
+            current_time = datetime.now(timezone.utc)
+            inactive_threshold = current_time - timedelta(minutes=INACTIVE_THRESHOLD_MINUTES)
+
+            # Mark device as inactive if last_sync_time is more than 30 minutes ago or None
+            if device.last_sync_time is None:
+                device.is_active = False
+            else:
+                # Ensure both datetimes are timezone-aware for comparison
+                if device.last_sync_time.tzinfo is None:
+                    # If the device time is naive, make it timezone-aware with UTC
+                    device_sync_time = device.last_sync_time.replace(tzinfo=timezone.utc)
+                else:
+                    device_sync_time = device.last_sync_time
+
+                # Now compare with the same timezone awareness
+                if device_sync_time < inactive_threshold:
+                    device.is_active = False
+
+        return device
     
     @staticmethod
     def create_device(db: Session, device: DeviceCreate) -> Device:
@@ -193,42 +240,62 @@ class DeviceService:
     @staticmethod
     def get_device_connectivity_trends(db: Session, days: int = 7) -> List[Dict[str, Any]]:
         start_date = datetime.now(timezone.utc) - timedelta(days=days)
-        
-        # Get daily counts
-        active_counts = (
-            db.query(
-                func.date_trunc('day', Device.last_sync_time).label('date'),
-                func.count(Device.id).label('active')
-            )
-            .filter(Device.last_sync_time >= start_date)
-            .filter(Device.is_active == True)
-            .group_by(func.date_trunc('day', Device.last_sync_time))
-            .all()
-        )
-        
-        # Convert to dictionaries
-        active_dict = {date.strftime('%Y-%m-%d'): count for date, count in active_counts}
-        
-        # Get total count per day
+
+        # Get daily counts with proper activity definition
         result = []
         for day_offset in range(days):
             current_date = datetime.now(timezone.utc) - timedelta(days=day_offset)
             date_str = current_date.strftime('%Y-%m-%d')
-            
-            # Count total devices registered up to this date
-            total_count = db.query(Device).filter(
-                Device.registration_time <= current_date
-            ).count()
-            
+
+            # For each day, count devices that were active (synced within last 30 mins of that day)
+            day_start = datetime(current_date.year, current_date.month, current_date.day,
+                               tzinfo=timezone.utc)
+            day_end = day_start + timedelta(days=1) - timedelta(seconds=1)
+
+            active_count = 0
+            devices = db.query(Device).filter(Device.registration_time <= day_end).all()
+
+            for device in devices:
+                # Check if device was active on this specific day - with timezone handling
+                if device.last_sync_time:
+                    # Ensure device.last_sync_time is timezone-aware
+                    if device.last_sync_time.tzinfo is None:
+                        sync_time = device.last_sync_time.replace(tzinfo=timezone.utc)
+                    else:
+                        sync_time = device.last_sync_time
+
+                    # Now do the timezone-aware comparison
+                    if day_start <= sync_time <= day_end:
+                        # Check if device was active by that time (within 30 mins)
+                        check_time = sync_time + timedelta(minutes=INACTIVE_THRESHOLD_MINUTES)
+                        if check_time >= day_end:  # Device was active at the end of the day
+                            active_count += 1
+
+            # Count total devices registered up to this date (with timezone handling)
+            # We need to handle the case where device.registration_time might be timezone naive
+            devices_registered = db.query(Device).all()
+            total_count = 0
+
+            for device in devices_registered:
+                if device.registration_time:
+                    # Ensure registration_time is timezone-aware for comparison
+                    if device.registration_time.tzinfo is None:
+                        reg_time = device.registration_time.replace(tzinfo=timezone.utc)
+                    else:
+                        reg_time = device.registration_time
+
+                    if reg_time <= day_end:
+                        total_count += 1
+
             result.append({
                 "date": date_str,
-                "active": active_dict.get(date_str, 0),
+                "active": active_count,
                 "total": total_count
             })
-        
+
         # Sort by date
         result.sort(key=lambda x: x['date'])
-        
+
         return result
 
     @staticmethod

@@ -79,12 +79,14 @@ frontend/build/
 frontend/dist/
 
 # MacOS
-<<<<<<< Updated upstream
-.DS_Store
-=======
 .DS_Store
 
 # Others
 CLAUDE.md
 **/.claude/settings.local.json
->>>>>>> Stashed changes
+**/CLAUDE.local.md
+
+# Ignore images folder
+**/images/
+# But keep specific images that should be tracked
+!examples/assets/images/README.md

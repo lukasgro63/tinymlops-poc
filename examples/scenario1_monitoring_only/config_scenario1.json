@@ -1,0 +1,100 @@
+{
+  "device": {
+    "name": "Raspberry Pi Zero 2W",
+    "description": "TinyLCM Autonomous Monitoring Demo",
+    "log_level": "INFO"
+  },
+  "camera": {
+    "resolution": [640, 480],
+    "framerate": 10,
+    "rotation": 0,
+    "inference_resolution": [224, 224]
+  },
+  "model": {
+    "model_path": "../assets/model/model.tflite",
+    "labels_path": "../assets/model/labels.txt",
+    "threshold": 0.6,
+    "input_mean": 127.5,
+    "input_std": 127.5,
+    "feature_layer_index": -1
+  },
+  "tinylcm": {
+    "feature_extractor": {
+      "type": "TFLiteFeatureExtractor",
+      "model_path": "../assets/model/model.tflite",
+      "feature_layer_index": -1,
+      "normalize_features": true,
+      "lazy_loading": false
+    },
+    "adaptive_classifier": {
+      "type": "LightweightKNN",
+      "k": 5,
+      "max_samples": 100,
+      "distance_metric": "cosine",
+      "use_numpy": true,
+      "adapting_enabled": false
+    },
+    "drift_detectors": [
+      {
+        "type": "EWMAConfidenceMonitor",
+        "window_size": 50,
+        "alpha": 0.1,
+        "threshold_factor": 2.5,
+        "min_samples": 100,
+        "warmup_samples": 200
+      },
+      {
+        "type": "PageHinkleyFeatureMonitor",
+        "feature_index": 0,
+        "delta": 0.005,
+        "lambda_param": 50,
+        "alpha": 0.1,
+        "min_samples": 100,
+        "warmup_samples": 200
+      },
+      {
+        "type": "PredictionDistributionMonitor",
+        "window_size": 50,
+        "threshold": 0.2,
+        "method": "block",
+        "min_samples": 100
+      }
+    ],
+    "operational_monitor": {
+      "track_system_metrics": true,
+      "track_inference_time": true, 
+      "track_memory_usage": true,
+      "report_interval_seconds": 30
+    },
+    "sync_client": {
+      "server_url": "http://192.168.0.66:8000",
+      "api_key": "tinylcm-demo-key",
+      "sync_interval_seconds": 30,
+      "max_retries": 3,
+      "auto_register": true,
+      "sync_dir": "./sync_data"
+    },
+    "features": {
+      "enable_quarantine": false,
+      "enable_heuristic_adaptation": false,
+      "save_drift_images": true
+    },
+    "state_manager": {
+      "state_dir": "./state",
+      "max_snapshots": 5
+    },
+    "data_logger": {
+      "enabled": true,
+      "log_dir": "./logs",
+      "log_images": true,
+      "log_drift_events": true,
+      "max_log_size_mb": 100
+    }
+  },
+  "application": {
+    "inference_interval_ms": 100,
+    "display_frames": false,
+    "save_debug_frames": false,
+    "debug_output_dir": "./debug"
+  }
+}

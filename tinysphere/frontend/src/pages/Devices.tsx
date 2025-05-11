@@ -214,10 +214,14 @@ const DevicesPage: React.FC = () => {
       );
     }
     
-    // Statusfilter anwenden
+    // Statusfilter anwenden with 30-minute threshold
     if (statusFilter !== 'all') {
-      const isActive = statusFilter === 'active';
-      filtered = filtered.filter(device => device.is_active === isActive);
+      const isActiveStatus = statusFilter === 'active';
+      // Use the device's is_active property instead of calculating it again
+      filtered = filtered.filter(device => {
+        // For stability, just use the server-provided active status
+        return device.is_active === isActiveStatus;
+      });
     }
     
     // Plattformfilter anwenden
@@ -230,9 +234,13 @@ const DevicesPage: React.FC = () => {
     // Sortierung anwenden
     if (orderBy) {
       filtered.sort((a, b) => {
-        let aValue: any = a[orderBy];
-        let bValue: any = b[orderBy];
-        
+        let aValue: any;
+        let bValue: any;
+
+        // Use the default is_active property from server
+        aValue = a[orderBy];
+        bValue = b[orderBy];
+
         // Besondere Behandlung für verschiedene Typen
         if (orderBy === 'last_sync_time') {
           aValue = aValue ? new Date(aValue).getTime() : 0;
@@ -241,9 +249,9 @@ const DevicesPage: React.FC = () => {
           aValue = aValue.toLowerCase();
           bValue = bValue.toLowerCase();
         }
-        
+
         if (aValue === bValue) return 0;
-        
+
         // Sortierreihenfolge berücksichtigen
         const comparison = aValue < bValue ? -1 : 1;
         return order === 'asc' ? comparison : -comparison;
@@ -305,9 +313,58 @@ const DevicesPage: React.FC = () => {
     return Array.from(platforms);
   }, [devices]);
 
-  // Gerätezählung für Status-Chart
+  // Gerätezählung für Status-Chart - using server's is_active property
   const activeCount = useMemo(() => devices.filter(d => d.is_active).length, [devices]);
   const inactiveCount = useMemo(() => devices.length - activeCount, [devices, activeCount]);
+
+  // MLflow Metriken verarbeiten
+  const getAverageMLflowMetric = useCallback((metricType: 'inference_time' | 'cpu_usage' | 'memory_usage'): number => {
+    let sum = 0;
+    let count = 0;
+
+    deviceSummaries.forEach(device => {
+      if (device.mlflow_metrics && device.mlflow_metrics[metricType]) {
+        sum += device.mlflow_metrics[metricType]!.avg * device.mlflow_metrics[metricType]!.count;
+        count += device.mlflow_metrics[metricType]!.count;
+      }
+    });
+
+    return count > 0 ? sum / count : 0;
+  }, [deviceSummaries]);
+
+  const getMLflowMetricCount = useCallback((metricType: 'inference_time' | 'cpu_usage' | 'memory_usage'): number => {
+    let count = 0;
+
+    deviceSummaries.forEach(device => {
+      if (device.mlflow_metrics && device.mlflow_metrics[metricType]) {
+        count += device.mlflow_metrics[metricType]!.count;
+      }
+    });
+
+    return count;
+  }, [deviceSummaries]);
+
+  // Check if any device has MLflow available metrics
+  const anyAvailableMetrics = useMemo(() => {
+    return deviceSummaries.some(device =>
+      device.mlflow_metrics && device.mlflow_metrics.available_metrics &&
+      device.mlflow_metrics.available_metrics.length > 0);
+  }, [deviceSummaries]);
+
+  // Get list of all available metrics
+  const allAvailableMetrics = useMemo(() => {
+    const metrics = new Set<string>();
+
+    deviceSummaries.forEach(device => {
+      if (device.mlflow_metrics && device.mlflow_metrics.available_metrics) {
+        device.mlflow_metrics.available_metrics.forEach(metric => {
+          metrics.add(metric as string);
+        });
+      }
+    });
+
+    return Array.from(metrics);
+  }, [deviceSummaries]);
 
   // Handler für Dialog
   const handleOpenDialog = (device: Device) => {
@@ -323,21 +380,21 @@ const DevicesPage: React.FC = () => {
   // Relative Zeit formatieren
   const formatRelativeTime = (dateString: string | undefined | null) => {
     if (!dateString) return 'Never';
-    
+
     try {
       // Explicitly handle the Z suffix to ensure UTC parsing
       const dateStr = dateString.endsWith('Z') ? dateString : dateString + 'Z';
-      
+
       // Parse the date string as UTC, then convert to local time
       const date = new Date(dateStr);
       const now = new Date();
       const diffMs = now.getTime() - date.getTime();
-      
+
       const diffSeconds = Math.floor(diffMs / 1000);
       const diffMinutes = Math.floor(diffSeconds / 60);
       const diffHours = Math.floor(diffMinutes / 60);
       const diffDays = Math.floor(diffHours / 24);
-      
+
       if (diffDays > 0) {
         return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
       } else if (diffHours > 0) {
@@ -352,6 +409,29 @@ const DevicesPage: React.FC = () => {
       return 'Unknown';
     }
   };
+
+  // Helper to check if device is active (synced within last 30 minutes)
+  // Memoized to prevent recalculations on every render
+  const isDeviceActive = useCallback((device: Device): boolean => {
+    if (!device || !device.last_sync_time) return false;
+
+    try {
+      // Explicitly handle the Z suffix to ensure UTC parsing
+      const dateStr = device.last_sync_time.endsWith('Z') ? device.last_sync_time : device.last_sync_time + 'Z';
+
+      // Parse the date string as UTC
+      const syncTime = new Date(dateStr);
+      const now = new Date();
+      const diffMs = now.getTime() - syncTime.getTime();
+
+      // Convert to minutes and check against 30-minute threshold
+      const diffMinutes = Math.floor(diffMs / (1000 * 60));
+      return diffMinutes < 30;
+    } catch (e) {
+      console.error("Date parsing error:", e, "for date:", device.last_sync_time);
+      return false;
+    }
+  }, []);
 
   // Paginierung
   const handleChangePage = (event: unknown, newPage: number) => {
@@ -419,11 +499,25 @@ const DevicesPage: React.FC = () => {
         <Box sx={{ flex: '1 1 220px', minWidth: '220px' }}>
           <StatusCard
             title="Avg. Inference Time"
-            value={`${deviceMetrics?.inference_time.avg.toFixed(2) || 0} ms`}
-            secondaryValue={`${deviceMetrics?.inference_time.min.toFixed(2) || 0} - ${deviceMetrics?.inference_time.max.toFixed(2) || 0} ms`}
-            secondaryLabel="Range"
+            value={
+              // Use MLflow metrics as primary value if available
+              deviceSummaries.some(d => d.mlflow_metrics?.inference_time)
+                ? `${getAverageMLflowMetric('inference_time').toFixed(2)} ms`
+                : `${deviceMetrics?.inference_time.avg.toFixed(2) || 0} ms`
+            }
+            secondaryValue={
+              // Show appropriate secondary information
+              deviceSummaries.some(d => d.mlflow_metrics?.inference_time)
+                ? `From MLflow (${getMLflowMetricCount('inference_time')} runs)`
+                : `${deviceMetrics?.inference_time.min.toFixed(2) || 0} - ${deviceMetrics?.inference_time.max.toFixed(2) || 0} ms`
+            }
+            secondaryLabel={deviceSummaries.some(d => d.mlflow_metrics?.inference_time) ? "Source" : "Range"}
             icon={<SpeedIcon style={{ fontSize: 24, color: '#0B2A5A' }} />}
             color="#0B2A5A"
+            tooltip={deviceSummaries.some(d => d.mlflow_metrics?.inference_time)
+              ? `MLflow metrics available: ${allAvailableMetrics.filter(m => m.includes('time') || m.includes('latency')).join(', ')}`
+              : "No MLflow metrics available. Standard device metrics shown."
+            }
           />
         </Box>
 
@@ -431,11 +525,25 @@ const DevicesPage: React.FC = () => {
         <Box sx={{ flex: '1 1 220px', minWidth: '220px' }}>
           <StatusCard
             title="Avg. CPU Usage"
-            value={`${deviceMetrics?.cpu_usage.avg.toFixed(2) || 0}%`}
-            secondaryValue={`${deviceMetrics?.cpu_usage.min.toFixed(2) || 0}% - ${deviceMetrics?.cpu_usage.max.toFixed(2) || 0}%`}
-            secondaryLabel="Range"
+            value={
+              // Use MLflow metrics as primary value if available
+              deviceSummaries.some(d => d.mlflow_metrics?.cpu_usage)
+                ? `${getAverageMLflowMetric('cpu_usage').toFixed(2)}%`
+                : `${deviceMetrics?.cpu_usage.avg.toFixed(2) || 0}%`
+            }
+            secondaryValue={
+              // Show appropriate secondary information
+              deviceSummaries.some(d => d.mlflow_metrics?.cpu_usage)
+                ? `From MLflow (${getMLflowMetricCount('cpu_usage')} runs)`
+                : `${deviceMetrics?.cpu_usage.min.toFixed(2) || 0}% - ${deviceMetrics?.cpu_usage.max.toFixed(2) || 0}%`
+            }
+            secondaryLabel={deviceSummaries.some(d => d.mlflow_metrics?.cpu_usage) ? "Source" : "Range"}
             icon={<MemoryIcon style={{ fontSize: 24, color: '#E5A823' }} />}
             color="#E5A823"
+            tooltip={deviceSummaries.some(d => d.mlflow_metrics?.cpu_usage)
+              ? `MLflow metrics available: ${allAvailableMetrics.filter(m => m.includes('cpu')).join(', ')}`
+              : "No MLflow metrics available. Standard device metrics shown."
+            }
           />
         </Box>
 
@@ -443,11 +551,25 @@ const DevicesPage: React.FC = () => {
         <Box sx={{ flex: '1 1 220px', minWidth: '220px' }}>
           <StatusCard
             title="Avg. Memory Usage"
-            value={`${deviceMetrics?.memory_usage.avg.toFixed(2) || 0}%`}
-            secondaryValue={`${deviceMetrics?.memory_usage.min.toFixed(2) || 0}% - ${deviceMetrics?.memory_usage.max.toFixed(2) || 0}%`}
-            secondaryLabel="Range"
+            value={
+              // Use MLflow metrics as primary value if available
+              deviceSummaries.some(d => d.mlflow_metrics?.memory_usage)
+                ? `${getAverageMLflowMetric('memory_usage').toFixed(2)}%`
+                : `${deviceMetrics?.memory_usage.avg.toFixed(2) || 0}%`
+            }
+            secondaryValue={
+              // Show appropriate secondary information
+              deviceSummaries.some(d => d.mlflow_metrics?.memory_usage)
+                ? `From MLflow (${getMLflowMetricCount('memory_usage')} runs)`
+                : `${deviceMetrics?.memory_usage.min.toFixed(2) || 0}% - ${deviceMetrics?.memory_usage.max.toFixed(2) || 0}%`
+            }
+            secondaryLabel={deviceSummaries.some(d => d.mlflow_metrics?.memory_usage) ? "Source" : "Range"}
             icon={<StorageIcon style={{ fontSize: 24, color: '#4CAF50' }} />}
             color="#4CAF50"
+            tooltip={deviceSummaries.some(d => d.mlflow_metrics?.memory_usage)
+              ? `MLflow metrics available: ${allAvailableMetrics.filter(m => m.includes('memory')).join(', ')}`
+              : "No MLflow metrics available. Standard device metrics shown."
+            }
           />
         </Box>
 
@@ -610,10 +732,11 @@ const DevicesPage: React.FC = () => {
                             </TableCell>
                             <TableCell>{device.platform || 'Unknown'}</TableCell>
                             <TableCell>
-                              <Chip 
+                              <Chip
                                 label={device.is_active ? 'Active' : 'Inactive'}
                                 size="small"
-                                color={device.is_active ? 'success' : 'error'}
+                                color={device.is_active ? 'success' : 'warning'}
+                                sx={device.is_active ? {} : { backgroundColor: '#FFA500' }}
                               />
                             </TableCell>
                             <TableCell>{formatRelativeTime(device.last_sync_time)}</TableCell>
