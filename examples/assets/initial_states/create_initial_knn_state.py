@@ -37,7 +37,7 @@ from tinylcm.utils.file_utils import ensure_directory_exists
 # Pfade zu deinen initialen Bilddaten
 # Angepasster Pfad für die tatsächliche Verzeichnisstruktur
 INITIAL_IMAGE_DATA_DIR = Path("examples/assets/initial_states/images")  # Hauptordner für initiale Bilder
-CLASSES = {"red": INITIAL_IMAGE_DATA_DIR / "red", "negative": INITIAL_IMAGE_DATA_DIR / "negative"}
+CLASSES = {"lego": INITIAL_IMAGE_DATA_DIR / "lego", "stone": INITIAL_IMAGE_DATA_DIR / "stone", "negative": INITIAL_IMAGE_DATA_DIR / "negative"}
 
 # Pfad zum TFLite-Modell (das auch im Beispiel verwendet wird)
 MODEL_PATH = "examples/assets/model/model.tflite"  # Relativ zum Skript-Ausführungsort
@@ -55,7 +55,7 @@ KNN_USE_NUMPY = True  # Für die Offline-Erstellung können wir NumPy nutzen
 
 # Speicherort für den initialen k-NN Zustand
 OUTPUT_STATE_DIR = Path("examples/assets/initial_states/")
-OUTPUT_STATE_FILENAME = "knn_initial_state_RN.json"  # Red, Negative
+OUTPUT_STATE_FILENAME = "knn_initial_state_LSN.json"  # Lego, Stone, Negative
 # --- ENDE KONFIGURATION ---
 
 def preprocess_image_for_feature_extraction(image_path: Path, target_size: tuple) -> np.ndarray:
