@@ -44,7 +44,7 @@ MODEL_PATH = "examples/assets/model/model.tflite"  # Relativ zum Skript-Ausführ
 LABELS_PATH = "examples/assets/model/labels.txt"  # Relativ zum Skript-Ausführungsort
 
 # Konfiguration für den Feature Extractor
-FEATURE_LAYER_INDEX = -1  # Oder der Index, den du im Beispiel verwendest
+FEATURE_LAYER_INDEX = -2  # Verwende den vorletzten Layer für reichhaltigere Features
 TARGET_IMG_SIZE = (224, 224)  # Inferenzauflösung
 
 # Konfiguration für den LightweightKNN
@@ -72,22 +72,32 @@ def preprocess_image_for_feature_extraction(image_path: Path, target_size: tuple
     
     return img_rgb  # Return RGB image as uint8
 
-def extract_features_manually(image, interpreter, input_details, output_details):
+def extract_features_manually(image, interpreter, input_details, output_details, feature_layer_index=FEATURE_LAYER_INDEX):
     """Extrahiere Features manuell mit dem TFLite-Interpreter."""
     # Konvertiere das Bild in das richtige Format für das Modell
     # Verwende die prepare_input_tensor_quantized Funktion, die das richtige Datentyp-Handling übernimmt
     processed_image = prepare_input_tensor_quantized(image, input_details)
-    
+
     # Setze den Input-Tensor - input_details ist bereits ein Dictionary, nicht ein Array von Dictionaries
     interpreter.set_tensor(input_details['index'], processed_image)
-    
+
     # Führe die Inferenz durch
     interpreter.invoke()
-    
-    # Feature-Extraktion (letzter Layer)
-    output_tensor = interpreter.get_tensor(output_details['index'])
-    
-    return output_tensor
+
+    # Hole alle Output-Details, um den richtigen Layer zu finden
+    all_output_details = interpreter.get_output_details()
+
+    # Wähle den richtigen Layer basierend auf feature_layer_index
+    if abs(feature_layer_index) < len(all_output_details):
+        feature_tensor_details = all_output_details[feature_layer_index]
+        feature_tensor = interpreter.get_tensor(feature_tensor_details['index'])
+        print(f"Verwende Feature-Layer mit Index {feature_layer_index}, Shape: {feature_tensor.shape}")
+        return feature_tensor
+    else:
+        # Fallback auf den Standard-Output, wenn der Index ungültig ist
+        print(f"WARNUNG: Feature-Layer-Index {feature_layer_index} ist ungültig. Verwende Standard-Output.")
+        output_tensor = interpreter.get_tensor(output_details['index'])
+        return output_tensor
 
 def main():
     print("Erstelle initialen k-NN Zustand...")
@@ -196,14 +206,52 @@ def main():
 
     # 3. Initialisiere und trainiere den LightweightKNN
     knn = LightweightKNN(
-        k=KNN_K, 
-        max_samples=KNN_MAX_SAMPLES, 
+        k=KNN_K,
+        max_samples=KNN_MAX_SAMPLES,
         distance_metric=KNN_DISTANCE_METRIC,
         use_numpy=KNN_USE_NUMPY
     )
-    
-    # Trainiere den KNN mit den extrahierten Features
-    knn.fit(initial_features_np, all_labels, all_timestamps)
+
+    # Balanciere die Klassen, damit beide gleichmäßig vertreten sind
+    # Gruppiere Samples nach Klassen
+    features_by_class = {}
+    labels_by_class = {}
+    timestamps_by_class = {}
+
+    for i, label in enumerate(all_labels):
+        if label not in features_by_class:
+            features_by_class[label] = []
+            labels_by_class[label] = []
+            timestamps_by_class[label] = []
+
+        features_by_class[label].append(initial_features_np[i])
+        labels_by_class[label].append(label)
+        timestamps_by_class[label].append(all_timestamps[i])
+
+    # Finde die kleinste Klasse
+    min_class_size = min(len(samples) for samples in features_by_class.values())
+    print(f"Balanciere Klassen auf {min_class_size} Samples pro Klasse")
+
+    # Erstelle balancierte Arrays
+    balanced_features = []
+    balanced_labels = []
+    balanced_timestamps = []
+
+    for label, features in features_by_class.items():
+        # Wähle zufällig Samples aus jeder Klasse, maximal min_class_size
+        indices = np.random.choice(len(features), min(len(features), min_class_size), replace=False)
+
+        for i in indices:
+            balanced_features.append(features_by_class[label][i])
+            balanced_labels.append(labels_by_class[label][i])
+            balanced_timestamps.append(timestamps_by_class[label][i])
+
+    # Konvertiere zurück zu NumPy-Array
+    balanced_features_np = np.array(balanced_features)
+
+    # Trainiere den KNN mit den balancierten Features
+    print(f"Training mit {len(balanced_features_np)} balancierten Samples")
+    knn.fit(balanced_features_np, balanced_labels, balanced_timestamps)
     
     # Hole die Size und Klassen vom KNN
     # Verwende die korrekten Methoden für LightweightKNN
