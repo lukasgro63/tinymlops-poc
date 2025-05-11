@@ -101,18 +101,10 @@ def extract_features_manually(image, interpreter, input_details, output_details,
     if len(feature_tensor.shape) > 1 and feature_tensor.shape[0] == 1:
         feature_tensor = feature_tensor[0]
 
-    # Wende die gleiche Normalisierung an wie in TFLiteFeatureExtractor
-    # WICHTIG: Dies muss konsistent mit der Konfiguration in config_scenario1.json sein
-    # L2-Normalisierung wie in TFLiteFeatureExtractor
-    norm = np.sqrt(np.sum(feature_tensor * feature_tensor, axis=-1, keepdims=True))
-    # Vermeide Division durch Null
-    norm = np.maximum(norm, 1e-12)
-    normalized_feature_tensor = feature_tensor / norm
+    # Keine Normalisierung mehr anwenden, um konsistent mit config_scenario1.json zu sein
+    print(f"Feature-Tensor (ohne Normalisierung): min={feature_tensor.min()}, max={feature_tensor.max()}")
 
-    print(f"Feature-Tensor vor Normalisierung: min={feature_tensor.min()}, max={feature_tensor.max()}")
-    print(f"Feature-Tensor nach Normalisierung: min={normalized_feature_tensor.min()}, max={normalized_feature_tensor.max()}")
-
-    return normalized_feature_tensor
+    return feature_tensor
 
 def main():
     print("Erstelle initialen k-NN Zustand...")
