@@ -47,6 +47,7 @@ from tinylcm.core.classifiers.knn import LightweightKNN
 from tinylcm.core.data_logger.logger import DataLogger
 from tinylcm.core.data_structures import FeatureSample
 from tinylcm.core.drift_detection.features import PageHinkleyFeatureMonitor
+from tinylcm.core.drift_detection.confidence import EWMAConfidenceMonitor
 # Import tinylcm components
 from tinylcm.core.feature_extractors.tflite import TFLiteFeatureExtractor
 from tinylcm.core.operational_monitor.monitor import OperationalMonitor
@@ -511,123 +512,167 @@ def main():
             initial_timestamps = [time.time() - (i*10) for i in range(len(labels))]
             classifier.fit(initial_features, labels, initial_timestamps)
         
-        # Initialize drift detector
-        drift_detector_config = tinylcm_config["drift_detectors"][0]  # Use first detector
-        
-        # Create a function that extracts a specific feature dimension
-        feature_index = drift_detector_config["feature_index"]
+        # Initialize drift detectors
+        drift_detectors = []
 
-        # Make a more robust feature extraction function that handles edge cases
-        def safe_feature_extractor(features):
-            """Extract a feature safely with boundary checking."""
-            if features is None:
-                return 0.0
+        # Process each drift detector configuration
+        for detector_idx, detector_config in enumerate(tinylcm_config["drift_detectors"]):
+            detector_type = detector_config.get("type", "PageHinkleyFeatureMonitor")
 
-            # Convert to numpy array if needed
-            if not isinstance(features, np.ndarray):
-                try:
-                    features = np.array(features)
-                except:
-                    return 0.0
+            if detector_type == "PageHinkleyFeatureMonitor":
+                # Get feature index from config
+                feature_index = detector_config["feature_index"]
 
-            # Check if feature index is in range
-            if feature_index < 0 or feature_index >= features.size:
-                # Use last feature if index out of range
-                if features.size > 0:
-                    return float(features.flatten()[-1])
-                return 0.0
+                # Make a more robust feature extraction function that handles edge cases
+                def safe_feature_extractor(features):
+                    """Extract a feature safely with boundary checking."""
+                    if features is None:
+                        return 0.0
 
-            # Get the feature at the specified index
-            try:
-                feature_value = float(features.flatten()[feature_index])
+                    # Convert to numpy array if needed
+                    if not isinstance(features, np.ndarray):
+                        try:
+                            features = np.array(features)
+                        except:
+                            return 0.0
 
-                # Log some feature statistics occasionally to understand the scale issue
-                if hasattr(safe_feature_extractor, 'feature_count'):
-                    safe_feature_extractor.feature_count += 1
-                else:
-                    safe_feature_extractor.feature_count = 1
+                    # Check if feature index is in range
+                    if feature_index < 0 or feature_index >= features.size:
+                        # Use last feature if index out of range
+                        if features.size > 0:
+                            return float(features.flatten()[-1])
+                        return 0.0
 
-                if safe_feature_extractor.feature_count % 50 == 0:
-                    # Calculate some statistics about the features
-                    flat_features = features.flatten()
+                    # Get the feature at the specified index
                     try:
-                        stats = {
-                            'min': float(np.min(flat_features)),
-                            'max': float(np.max(flat_features)),
-                            'mean': float(np.mean(flat_features)),
-                            'std': float(np.std(flat_features)),
-                            'selected_value': feature_value,
-                            'dtype': str(features.dtype)
-                        }
-                        logger.info(f"Feature statistics: {stats}")
+                        feature_value = float(features.flatten()[feature_index])
+
+                        # Log some feature statistics occasionally to understand the scale issue
+                        if hasattr(safe_feature_extractor, 'feature_count'):
+                            safe_feature_extractor.feature_count += 1
+                        else:
+                            safe_feature_extractor.feature_count = 1
+
+                        if safe_feature_extractor.feature_count % 50 == 0:
+                            # Calculate some statistics about the features
+                            flat_features = features.flatten()
+                            try:
+                                stats = {
+                                    'min': float(np.min(flat_features)),
+                                    'max': float(np.max(flat_features)),
+                                    'mean': float(np.mean(flat_features)),
+                                    'std': float(np.std(flat_features)),
+                                    'selected_value': feature_value,
+                                    'dtype': str(features.dtype)
+                                }
+                                logger.info(f"Feature statistics: {stats}")
+                            except Exception as e:
+                                logger.error(f"Error calculating feature statistics: {e}")
+
+                        return feature_value
+                    except:
+                        return 0.0
+
+                # Alternative feature statistic that uses normalized feature values
+                def normalized_feature_extractor(features):
+                    """Extract feature and normalize to reduce extreme values."""
+                    raw_value = safe_feature_extractor(features)
+                    # Normalize to a more reasonable range for drift detection
+                    # The value 1e14 is based on the observed magnitude in logs
+                    normalized_value = raw_value / 1e14
+                    return normalized_value
+
+                # Create feature detector with normalized values
+                feature_detector = PageHinkleyFeatureMonitor(
+                    feature_statistic_fn=normalized_feature_extractor,
+                    delta=detector_config["delta"],
+                    lambda_threshold=detector_config["lambda_param"],
+                    warm_up_samples=detector_config["min_samples"],
+                    reference_update_interval=detector_config["warmup_samples"]
+                )
+
+                # Add a filter to prevent multiple sequential drift detections
+                feature_detector.drift_cooldown_period = 100  # Samples to wait before detecting drift again
+                feature_detector.samples_since_last_drift = 0
+
+                # Override update method to handle detection cooldown
+                original_update = feature_detector.update
+                def update_with_cooldown(record, *args, **kwargs):
+                    # Increment counter since last drift
+                    feature_detector.samples_since_last_drift += 1
+
+                    # Check if we're in cooldown period after drift detected
+                    if hasattr(feature_detector, 'drift_detected') and feature_detector.drift_detected:
+                        # During cooldown period, don't try to update stats
+                        if feature_detector.samples_since_last_drift < feature_detector.drift_cooldown_period:
+                            return False, {}
+                        else:
+                            # Cooldown period over, reset drift flag
+                            feature_detector.drift_detected = False
+
+                    try:
+                        # Try to extract feature safely
+                        if not record or 'features' not in record:
+                            return False, {}
+
+                        # Call original update
+                        result = original_update(record, *args, **kwargs)
+
+                        # If drift detected, set flag
+                        is_drift, _ = result
+                        if is_drift:
+                            feature_detector.drift_detected = True
+                            feature_detector.samples_since_last_drift = 0
+
+                        return result
                     except Exception as e:
-                        logger.error(f"Error calculating feature statistics: {e}")
+                        logger.warning(f"Error in feature detector update: {e}")
+                        return False, {}
 
-                return feature_value
-            except:
-                return 0.0
+                # Replace the update method
+                feature_detector.update = update_with_cooldown
 
-        # Alternative feature statistic that uses normalized feature values
-        def normalized_feature_extractor(features):
-            """Extract feature and normalize to reduce extreme values."""
-            raw_value = safe_feature_extractor(features)
-            # Normalize to a more reasonable range for drift detection
-            # The value 1e14 is based on the observed magnitude in logs
-            normalized_value = raw_value / 1e14
-            return normalized_value
+                # Register drift callback
+                feature_detector.register_callback(on_drift_detected)
 
-        # Use the normalized feature extractor to avoid extreme values in drift detection
-        drift_detector = PageHinkleyFeatureMonitor(
-            feature_statistic_fn=normalized_feature_extractor,  # Use normalized values
-            delta=drift_detector_config["delta"],
-            lambda_threshold=drift_detector_config["lambda_param"],
-            warm_up_samples=drift_detector_config["min_samples"],
-            reference_update_interval=drift_detector_config["warmup_samples"]
-        )
-        
-        # Add a filter to prevent multiple sequential drift detections
-        drift_detector.drift_cooldown_period = 100  # Samples to wait before detecting drift again
-        drift_detector.samples_since_last_drift = 0
+                # Add to detector list
+                drift_detectors.append(feature_detector)
+                logger.info(f"Initialized PageHinkleyFeatureMonitor with feature index {feature_index}")
 
-        # Override update method to handle detection cooldown
-        original_update = drift_detector.update
-        def update_with_cooldown(record, *args, **kwargs):
-            # Increment counter since last drift
-            drift_detector.samples_since_last_drift += 1
+            elif detector_type == "EWMAConfidenceMonitor":
+                # Create confidence monitor to detect when confidence drops
+                confidence_monitor = EWMAConfidenceMonitor(
+                    lambda_param=detector_config.get("lambda_param", 0.2),
+                    threshold_factor=detector_config.get("threshold_factor", 2.0),
+                    drift_window=detector_config.get("drift_window", 3),
+                    min_confidence=detector_config.get("min_confidence", 0.5),
+                    warm_up_samples=detector_config.get("warm_up_samples", 30),
+                    reference_update_interval=detector_config.get("reference_update_interval", 50)
+                )
 
-            # Check if we're in cooldown period after drift detected
-            if hasattr(drift_detector, 'drift_detected') and drift_detector.drift_detected:
-                # During cooldown period, don't try to update stats
-                if drift_detector.samples_since_last_drift < drift_detector.drift_cooldown_period:
-                    return False, {}
-                else:
-                    # Cooldown period over, reset drift flag
-                    drift_detector.drift_detected = False
+                # Register drift callback
+                confidence_monitor.register_callback(on_drift_detected)
 
-            try:
-                # Try to extract feature safely
-                if not record or 'features' not in record:
-                    return False, {}
+                # Add to detector list
+                drift_detectors.append(confidence_monitor)
+                logger.info(f"Initialized EWMAConfidenceMonitor to detect confidence changes")
 
-                # Call original update
-                result = original_update(record, *args, **kwargs)
+            else:
+                logger.warning(f"Unknown drift detector type: {detector_type}")
 
-                # If drift detected, set flag
-                is_drift, _ = result
-                if is_drift:
-                    drift_detector.drift_detected = True
-                    drift_detector.samples_since_last_drift = 0
+        # Make sure we have at least one detector
+        if not drift_detectors:
+            logger.warning("No drift detectors configured - creating default PageHinkleyFeatureMonitor")
+            default_detector = PageHinkleyFeatureMonitor(
+                feature_statistic_fn=lambda features: float(np.mean(features)) if isinstance(features, np.ndarray) else 0.0,
+                lambda_threshold=15.0,
+                warm_up_samples=50
+            )
+            default_detector.register_callback(on_drift_detected)
+            drift_detectors.append(default_detector)
 
-                return result
-            except Exception as e:
-                logger.warning(f"Error in drift detector update: {e}")
-                return False, {}
-
-        # Replace the update method
-        drift_detector.update = update_with_cooldown
-
-        # Register drift callback
-        drift_detector.register_callback(on_drift_detected)
+        # Keep backward compatibility by using the first detector as primary
+        drift_detector = drift_detectors[0]
         
         # Initialize operational monitor
         monitor_config = tinylcm_config["operational_monitor"]
@@ -662,7 +707,7 @@ def main():
         pipeline = InferencePipeline(
             feature_extractor=feature_extractor,
             classifier=classifier,
-            autonomous_monitors=[drift_detector],
+            autonomous_monitors=drift_detectors,  # Use all configured detectors
             operational_monitor=operational_monitor,
             data_logger=data_logger
         )

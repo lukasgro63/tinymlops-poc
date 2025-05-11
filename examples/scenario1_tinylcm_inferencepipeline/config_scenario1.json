@@ -25,7 +25,7 @@
     },
     "adaptive_classifier": {
       "type": "LightweightKNN",
-      "k": 5,
+      "k": 3,
       "max_samples": 100,
       "distance_metric": "cosine",
       "use_numpy": true,
@@ -39,6 +39,15 @@
         "lambda_param": 15,
         "min_samples": 50,
         "warmup_samples": 100
+      },
+      {
+        "type": "EWMAConfidenceMonitor",
+        "lambda_param": 0.2,
+        "threshold_factor": 2.0,
+        "drift_window": 3,
+        "min_confidence": 0.5,
+        "warm_up_samples": 30,
+        "reference_update_interval": 50
       }
     ],
     "operational_monitor": {
