@@ -359,12 +359,45 @@ class ExtendedSyncClient:
                 logger.info(f"Adding drift image to package: {image_path}")
                 logger.info(f"Relative path for drift image: {rel_path}")
 
-                # Remove destination_path parameter that's causing compatibility issues
-                self.sync_interface.add_file_to_package(
-                    package_id=package_id,
-                    file_path=image_path,
-                    file_type="image"
-                )
+                # Create a metadata file for the image with the proper destination path
+                metadata = {
+                    "relative_path": rel_path,  # Store this for the server to reconstruct the path
+                    "drift_type": detector_name,
+                    "timestamp": time.time()
+                }
+
+                # Create a temp metadata file
+                temp_dir = tempfile.mkdtemp()
+                try:
+                    metadata_file_path = os.path.join(temp_dir, "image_metadata.json")
+                    with open(metadata_file_path, 'w') as meta_file:
+                        json.dump(metadata, meta_file)
+
+                    # Add metadata file first
+                    self.sync_interface.add_file_to_package(
+                        package_id=package_id,
+                        file_path=metadata_file_path,
+                        file_type="image_metadata"
+                    )
+
+                    # Add the image itself
+                    self.sync_interface.add_file_to_package(
+                        package_id=package_id,
+                        file_path=image_path,
+                        file_type="image"
+                    )
+
+                    # Clean up temp dir
+                    os.remove(metadata_file_path)
+                    os.rmdir(temp_dir)
+                except Exception as e:
+                    logger.warning(f"Error adding drift image metadata: {e}")
+                    # Add the image without metadata as fallback
+                    self.sync_interface.add_file_to_package(
+                        package_id=package_id,
+                        file_path=image_path,
+                        file_type="image"
+                    )
             
             # Finalize the package
             self.sync_interface.finalize_package(package_id)

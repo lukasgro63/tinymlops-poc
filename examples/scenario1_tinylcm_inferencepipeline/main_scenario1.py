@@ -647,7 +647,8 @@ def main():
                 )
 
                 # Add a filter to prevent multiple sequential drift detections
-                feature_detector.drift_cooldown_period = 100  # Samples to wait before detecting drift again
+                # Increase the cooldown period significantly to reduce frequent drift events
+                feature_detector.drift_cooldown_period = 500  # Samples to wait before detecting drift again (5x more)
                 feature_detector.samples_since_last_drift = 0
 
                 # Override update method to handle detection cooldown
@@ -977,18 +978,29 @@ def main():
                 fps = frame_count / elapsed
                 logger.info(f"Processed {frame_count} frames. Current FPS: {fps:.2f}")
             
-            # Periodically check for drift - ensure we do this on every frame for more sensitivity
+            # Check for drift only periodically to reduce frequency of drift events
             current_time = time.time()
-            # Force check for drift with every frame for testing
-            drift_results = pipeline.check_autonomous_drifts()
-            if drift_results:
-                logger.info(f"Autonomous drift check results: {drift_results}")
-                # Important: manually call on_drift_detected for each detected drift
-                for result in drift_results:
-                    if result.get("drift_detected", False):
-                        # Extract the drift info and call the callback directly
-                        logger.warning(f"MANUALLY TRIGGERING DRIFT CALLBACK for {result.get('detector_type', 'unknown')}")
-                        on_drift_detected(result)
+
+            # Only check for drift every 10 frames to reduce processing overhead and event frequency
+            if frame_count % 10 == 0:
+                drift_results = pipeline.check_autonomous_drifts()
+                if drift_results:
+                    logger.info(f"Autonomous drift check results: {drift_results}")
+
+                    # Important: manually call on_drift_detected for each detected drift
+                    drift_count = 0
+                    for result in drift_results:
+                        if result.get("drift_detected", False):
+                            # Extract the drift info and call the callback directly
+                            logger.warning(f"MANUALLY TRIGGERING DRIFT CALLBACK for {result.get('detector_type', 'unknown')}")
+                            on_drift_detected(result)
+                            drift_count += 1
+
+                            # Only process one drift event per check to avoid flooding
+                            if drift_count >= 1:
+                                logger.info("Breaking after processing one drift event to avoid flooding")
+                                break
+
             last_drift_check_time = current_time
             
             # Periodically sync with TinySphere
