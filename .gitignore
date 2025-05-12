@@ -85,7 +85,7 @@ frontend/dist/
 CLAUDE.md
 **/.claude/settings.local.json
 **/CLAUDE.local.md
-
+./claude
 # Ignore images folder
 **/images/
 # But keep specific images that should be tracked

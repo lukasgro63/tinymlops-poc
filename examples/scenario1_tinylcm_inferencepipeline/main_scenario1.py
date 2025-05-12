@@ -858,8 +858,8 @@ def main():
                 if probabilities is not None:
                     logger.info(f"MAIN DEBUG: Raw probabilities: {probabilities}")
 
-                # Ignore negative predictions and only process LEGO bricks (red/green) with high confidence
-                if prediction != "negative" and confidence >= confidence_threshold:
+                # Process lego and stone predictions with high confidence, ignore negative class
+                if prediction in ["lego", "stone"] and confidence >= confidence_threshold:
                     # Log more details for better analysis
                     if frame_count % 10 == 0:  # Log every 10th frame to avoid flooding
                         logger.info(f"Frame {frame_count}: Prediction={prediction}, Confidence={confidence:.4f}")
@@ -878,7 +878,8 @@ def main():
                         rgb_frame = cv2.cvtColor(current_frame, cv2.COLOR_BGR2RGB)
 
                         # Save the image with frame number and prediction information
-                        image_path = pred_dir / f"frame{frame_count:06d}_{prediction}_{confidence:.2f}.jpg"
+                        timestamp_str = datetime.now().strftime("%H%M%S")
+                        image_path = pred_dir / f"frame{frame_count:06d}_{timestamp_str}_{prediction}_{confidence:.2f}.jpg"
                         cv2.imwrite(str(image_path), rgb_frame)
 
                         # Only log occasionally to avoid flooding logs

@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import mlflow
 import pandas as pd
@@ -417,7 +417,7 @@ def get_device_models(device_id: str, db: Session = Depends(get_db)):
             
             # Nach Modellen filtern, die zum angegebenen Gerät gehören
             device_models = []
-            for model in registered_models:
+            for model in models:
                 try:
                     if model.name.startswith(f"{device_id}-"):
                         # Neueste Versionen abrufen
@@ -427,17 +427,19 @@ def get_device_models(device_id: str, db: Session = Depends(get_db)):
                         versions = []
                         for version in latest_versions:
                             try:
-                                # Get run metrics as DataFrame
+                                # Get run metrics directly from the run object
                                 metrics_dict = {}
                                 if version.run_id:
-                                    run_data = mlflow.search_runs(run_ids=[version.run_id])
-
-                                    if not run_data.empty:
-                                        # Extract metrics from the DataFrame columns
-                                        for col in run_data.iloc[0].keys():
-                                            if col.startswith('metrics.'):
-                                                metric_name = col.replace('metrics.', '')
-                                                metrics_dict[metric_name] = float(run_data.iloc[0][col])
+                                    try:
+                                        # Get the run directly
+                                        run = mlflow_client.get_run(version.run_id)
+                                        
+                                        # Extract metrics from the run data object
+                                        if hasattr(run, "data") and hasattr(run.data, "metrics"):
+                                            print(f"[DEBUG] Found metrics for run {version.run_id}: {list(run.data.metrics.keys())}")
+                                            metrics_dict = run.data.metrics
+                                    except Exception as run_err:
+                                        print(f"[DEBUG] Error getting run data for {version.run_id}: {run_err}")
 
                                 versions.append({
                                     "version": version.version,
@@ -734,63 +736,291 @@ def get_package_timeline(period: str = "week", db: Session = Depends(get_db)):
         return []
 
 @router.get("/models/performance")
-def get_models_performance(metric: str = "accuracy", db: Session = Depends(get_db)):
-    """Fetch performance metrics for models from MLflow."""
+def get_models_performance(
+    metric: str = "accuracy",
+    days: Optional[int] = None,
+    limit: Optional[int] = None,
+    model_name: Optional[str] = None,
+    tags: Optional[str] = None,
+    include_operational_metrics: bool = True,
+    db: Session = Depends(get_db)
+):
+    """
+    Fetch performance metrics for models from MLflow with enhanced filtering options.
+
+    Parameters:
+    - metric: Main metric name to retrieve (default: "accuracy")
+    - days: Filter runs from last N days
+    - limit: Maximum number of runs to return per model
+    - model_name: Filter by specific model name
+    - tags: Comma-separated list of tags in format "key=value"
+    - include_operational_metrics: Include operational metrics like latency, CPU usage, etc.
+    """
     try:
         try:
+            # Add detailed logging
+            print(f"[DEBUG] get_models_performance: Starting with params: metric={metric}, days={days}, limit={limit}, model_name={model_name}, tags={tags}")
+
             # Set connection timeout to avoid hanging if MLflow is down
-            os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] = "5"  # 5 seconds timeout
+            os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] = "10"  # 10 seconds timeout
             mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+            print(f"[DEBUG] Using MLflow URI: {mlflow_uri}")
+
             mlflow.set_tracking_uri(mlflow_uri)
             client = mlflow.tracking.MlflowClient()
-            
-            # Get all registered models
-            models = client.search_registered_models()
-            
-            performance_data = []
-            
-            for model in models:
+            print(f"[DEBUG] MLflow client created successfully")
+
+            # Calculate date filter if days provided
+            date_filter = None
+            if days:
+                start_time = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000)
+                date_filter = start_time
+
+            # Parse tags filter from parameter
+            user_tag_filters = {}
+            if tags:
                 try:
-                    # Get latest versions
-                    versions = client.get_latest_versions(model.name)
-                    
+                    tag_pairs = tags.split(",")
+                    for pair in tag_pairs:
+                        key, value = pair.strip().split("=")
+                        user_tag_filters[key.strip()] = value.strip()
+                except Exception as tag_error:
+                    print(f"Invalid tag format: {tags}. Use 'key1=value1,key2=value2'")
+
+            # Get all registered models or filter by name
+            registered_models = []
+            if model_name:
+                try:
+                    print(f"[DEBUG] Trying to get registered model: {model_name}")
+                    model = client.get_registered_model(model_name)
+                    registered_models = [model]
+                    print(f"[DEBUG] Found registered model: {model_name}")
+                except Exception as m_err:
+                    print(f"[DEBUG] Error getting model {model_name}: {m_err}")
+            else:
+                print(f"[DEBUG] Searching for all registered models")
+                registered_models = client.search_registered_models()
+                print(f"[DEBUG] Found {len(registered_models)} registered models")
+
+            # Define operational metrics to include
+            operational_metrics = [
+                # TinyLCM specific metrics
+                "confidence_mean", "confidence_median", "confidence_min", "confidence_max",
+                "latency_mean_ms", "latency_median_ms", "latency_min_ms", "latency_max_ms",
+                "system_cpu_percent_avg", "system_memory_percent_avg",
+                "total_inferences"
+            ]
+
+            performance_data = []
+
+            # Find all experiments to search through
+            print(f"[DEBUG] Searching for all experiments")
+            all_experiments = mlflow.search_experiments()
+            print(f"[DEBUG] Found {len(all_experiments)} total experiments")
+
+            # Process each registered model
+            for reg_model in registered_models:
+                print(f"[DEBUG] Processing registered model: {reg_model.name}")
+                model_data = []  # Collect data for this model
+
+                # Build search filter for runs with this model tag
+                base_filter_string = f"tags.registered_model_name = '{reg_model.name}'"
+
+                # Add user tags if provided
+                tag_filter_parts = [base_filter_string]
+                for tag_key, tag_value in user_tag_filters.items():
+                    tag_filter_parts.append(f"tags.{tag_key} = '{tag_value}'")
+
+                filter_string = " and ".join(tag_filter_parts)
+                print(f"[DEBUG] Using filter string: {filter_string}")
+
+                # Search all experiments for runs related to this model
+                for experiment in all_experiments:
+                    try:
+                        print(f"[DEBUG] Searching in experiment: {experiment.name} (ID: {experiment.experiment_id})")
+
+                        # Search runs with model tag
+                        runs = mlflow.search_runs(
+                            experiment_ids=[experiment.experiment_id],
+                            filter_string=filter_string,
+                            max_results=100  # Set a reasonable limit
+                        )
+
+                        if runs.empty:
+                            print(f"[DEBUG] No matching runs found in experiment {experiment.name}")
+                            continue
+
+                        print(f"[DEBUG] Found {len(runs)} matching runs in experiment {experiment.name}")
+
+                        # Process each run's metrics
+                        for idx, row in runs.iterrows():
+                            run_id = row.get("run_id", "unknown")
+                            run_timestamp = row.get("start_time", 0)
+                            version_tag = row.get("tags.version", "1")  # Default to version 1 if not specified
+
+                            try:
+                                version_num = int(version_tag)
+                            except (ValueError, TypeError):
+                                version_num = 1
+
+                            stage = row.get("tags.stage", "None")
+
+                            print(f"[DEBUG] Processing run {run_id} with {len([c for c in row.index if c.startswith('metrics.')])} metrics")
+
+                            # Date filtering if required
+                            if date_filter and run_timestamp < date_filter:
+                                print(f"[DEBUG] Skipping run with timestamp {run_timestamp} (before {date_filter})")
+                                continue
+
+                            # Extract all metrics from the run
+                            all_metrics = {}
+                            for col in row.index:
+                                if col.startswith('metrics.'):
+                                    try:
+                                        metric_name = col.replace('metrics.', '')
+                                        metric_value = row[col]
+                                        # Try to convert to float and check for NaN
+                                        try:
+                                            float_value = float(metric_value)
+                                            # Skip NaN values which are not JSON serializable
+                                            if not pd.isna(float_value):
+                                                all_metrics[metric_name] = float_value
+                                            else:
+                                                print(f"[DEBUG] Skipping NaN value for metric {metric_name}")
+                                        except (ValueError, TypeError):
+                                            # For non-numeric values, keep as is if they're serializable
+                                            if isinstance(metric_value, (str, int, bool)) or metric_value is None:
+                                                all_metrics[metric_name] = metric_value
+                                    except Exception as metric_err:
+                                        print(f"[DEBUG] Error getting metric {col}: {metric_err}")
+
+                            print(f"[DEBUG] Found metrics: {list(all_metrics.keys())}")
+
+                            # Check for the main requested metric
+                            if metric in all_metrics:
+                                try:
+                                    # Value should already be filtered for NaN at this point
+                                    value = all_metrics[metric]
+                                    if isinstance(value, (int, float)) and not pd.isna(value):
+                                        print(f"[DEBUG] Found main metric {metric} = {value}")
+                                        model_data.append({
+                                            "model_name": reg_model.name,
+                                            "version": version_num,
+                                            "stage": stage,
+                                            "metric_name": metric,
+                                            "value": value,
+                                            "timestamp": run_timestamp,
+                                            "run_id": run_id
+                                        })
+                                    else:
+                                        print(f"[DEBUG] Skipping non-numeric or NaN value for main metric {metric}")
+                                except Exception as e:
+                                    print(f"Error processing metric {metric} for run {run_id}: {e}")
+
+                            # Include operational metrics if requested
+                            if include_operational_metrics:
+                                for op_metric in operational_metrics:
+                                    if op_metric in all_metrics:
+                                        try:
+                                            # Value should already be filtered for NaN
+                                            value = all_metrics[op_metric]
+                                            if isinstance(value, (int, float)) and not pd.isna(value):
+                                                print(f"[DEBUG] Found operational metric {op_metric} = {value}")
+                                                model_data.append({
+                                                    "model_name": reg_model.name,
+                                                    "version": version_num,
+                                                    "stage": stage,
+                                                    "metric_name": op_metric,
+                                                    "value": value,
+                                                    "timestamp": run_timestamp,
+                                                    "run_id": run_id
+                                                })
+                                            else:
+                                                print(f"[DEBUG] Skipping non-numeric or NaN value for operational metric {op_metric}")
+                                        except Exception as e:
+                                            print(f"Error processing operational metric {op_metric}: {e}")
+                    except Exception as exp_err:
+                        print(f"[DEBUG] Error searching experiment {experiment.name}: {exp_err}")
+                        continue
+
+                # If we have no data from tags search, fall back to direct version search
+                if not model_data:
+                    print(f"[DEBUG] No metrics found via tag search, trying registered model versions")
+                    versions = client.get_latest_versions(reg_model.name)
+                    print(f"[DEBUG] Found {len(versions)} versions for model: {reg_model.name}")
+
                     for version in versions:
                         # Skip if no run ID
                         if not version.run_id:
+                            print(f"[DEBUG] Skipping version {version.version} - no run ID")
                             continue
-                            
-                        try:
-                            # Get run data
-                            run = client.get_run(version.run_id)
-                            
-                            # Get the run data as DataFrame
-                            run_data = mlflow.search_runs(run_ids=[run.info.run_id])
 
-                            if not run_data.empty:
-                                metric_column = f"metrics.{metric}"
-                                if metric_column in run_data.iloc[0]:
+                        try:
+                            # Get run data directly
+                            run = client.get_run(version.run_id)
+                            run_timestamp = run.info.start_time if hasattr(run.info, "start_time") else 0
+
+                            # Extract metrics
+                            if hasattr(run, "data") and hasattr(run.data, "metrics"):
+                                metrics_dict = run.data.metrics
+                                print(f"[DEBUG] Found {len(metrics_dict)} metrics for version {version.version}")
+
+                                # Check for the main requested metric
+                                if metric in metrics_dict:
                                     try:
-                                        value = float(run_data.iloc[0][metric_column])
-                                        if not pd.isna(value):  # Check for NaN values
-                                            performance_data.append({
-                                                "model_name": model.name,
+                                        value = metrics_dict[metric]
+                                        if isinstance(value, (int, float)) and not pd.isna(value):
+                                            model_data.append({
+                                                "model_name": reg_model.name,
                                                 "version": version.version,
                                                 "stage": version.current_stage,
                                                 "metric_name": metric,
                                                 "value": value,
-                                                "timestamp": run.info.start_time
+                                                "timestamp": run_timestamp,
+                                                "run_id": version.run_id
                                             })
-                                    except (ValueError, TypeError) as e:
-                                        print(f"Error processing metric {metric} for model {model.name}: {e}")
+                                        else:
+                                            print(f"[DEBUG] Skipping non-numeric or NaN value for main metric {metric}")
+                                    except Exception as e:
+                                        print(f"Error processing metric {metric}: {e}")
+
+                                # Include operational metrics if requested
+                                if include_operational_metrics:
+                                    for op_metric in operational_metrics:
+                                        if op_metric in metrics_dict:
+                                            try:
+                                                value = metrics_dict[op_metric]
+                                                if isinstance(value, (int, float)) and not pd.isna(value):
+                                                    model_data.append({
+                                                        "model_name": reg_model.name,
+                                                        "version": version.version,
+                                                        "stage": version.current_stage,
+                                                        "metric_name": op_metric,
+                                                        "value": value,
+                                                        "timestamp": run_timestamp,
+                                                        "run_id": version.run_id
+                                                    })
+                                                else:
+                                                    print(f"[DEBUG] Skipping non-numeric or NaN value for operational metric {op_metric}")
+                                            except Exception as e:
+                                                print(f"Error processing operational metric {op_metric}: {e}")
                         except Exception as run_err:
-                            print(f"Error getting run data for {model.name} version {version.version}: {run_err}")
+                            print(f"Error getting run data for version {version.version}: {run_err}")
                             continue
-                except Exception as version_err:
-                    print(f"Error getting versions for model {model.name}: {version_err}")
-                    continue
-                    
+
+                # Sort by version and timestamp
+                model_data.sort(key=lambda x: (x["version"], x.get("timestamp", 0)))
+
+                # Apply limit if specified
+                if limit and len(model_data) > limit:
+                    model_data = model_data[-limit:]  # Take the latest ones
+
+                print(f"[DEBUG] Collected {len(model_data)} data points for model {reg_model.name}")
+                performance_data.extend(model_data)
+
+            print(f"[DEBUG] Returning {len(performance_data)} total performance data points")
             return performance_data
-        
+
         except Exception as mlflow_err:
             # If MLflow is completely unavailable, return an empty list
             # rather than failing the entire request
@@ -798,7 +1028,7 @@ def get_models_performance(metric: str = "accuracy", db: Session = Depends(get_d
             import traceback
             traceback.print_exc()
             return []
-    
+
     except Exception as e:
         import traceback
         print(f"Unexpected error in models_performance: {e}")

@@ -178,8 +178,9 @@ export interface ModelPerformanceData {
   version: number;
   stage: string;
   metric_name: string;
-  value: number;
+  value: number | null;  // Allow null for missing metrics
   timestamp: number;
+  run_id?: string;
 }
 
 export interface ModelVersionMetrics {

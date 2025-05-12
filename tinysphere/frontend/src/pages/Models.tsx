@@ -248,18 +248,21 @@ const Models: React.FC = () => {
                   <CircularProgress size={24} />
                 </Box>
               ) : (
-                <ModelPerformanceChart 
+                <ModelPerformanceChart
                   models={modelList}
-                  selectedMetric={selectedMetric}
-                  onMetricChange={(metric) => setSelectedMetric(metric)}
                   performanceData={versionMetrics.map(metric => ({
                     model_name: selectedModel,
                     version: metric.version,
                     stage: metric.stage,
                     metric_name: selectedMetric,
-                    value: metric.metrics[selectedMetric] || 0,
-                    timestamp: metric.created_at
+                    value: metric.metrics && metric.metrics[selectedMetric] !== undefined
+                      ? metric.metrics[selectedMetric]
+                      : null,
+                    timestamp: metric.created_at,
+                    run_id: metric.run_id
                   }))}
+                  selectedMetric={selectedMetric}
+                  onMetricChange={(metric) => setSelectedMetric(metric)}
                 />
               )}
             </Box>

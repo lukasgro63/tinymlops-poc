@@ -37,7 +37,7 @@ from tinylcm.utils.file_utils import ensure_directory_exists
 # Pfade zu deinen initialen Bilddaten
 # Angepasster Pfad für die tatsächliche Verzeichnisstruktur
 INITIAL_IMAGE_DATA_DIR = Path("examples/assets/initial_states/images")  # Hauptordner für initiale Bilder
-CLASSES = {"red": INITIAL_IMAGE_DATA_DIR / "red", "negative": INITIAL_IMAGE_DATA_DIR / "negative"}
+CLASSES = {"lego": INITIAL_IMAGE_DATA_DIR / "lego", "stone": INITIAL_IMAGE_DATA_DIR / "stone", "negative": INITIAL_IMAGE_DATA_DIR / "negative"}
 
 # Pfad zum TFLite-Modell (das auch im Beispiel verwendet wird)
 MODEL_PATH = "examples/assets/model/model.tflite"  # Relativ zum Skript-Ausführungsort
@@ -50,12 +50,12 @@ TARGET_IMG_SIZE = (224, 224)  # Inferenzauflösung
 # Konfiguration für den LightweightKNN
 KNN_K = 3  # Anzahl der nächsten Nachbarn
 KNN_MAX_SAMPLES = 100  # Da wir nur 20 Samples haben (10 rot, 10 grün)
-KNN_DISTANCE_METRIC = "cosine"  # Metrik für den Abstandsvergleich
+KNN_DISTANCE_METRIC = "euclidean"  # Metrik für den Abstandsvergleich
 KNN_USE_NUMPY = True  # Für die Offline-Erstellung können wir NumPy nutzen
 
 # Speicherort für den initialen k-NN Zustand
 OUTPUT_STATE_DIR = Path("examples/assets/initial_states/")
-OUTPUT_STATE_FILENAME = "knn_initial_state_RN.json"  # Red, Negative
+OUTPUT_STATE_FILENAME = "knn_initial_state_LSN.json"  # Lego, Stone, Negative
 # --- ENDE KONFIGURATION ---
 
 def preprocess_image_for_feature_extraction(image_path: Path, target_size: tuple) -> np.ndarray:
@@ -101,8 +101,10 @@ def extract_features_manually(image, interpreter, input_details, output_details,
     if len(feature_tensor.shape) > 1 and feature_tensor.shape[0] == 1:
         feature_tensor = feature_tensor[0]
 
-    # Keine Normalisierung mehr anwenden, um konsistent mit config_scenario1.json zu sein
-    print(f"Feature-Tensor (ohne Normalisierung): min={feature_tensor.min()}, max={feature_tensor.max()}")
+    # Normalisiere Features um konsistent mit config_scenario1.json zu sein
+    # L2-Normalisierung der Features
+    feature_tensor = feature_tensor / np.linalg.norm(feature_tensor)
+    print(f"Feature-Tensor (mit Normalisierung): min={feature_tensor.min()}, max={feature_tensor.max()}")
 
     return feature_tensor
 

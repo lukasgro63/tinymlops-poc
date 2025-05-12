@@ -6,7 +6,7 @@
   },
   "camera": {
     "resolution": [640, 480],
-    "framerate": 10,
+    "framerate": 5,
     "rotation": 0,
     "inference_resolution": [224, 224]
   },
@@ -20,34 +20,34 @@
       "type": "TFLiteFeatureExtractor",
       "model_path": "../assets/model/model.tflite",
       "feature_layer_index": -1,
-      "normalize_features": false,
+      "normalize_features": true,
       "lazy_loading": false
     },
     "adaptive_classifier": {
       "type": "LightweightKNN",
       "k": 3,
       "max_samples": 100,
-      "distance_metric": "cosine",
+      "distance_metric": "euclidean",
       "use_numpy": true,
-      "initial_state_path": "../assets/initial_states/knn_initial_state_RN.json"
+      "initial_state_path": "../assets/initial_states/knn_initial_state_LSN.json"
     },
     "drift_detectors": [
       {
         "type": "PageHinkleyFeatureMonitor",
         "feature_index": 1,
-        "delta": 0.001,
-        "lambda_param": 15,
-        "min_samples": 50,
-        "warmup_samples": 100
+        "delta": 0.0001,
+        "lambda_param": 5,
+        "min_samples": 15,
+        "warmup_samples": 30
       },
       {
         "type": "EWMAConfidenceMonitor",
-        "lambda_param": 0.2,
-        "threshold_factor": 2.0,
-        "drift_window": 3,
-        "min_confidence": 0.5,
-        "warm_up_samples": 30,
-        "reference_update_interval": 50
+        "lambda_param": 0.4,
+        "threshold_factor": 1.2,
+        "drift_window": 1,
+        "min_confidence": 0.8,
+        "warm_up_samples": 10,
+        "reference_update_interval": 20
       }
     ],
     "operational_monitor": {
@@ -79,7 +79,7 @@
     }
   },
   "application": {
-    "inference_interval_ms": 100,
+    "inference_interval_ms": 500,
     "display_frames": false,
     "save_debug_frames": false,
     "debug_output_dir": "./debug"
