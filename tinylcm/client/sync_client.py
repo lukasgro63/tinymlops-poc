@@ -2,10 +2,13 @@ import json
 import os
 import platform
 import re
+import shutil
+import tempfile
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import requests
 
@@ -46,19 +49,20 @@ except ImportError:
 
 class SyncClient:
     def __init__(
-        self, 
-        server_url: str, 
-        api_key: str, 
-        device_id: str, 
-        sync_interface: Optional[SyncInterface] = None, 
-        sync_dir: Optional[Union[str, Path]] = None, 
-        max_retries: int = 3, 
-        connection_timeout: float = 300.0, 
+        self,
+        server_url: str,
+        api_key: str,
+        device_id: str,
+        sync_interface: Optional[SyncInterface] = None,
+        sync_dir: Optional[Union[str, Path]] = None,
+        max_retries: int = 3,
+        connection_timeout: float = 300.0,
         auto_register: bool = True,
         quarantine_buffer: Optional['QuarantineBuffer'] = None,
         drift_detectors: Optional[List[Any]] = None,
         adaptation_tracker: Optional['AdaptationTracker'] = None,
-        state_manager: Optional['AdaptiveStateManager'] = None
+        state_manager: Optional['AdaptiveStateManager'] = None,
+        enable_prediction_images: bool = False
     ):
         if not self.validate_server_url(server_url):
             raise ValueError(f"Invalid server URL: {server_url}")
@@ -67,7 +71,9 @@ class SyncClient:
         self.api_key = api_key
         self.device_id = device_id
         self.auto_register = auto_register
-        
+        self.enable_prediction_images = enable_prediction_images
+        self.pending_prediction_images = []
+
         # Set up sync interface
         if sync_interface is None:
             if sync_dir is None:
@@ -75,36 +81,38 @@ class SyncClient:
             self.sync_interface = SyncInterface(sync_dir=sync_dir)
         else:
             self.sync_interface = sync_interface
-            
+
         # Set up quarantine buffer reference
         self.quarantine_buffer = quarantine_buffer
-        
+
         # Set up drift detectors reference
         self.drift_detectors = drift_detectors or []
-        
+
         # Set up adaptation tracker reference
         self.adaptation_tracker = adaptation_tracker
-        
+
         # Set up state manager reference
         self.state_manager = state_manager
-        
+
         # Set up headers
         self.headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "X-Device-ID": device_id
         }
-        
+
         # Set up connection manager
         self.connection_manager = ConnectionManager(
-            server_url=server_url, 
-            max_retries=max_retries, 
-            connection_timeout=connection_timeout, 
+            server_url=server_url,
+            max_retries=max_retries,
+            connection_timeout=connection_timeout,
             headers=self.headers
         )
-        
-        self.logger.info(f"Initialized sync client for server: {server_url}")
-        
+
+        # Log image transfer status
+        image_transfer_status = "enabled" if enable_prediction_images else "disabled"
+        self.logger.info(f"Initialized sync client for server: {server_url} (prediction image transfer: {image_transfer_status})")
+
         # Auto-register if needed
         if auto_register:
             try:
@@ -263,11 +271,24 @@ class SyncClient:
             raise
     
     def sync_all_pending_packages(self) -> List[Dict[str, Any]]:
+        """Synchronize all pending packages and prediction images if enabled.
+
+        Returns:
+            List of results for each package
+        """
         self.logger.info("Synchronizing all pending packages")
+
+        # First sync prediction images if enabled
+        if self.enable_prediction_images and self.pending_prediction_images:
+            self.logger.info(f"Syncing {len(self.pending_prediction_images)} pending prediction images")
+            self._sync_prediction_images()
+
+        # Then sync all other pending packages
         packages = self.sync_interface.list_packages(include_synced=False)
         if not packages:
             self.logger.info("No pending packages to synchronize")
             return []
+
         self.logger.info(f"Found {len(packages)} pending packages")
         results = []
         for package in packages:
@@ -983,39 +1004,261 @@ class SyncClient:
             "validations_processed": validations_processed
         }
     
+    def add_prediction_image(self, image_path: str, prediction: str, confidence: float) -> bool:
+        """Add a prediction image to the queue for synchronization.
+
+        Args:
+            image_path: Path to the image file
+            prediction: Prediction label (e.g., "lego", "stone")
+            confidence: Confidence score for the prediction (0-1)
+
+        Returns:
+            True if the image was added to the queue, False otherwise
+        """
+        if not self.enable_prediction_images:
+            self.logger.debug(f"Prediction image transfer is disabled, not adding image {image_path}")
+            return False
+
+        try:
+            if not os.path.exists(image_path):
+                self.logger.warning(f"Image file not found: {image_path}")
+                return False
+
+            # Add to pending images queue
+            self.pending_prediction_images.append({
+                "path": image_path,
+                "prediction": prediction,
+                "confidence": confidence,
+                "timestamp": time.time()
+            })
+
+            self.logger.debug(f"Added prediction image to sync queue: {image_path}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to add prediction image: {str(e)}")
+            return False
+
+    def _sync_prediction_images(self) -> List[Dict[str, Any]]:
+        """Synchronize all pending prediction images.
+
+        Returns:
+            List of results for each image batch
+        """
+        if not self.enable_prediction_images or not self.pending_prediction_images:
+            return []
+
+        try:
+            results = []
+            max_images_per_batch = 10  # Limit number of images per batch
+
+            # Group images by prediction class
+            prediction_groups = {}
+            for img in self.pending_prediction_images:
+                pred = img["prediction"]
+                if pred not in prediction_groups:
+                    prediction_groups[pred] = []
+                prediction_groups[pred].append(img)
+
+            # Process each prediction group
+            for prediction, images in prediction_groups.items():
+                # Process images in batches
+                for i in range(0, len(images), max_images_per_batch):
+                    batch = images[i:i+max_images_per_batch]
+                    result = self._create_and_send_prediction_images_package(prediction, batch)
+                    results.append(result)
+
+            # Clear the pending list if all were processed successfully
+            processed_images = []
+            for result in results:
+                if result.get("status") == "success":
+                    processed_images.extend(result.get("processed_images", []))
+
+            # Remove processed images from the pending list
+            self.pending_prediction_images = [img for img in self.pending_prediction_images
+                                           if img["path"] not in processed_images]
+
+            # Log results
+            if processed_images:
+                self.logger.info(f"Synchronized {len(processed_images)} prediction images")
+            if self.pending_prediction_images:
+                self.logger.warning(f"{len(self.pending_prediction_images)} prediction images still pending")
+
+            return results
+        except Exception as e:
+            self.logger.error(f"Failed to sync prediction images: {str(e)}")
+            return []
+
+    def _create_and_send_prediction_images_package(self, prediction: str, images: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Create and send a package containing prediction images.
+
+        Args:
+            prediction: Prediction class
+            images: List of images with metadata
+
+        Returns:
+            Result dictionary
+        """
+        if not images:
+            return {"status": "error", "message": "No images provided"}
+
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            description = f"Prediction '{prediction}' images from device {self.device_id}"
+            package_id = self.sync_interface.create_package(
+                device_id=self.device_id,
+                package_type="prediction_images",
+                description=description
+            )
+
+            # Create metadata
+            metadata = {
+                "device_id": self.device_id,
+                "timestamp": time.time(),
+                "prediction": prediction,
+                "image_count": len(images),
+                "confidence_avg": sum(img["confidence"] for img in images) / len(images) if images else 0,
+            }
+
+            # Write metadata to a temp file
+            temp_dir = tempfile.mkdtemp()
+            metadata_file_path = os.path.join(temp_dir, "prediction_images.json")
+
+            with open(metadata_file_path, 'w') as metadata_file:
+                json.dump(metadata, metadata_file)
+
+            # Add the metadata file to the package
+            self.sync_interface.add_file_to_package(
+                package_id=package_id,
+                file_path=metadata_file_path,
+                file_type="metadata"
+            )
+
+            # Add each image with a proper name
+            processed_images = []
+            for idx, img in enumerate(images):
+                image_path = img["path"]
+                if os.path.exists(image_path):
+                    # Get image extension
+                    _, ext = os.path.splitext(image_path)
+
+                    # Create a meaningful image name
+                    conf_str = f"{img['confidence']:.2f}".replace(".", "")
+                    ts_str = datetime.fromtimestamp(img["timestamp"]).strftime("%H%M%S")
+                    new_filename = f"{prediction}_{ts_str}_{conf_str}_{idx}{ext}"
+
+                    # Create a temporary copy with the new name
+                    temp_img_path = os.path.join(temp_dir, new_filename)
+                    shutil.copy(image_path, temp_img_path)
+
+                    # Add to package
+                    success = self.sync_interface.add_file_to_package(
+                        package_id=package_id,
+                        file_path=temp_img_path,
+                        file_type="image"
+                    )
+
+                    if success:
+                        processed_images.append(img["path"])
+                    else:
+                        self.logger.warning(f"Failed to add image {image_path} to package")
+
+            # Clean up temp directory
+            try:
+                shutil.rmtree(temp_dir)
+            except Exception as e:
+                self.logger.warning(f"Failed to clean up temp directory: {e}")
+
+            # Finalize package
+            self.sync_interface.finalize_package(package_id)
+
+            # Send the package
+            result = self.send_package(package_id)
+            if result:
+                self.logger.info(f"Successfully sent {len(processed_images)} prediction images to server")
+                # Return list of image paths that were successfully processed
+                return {
+                    "status": "success",
+                    "message": f"Successfully sent {len(processed_images)} prediction images",
+                    "image_count": len(processed_images),
+                    "prediction": prediction,
+                    "processed_images": processed_images,
+                    "package_type": "prediction_images",
+                    "package_id": package_id
+                }
+            else:
+                self.logger.error(f"Failed to send prediction images package to server")
+                return {
+                    "status": "error",
+                    "message": "Failed to send prediction images package",
+                    "prediction": prediction
+                }
+
+        except Exception as e:
+            self.logger.error(f"Failed to create prediction images package: {str(e)}")
+            return {"status": "error", "message": str(e)}
+
+    def delete_transferred_images(self, image_paths: List[str]) -> Tuple[int, int]:
+        """Delete images that have been successfully transferred to the server.
+
+        Args:
+            image_paths: List of image file paths to delete
+
+        Returns:
+            Tuple of (success_count, fail_count)
+        """
+        success_count = 0
+        fail_count = 0
+
+        for path in image_paths:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+                    success_count += 1
+                    self.logger.debug(f"Deleted transferred image: {path}")
+                else:
+                    self.logger.warning(f"Image file not found: {path}")
+                    fail_count += 1
+            except Exception as e:
+                self.logger.error(f"Failed to delete image {path}: {e}")
+                fail_count += 1
+
+        self.logger.info(f"Deleted {success_count} transferred images, {fail_count} failed")
+        return success_count, fail_count
+
     def sync_all(self) -> Dict[str, Any]:
         """Perform a comprehensive synchronization of all components with the server.
-        
+
         This method synchronizes:
         1. Quarantine buffer (samples and validation results)
         2. Drift events and validations
         3. Adaptation logs, snapshots, and feedback
-        4. Pending packages
-        
+        4. Prediction images (if enabled)
+        5. Pending packages
+
         Returns:
             Dictionary with comprehensive sync results
         """
         self.logger.info("Starting comprehensive synchronization with server")
-        
+
         results = {
             "success": True,
             "components": {}
         }
-        
+
         # Step 1: Sync quarantine data
         if QUARANTINE_AVAILABLE and self.quarantine_buffer is not None:
             quarantine_result = self.sync_quarantine()
             results["components"]["quarantine"] = quarantine_result
             if not quarantine_result.get("success", False) and quarantine_result.get("error") != "Quarantine buffer not available":
                 results["success"] = False
-        
+
         # Step 2: Sync drift events
         if DRIFT_DETECTION_AVAILABLE and self.drift_detectors:
             drift_result = self.sync_drift_events()
             results["components"]["drift"] = drift_result
             if not drift_result.get("success", False) and drift_result.get("error") != "Drift detection not available or no detectors configured":
                 results["success"] = False
-        
+
         # Step 3: Sync adaptation components
         if (ADAPTATION_TRACKER_AVAILABLE and self.adaptation_tracker is not None) or \
            (STATE_MANAGER_AVAILABLE and self.state_manager is not None):
@@ -1023,8 +1266,23 @@ class SyncClient:
             results["components"]["adaptation"] = adaptation_result
             if not adaptation_result.get("success", False):
                 results["success"] = False
-        
-        # Step 4: Sync pending packages
+
+        # Step 4: Sync prediction images
+        if self.enable_prediction_images and self.pending_prediction_images:
+            image_results = self._sync_prediction_images()
+            if image_results:
+                success_count = sum(1 for r in image_results if r.get("status") == "success")
+                total_images = sum(r.get("image_count", 0) for r in image_results if r.get("status") == "success")
+                results["components"]["prediction_images"] = {
+                    "success": success_count == len(image_results),
+                    "total_batches": len(image_results),
+                    "successful_batches": success_count,
+                    "total_images": total_images
+                }
+                if success_count < len(image_results):
+                    results["success"] = False
+
+        # Step 5: Sync pending packages
         package_results = self.sync_all_pending_packages()
         if package_results:
             success_count = sum(1 for r in package_results if r.get("success", False))
@@ -1037,19 +1295,19 @@ class SyncClient:
             }
             if success_count < len(package_results):
                 results["success"] = False
-        
+
         # Compile summary
         components_synced = len(results["components"])
         successful_components = sum(1 for c in results["components"].values() if c.get("success", False))
-        
+
         results["summary"] = {
             "components_synced": components_synced,
             "successful_components": successful_components,
             "timestamp": time.time()
         }
-        
+
         self.logger.info(f"Comprehensive synchronization completed: {successful_components}/{components_synced} components successful")
-        
+
         return results
 
     def close(self) -> None:

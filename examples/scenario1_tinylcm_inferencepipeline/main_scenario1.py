@@ -733,8 +733,15 @@ def main():
             sync_dir=sync_config.get("sync_dir", "./sync_data"),
             sync_interval_seconds=sync_config["sync_interval_seconds"],
             max_retries=sync_config["max_retries"],
-            auto_register=sync_config["auto_register"]
+            auto_register=sync_config["auto_register"],
+            enable_image_transfer=sync_config.get("enable_prediction_images", False)
         )
+
+        # Log prediction image transfer status
+        if sync_client.enable_prediction_images:
+            logger.info("Prediction image transfer to TinySphere enabled")
+        else:
+            logger.info("Prediction image transfer to TinySphere disabled")
         
         # Initialize InferencePipeline with the configured components
         pipeline = InferencePipeline(
@@ -869,6 +876,7 @@ def main():
                             logger.info(f"Feature sample: {feature_sample}")
 
                     # Save LEGO brick predictions for validation
+                    image_path = None
                     try:
                         # Create directory for prediction images if it doesn't exist
                         pred_dir = Path("./prediction_images")
@@ -884,7 +892,17 @@ def main():
 
                         # Only log occasionally to avoid flooding logs
                         if frame_count % 10 == 0:
-                            logger.info(f"Saved LEGO brick image to {image_path}")
+                            logger.info(f"Saved {prediction} image to {image_path}")
+
+                        # Add image to sync client if enabled
+                        if config["tinylcm"]["features"].get("save_prediction_images", False) and sync_client and sync_client.enable_prediction_images:
+                            added = sync_client.add_prediction_image(
+                                image_path=str(image_path),
+                                prediction=prediction,
+                                confidence=confidence
+                            )
+                            if added and frame_count % 10 == 0:
+                                logger.debug(f"Added image {image_path} to sync queue")
                     except Exception as e:
                         logger.error(f"Error saving prediction image: {e}")
                 elif prediction == "negative":
@@ -928,8 +946,28 @@ def main():
                     # Sync all pending packages
                     logger.debug("Syncing pending packages with TinySphere")
                     sync_results = sync_client.sync_all_pending_packages()
+
+                    # Process sync results
                     if sync_results:
                         logger.info(f"Synced {len(sync_results)} packages with TinySphere")
+
+                        # Clean up transferred images if enabled
+                        if sync_client.enable_prediction_images and sync_config.get("cleanup_transferred_images", False):
+                            # Check if any prediction image packages were successfully synced
+                            prediction_image_packages = [r for r in sync_results
+                                                     if r.get("success") and r.get("package_type", "") == "prediction_images"]
+
+                            # Get list of transferred images for cleanup
+                            images_to_clean = []
+                            for pkg in prediction_image_packages:
+                                # Extract images from package details if available
+                                if "processed_images" in pkg:
+                                    images_to_clean.extend(pkg["processed_images"])
+
+                            # Delete transferred images
+                            if images_to_clean:
+                                success_count, fail_count = sync_client.delete_transferred_images(images_to_clean)
+                                logger.info(f"Cleaned up {success_count} transferred images, {fail_count} failed")
                     else:
                         logger.debug("No packages to sync with TinySphere")
 
@@ -959,8 +997,25 @@ def main():
         if 'sync_client' in locals() and sync_client:
             try:
                 # Sync all pending packages
-                sync_client.sync_all_pending_packages()
+                sync_results = sync_client.sync_all_pending_packages()
                 logger.info("Final sync completed")
+
+                # Final cleanup of transferred images if enabled
+                if sync_client.enable_prediction_images and sync_config.get("cleanup_transferred_images", False):
+                    # Check if any prediction image packages were successfully synced
+                    prediction_image_packages = [r for r in sync_results
+                                             if r.get("success") and r.get("package_type", "") == "prediction_images"]
+
+                    # Get list of transferred images for cleanup
+                    images_to_clean = []
+                    for pkg in prediction_image_packages:
+                        if "processed_images" in pkg:
+                            images_to_clean.extend(pkg["processed_images"])
+
+                    # Delete transferred images
+                    if images_to_clean:
+                        success_count, fail_count = sync_client.delete_transferred_images(images_to_clean)
+                        logger.info(f"Final cleanup: Removed {success_count} transferred images, {fail_count} failed")
             except Exception as e:
                 logger.warning(f"Error during final sync: {e}")
 

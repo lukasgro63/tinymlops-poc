@@ -4,11 +4,13 @@ from tinysphere.importer.transformers.metrics_transformer import \
     MetricsTransformer
 from tinysphere.importer.transformers.model_transformer import ModelTransformer
 from tinysphere.importer.transformers.drift_transformer import DriftTransformer
+from tinysphere.importer.transformers.prediction_images_transformer import PredictionImagesTransformer
 
 __all__ = [
     "DataTransformer",
     "ModelTransformer",
     "MetricsTransformer",
     "LogsTransformer",
-    "DriftTransformer"
+    "DriftTransformer",
+    "PredictionImagesTransformer"
 ]
