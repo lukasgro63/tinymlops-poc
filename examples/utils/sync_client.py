@@ -359,11 +359,11 @@ class ExtendedSyncClient:
                 logger.info(f"Adding drift image to package: {image_path}")
                 logger.info(f"Relative path for drift image: {rel_path}")
 
+                # Remove destination_path parameter that's causing compatibility issues
                 self.sync_interface.add_file_to_package(
                     package_id=package_id,
                     file_path=image_path,
-                    file_type="image",
-                    destination_path=rel_path  # Preserve the directory structure
+                    file_type="image"
                 )
             
             # Finalize the package
