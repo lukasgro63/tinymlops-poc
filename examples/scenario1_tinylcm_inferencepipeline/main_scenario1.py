@@ -733,9 +733,12 @@ def main():
             sync_dir=sync_config.get("sync_dir", "./sync_data"),
             sync_interval_seconds=sync_config["sync_interval_seconds"],
             max_retries=sync_config["max_retries"],
-            auto_register=sync_config["auto_register"],
-            enable_image_transfer=sync_config.get("enable_prediction_images", False)
+            auto_register=sync_config["auto_register"]
         )
+
+        # Set prediction image transfer attribute directly if available in config
+        if "enable_prediction_images" in sync_config:
+            sync_client.enable_prediction_images = sync_config.get("enable_prediction_images", False)
 
         # Log prediction image transfer status
         if sync_client.enable_prediction_images:
