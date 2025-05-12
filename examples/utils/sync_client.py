@@ -355,6 +355,10 @@ class ExtendedSyncClient:
                 # Extract the complete path structure to maintain it in the package
                 rel_path = os.path.relpath(image_path, "./drift_images") if image_path.startswith("./drift_images") else os.path.basename(image_path)
 
+                # Log path information for debugging
+                logger.info(f"Adding drift image to package: {image_path}")
+                logger.info(f"Relative path for drift image: {rel_path}")
+
                 self.sync_interface.add_file_to_package(
                     package_id=package_id,
                     file_path=image_path,

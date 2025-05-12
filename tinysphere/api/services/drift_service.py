@@ -186,6 +186,11 @@ class DriftService:
             except (ValueError, TypeError):
                 timestamp = datetime.now(timezone.utc)
         
+        # Extract raw_data_path from metadata if it exists
+        raw_data_path = sample_data.get("raw_data_path")
+        if not raw_data_path and "metadata" in sample_data and isinstance(sample_data["metadata"], dict):
+            raw_data_path = sample_data["metadata"].get("raw_data_path")
+
         # Create sample
         drift_sample = DriftSample(
             sample_id=sample_id,
@@ -194,7 +199,7 @@ class DriftService:
             confidence=sample_data.get("confidence"),
             drift_score=sample_data.get("drift_score"),
             feature_path=sample_data.get("feature_path"),
-            raw_data_path=sample_data.get("raw_data_path"),
+            raw_data_path=raw_data_path,
             timestamp=timestamp,
             sample_metadata=sample_data.get("metadata", {})
         )

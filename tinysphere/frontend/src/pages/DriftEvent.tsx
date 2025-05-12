@@ -174,6 +174,10 @@ const ValidationDialog: React.FC<ValidationDialogProps> = ({
                       maxHeight: '200px',
                       objectFit: 'contain'
                     }}
+                    onError={(e) => {
+                      console.error(`Error loading drift image: ${sample.raw_data_path}`);
+                      e.currentTarget.style.display = 'none';
+                    }}
                   />
                 </Box>
               )}
@@ -778,8 +782,10 @@ const DriftEventPage: React.FC = () => {
                               size="small"
                               sx={{ ml: 1 }}
                               onClick={() => {
+                                // URLs from the drift-images API should use the proper bucket path structure
                                 const imageUrl = `/api/drift-images/image/${sample.raw_data_path}`;
                                 window.open(imageUrl, '_blank');
+                                console.log(`Opening drift image: ${imageUrl}`);
                               }}
                             >
                               <ImageIcon fontSize="small" />

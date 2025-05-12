@@ -234,12 +234,32 @@ def on_drift_detected(drift_info: Dict[str, Any]) -> None:
                 # This is the best case - use the extended client's method
                 # Create a FeatureSample-like object for the current state
                 from tinylcm.core.data_structures import FeatureSample
+
+                # For drift detection, make sure we have a consistent path to the image
+                # that follows the drift/device_id/drift_type/date/filename.jpg convention
+                rel_path = None
+                if image_path:
+                    # Get the relative path to use for consistent storage of drift images in the server
+                    # Check if the image_path already follows our convention
+                    if image_path.parent.parent.parent.name == "drift_images":
+                        # Already follows the convention, get relative path
+                        rel_path = str(image_path.relative_to(Path("./drift_images")))
+                    else:
+                        # Doesn't follow convention yet, so we'll use just the filename
+                        rel_path = image_path.name
+
+                    logger.info(f"Using drift image relative path: {rel_path}")
+
+                # Create the sample object with image path information
                 current_sample_obj = FeatureSample(
                     sample_id=f"drift_{int(time.time())}",
                     features=None,
                     prediction=None,
                     timestamp=time.time(),
-                    metadata={"confidence": 0.0}
+                    metadata={
+                        "confidence": 0.0,
+                        "raw_data_path": rel_path if rel_path else None
+                    }
                 )
 
                 # Use the specialized method

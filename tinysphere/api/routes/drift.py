@@ -412,14 +412,41 @@ async def create_drift_event_with_data(
     # Handle image file if provided
     if image_file:
         try:
-            # Save image file
+            # Save image file with organized structure
+            device_folder = device_id
+            drift_type_folder = drift_type.lower() if drift_type else "unknown"
+            date_folder = datetime.now().strftime("%Y%m%d")
+            filename = f"event_{event.event_id}_{image_file.filename}"
+
+            # Create structured path for the image (device_id/drift_type/date/filename)
+            image_path = f"{device_folder}/{drift_type_folder}/{date_folder}/{filename}"
+
+            # Full path including bucket name
+            full_path = f"drift/{image_path}"
+
+            # Read image data
             image_data = await image_file.read()
-            image_path = f"drift_images/{event.event_id}_{image_file.filename}"
 
             # Update the event with image info
             event.event_metadata = event.event_metadata or {}
-            event.event_metadata["image_path"] = image_path
+            event.event_metadata["image_path"] = full_path
+
+            # Create sample data with image info
+            sample_data = {
+                "drift_score": drift_score,
+                "raw_data_path": image_path,  # Store organized path
+                "metadata": {
+                    "filename": image_file.filename,
+                    "drift_type": drift_type,
+                    "event_id": event.event_id
+                }
+            }
+
+            # Add as drift sample to maintain association with the event
+            DriftService.add_drift_sample(db, event.event_id, sample_data)
+
             db.commit()
+            logger.info(f"Processed drift image: {full_path}")
         except Exception as e:
             logger.error(f"Error processing image file: {e}")
 
