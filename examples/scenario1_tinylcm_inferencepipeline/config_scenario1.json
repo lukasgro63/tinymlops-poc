@@ -35,19 +35,19 @@
       {
         "type": "PageHinkleyFeatureMonitor",
         "feature_index": 1,
-        "delta": 0.0001,
-        "lambda_param": 5,
-        "min_samples": 15,
-        "warmup_samples": 30
+        "delta": 0.00001,
+        "lambda_param": 1.5,
+        "min_samples": 10,
+        "warmup_samples": 20
       },
       {
         "type": "EWMAConfidenceMonitor",
-        "lambda_param": 0.4,
-        "threshold_factor": 1.2,
+        "lambda_param": 0.6,
+        "threshold_factor": 0.8,
         "drift_window": 1,
-        "min_confidence": 0.8,
-        "warm_up_samples": 10,
-        "reference_update_interval": 20
+        "min_confidence": 0.5,
+        "warm_up_samples": 5,
+        "reference_update_interval": 10
       }
     ],
     "operational_monitor": {
