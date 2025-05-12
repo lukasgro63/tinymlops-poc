@@ -351,10 +351,15 @@ class ExtendedSyncClient:
             
             # Add image to the package if provided
             if image_path and os.path.exists(image_path):
+                # Path to image is structured as device_id/drift_type/date/filename.jpg
+                # Extract the complete path structure to maintain it in the package
+                rel_path = os.path.relpath(image_path, "./drift_images") if image_path.startswith("./drift_images") else os.path.basename(image_path)
+
                 self.sync_interface.add_file_to_package(
                     package_id=package_id,
                     file_path=image_path,
-                    file_type="image"
+                    file_type="image",
+                    destination_path=rel_path  # Preserve the directory structure
                 )
             
             # Finalize the package

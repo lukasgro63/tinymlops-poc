@@ -11,8 +11,7 @@ MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
 MINIO_HOST=${MINIO_HOST:-minio:9000}
 
 # Required buckets for drift detection
-DRIFT_FEATURES_BUCKET="drift-features"
-DRIFT_SAMPLES_BUCKET="drift-samples"
+DRIFT_BUCKET="drift"
 DRIFT_MODELS_BUCKET="drift-models"
 
 # Required bucket for prediction images
@@ -24,8 +23,7 @@ mc alias set tinysphere http://${MINIO_HOST} ${MINIO_ROOT_USER} ${MINIO_ROOT_PAS
 
 # Create buckets for drift detection
 echo "Creating drift detection buckets..."
-mc mb --ignore-existing tinysphere/${DRIFT_FEATURES_BUCKET}
-mc mb --ignore-existing tinysphere/${DRIFT_SAMPLES_BUCKET}
+mc mb --ignore-existing tinysphere/${DRIFT_BUCKET}
 mc mb --ignore-existing tinysphere/${DRIFT_MODELS_BUCKET}
 
 # Create bucket for prediction images
@@ -34,16 +32,15 @@ mc mb --ignore-existing tinysphere/${PREDICTION_IMAGES_BUCKET}
 
 # Set policies to allow public read (useful for web UI)
 echo "Setting bucket policies..."
-mc policy set download tinysphere/${DRIFT_SAMPLES_BUCKET}
-mc policy set download tinysphere/${DRIFT_FEATURES_BUCKET}
+mc policy set download tinysphere/${DRIFT_BUCKET}
 mc policy set download tinysphere/${DRIFT_MODELS_BUCKET}
 mc policy set download tinysphere/${PREDICTION_IMAGES_BUCKET}
 
 # Create sample directory structure
 echo "Creating sample directory structure..."
-mc mb --ignore-existing tinysphere/${DRIFT_SAMPLES_BUCKET}/pending
-mc mb --ignore-existing tinysphere/${DRIFT_SAMPLES_BUCKET}/validated
-mc mb --ignore-existing tinysphere/${DRIFT_SAMPLES_BUCKET}/rejected
+mc mb --ignore-existing tinysphere/${DRIFT_BUCKET}/pending
+mc mb --ignore-existing tinysphere/${DRIFT_BUCKET}/validated
+mc mb --ignore-existing tinysphere/${DRIFT_BUCKET}/rejected
 
 echo "Drift detection buckets configured successfully!"
 echo "Prediction images bucket configured successfully!"

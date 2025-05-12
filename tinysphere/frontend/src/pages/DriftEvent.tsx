@@ -154,6 +154,29 @@ const ValidationDialog: React.FC<ValidationDialogProps> = ({
                   Confidence: {(sample.confidence * 100).toFixed(2)}%
                 </Typography>
               )}
+
+              {/* Preview image if available */}
+              {sample.raw_data_path && (
+                <Box sx={{
+                  mt: 2,
+                  display: 'flex',
+                  justifyContent: 'center',
+                  bgcolor: 'rgba(0,0,0,0.03)',
+                  p: 2,
+                  borderRadius: 1,
+                  mb: 2
+                }}>
+                  <img
+                    src={`/api/drift-images/image/${sample.raw_data_path}`}
+                    alt="Sample raw data"
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '200px',
+                      objectFit: 'contain'
+                    }}
+                  />
+                </Box>
+              )}
             </Box>
 
             <Box>
@@ -751,7 +774,14 @@ const DriftEventPage: React.FC = () => {
                       <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
                         {sample.raw_data_path && (
                           <Tooltip title="View Raw Data">
-                            <IconButton size="small" sx={{ ml: 1 }}>
+                            <IconButton
+                              size="small"
+                              sx={{ ml: 1 }}
+                              onClick={() => {
+                                const imageUrl = `/api/drift-images/image/${sample.raw_data_path}`;
+                                window.open(imageUrl, '_blank');
+                              }}
+                            >
                               <ImageIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>

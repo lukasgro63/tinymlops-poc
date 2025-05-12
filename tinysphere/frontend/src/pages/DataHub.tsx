@@ -32,12 +32,29 @@ import {
   Close as CloseIcon,
   DownloadForOffline as DownloadIcon,
   Image as GalleryIcon,
-  List as ListIcon
+  List as ListIcon,
+  WarningAmber
 } from '@mui/icons-material';
 import { format, parseISO } from 'date-fns';
 
-import { getDevices, getPredictionImageDevices, getPredictionTypes, getPredictionDates, getPredictionImages } from '../services/api';
-import { Device, PredictionImage, PredictionImagesResponse } from '../types/api';
+import {
+  getDevices,
+  getPredictionImageDevices,
+  getPredictionTypes,
+  getPredictionDates,
+  getPredictionImages,
+  getDriftImageDevices,
+  getDriftTypes,
+  getDriftDates,
+  getDriftImages
+} from '../services/api';
+import {
+  Device,
+  PredictionImage,
+  PredictionImagesResponse,
+  DriftImage,
+  DriftImagesResponse
+} from '../types/api';
 import ErrorDisplay from '../components/common/ErrorDisplay';
 
 // Tab panel component for the content sections
@@ -81,12 +98,24 @@ const DataHub: React.FC = () => {
   const [totalImages, setTotalImages] = useState(0);
   const [loadingImages, setLoadingImages] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
+  // State for drift images
+  const [driftImages, setDriftImages] = useState<DriftImage[]>([]);
+  const [totalDriftImages, setTotalDriftImages] = useState(0);
+  const [loadingDriftImages, setLoadingDriftImages] = useState(false);
+  const [driftError, setDriftError] = useState<string | null>(null);
+
   // State for image filters
   const [predictionTypes, setPredictionTypes] = useState<string[]>([]);
   const [dates, setDates] = useState<string[]>([]);
   const [selectedType, setSelectedType] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>('');
+
+  // State for drift image filters
+  const [driftTypes, setDriftTypes] = useState<string[]>([]);
+  const [driftDates, setDriftDates] = useState<string[]>([]);
+  const [selectedDriftType, setSelectedDriftType] = useState<string>('');
+  const [selectedDriftDate, setSelectedDriftDate] = useState<string>('');
   
   // Pagination
   const [page, setPage] = useState(0);
@@ -153,8 +182,39 @@ const DataHub: React.FC = () => {
     
     loadPredictionTypes();
   }, [selectedDeviceId]);
+
+  // Load drift types when device is selected
+  useEffect(() => {
+    const loadDriftTypes = async () => {
+      if (!selectedDeviceId || selectedDeviceId === 'all') {
+        setDriftTypes([]);
+        setSelectedDriftType('');
+        return;
+      }
+      
+      try {
+        const types = await getDriftTypes(selectedDeviceId);
+        setDriftTypes(types);
+        
+        // Auto-select first type if available
+        if (types.length > 0) {
+          setSelectedDriftType(types[0]);
+        } else {
+          setSelectedDriftType('');
+        }
+      } catch (err) {
+        console.error('Error loading drift types:', err);
+        setDriftError('Failed to load drift types');
+      }
+    };
+    
+    // Only load drift types when the drift tab is active
+    if (tabValue === 1) {
+      loadDriftTypes();
+    }
+  }, [selectedDeviceId, tabValue]);
   
-  // Load dates when prediction type is selected
+  // Load prediction dates when prediction type is selected
   useEffect(() => {
     const loadDates = async () => {
       if (!selectedDeviceId || selectedDeviceId === 'all' || !selectedType) {
@@ -181,6 +241,37 @@ const DataHub: React.FC = () => {
     
     loadDates();
   }, [selectedDeviceId, selectedType]);
+
+  // Load drift dates when drift type is selected
+  useEffect(() => {
+    const loadDriftDates = async () => {
+      if (!selectedDeviceId || selectedDeviceId === 'all' || !selectedDriftType) {
+        setDriftDates([]);
+        setSelectedDriftDate('');
+        return;
+      }
+      
+      try {
+        const datesList = await getDriftDates(selectedDeviceId, selectedDriftType);
+        setDriftDates(datesList);
+        
+        // Auto-select first date if available
+        if (datesList.length > 0) {
+          setSelectedDriftDate(datesList[0]);
+        } else {
+          setSelectedDriftDate('');
+        }
+      } catch (err) {
+        console.error('Error loading drift dates:', err);
+        setDriftError('Failed to load drift dates');
+      }
+    };
+    
+    // Only load drift dates when the drift tab is active
+    if (tabValue === 1) {
+      loadDriftDates();
+    }
+  }, [selectedDeviceId, selectedDriftType, tabValue]);
   
   // Load images based on filters and pagination
   useEffect(() => {
@@ -242,10 +333,79 @@ const DataHub: React.FC = () => {
     
     loadImages();
   }, [selectedDeviceId, selectedType, selectedDate, page, rowsPerPage, tabValue]);
+
+  // Load drift images based on filters and pagination
+  useEffect(() => {
+    const loadDriftImages = async () => {
+      // Only load drift images on the Drift Events tab
+      if (tabValue !== 1) return;
+
+      setLoadingDriftImages(true);
+      setDriftError(null);
+      
+      try {
+        if (selectedDeviceId && selectedDeviceId !== 'all') {
+          // For a specific device
+          const response = await getDriftImages(
+            selectedDeviceId,
+            selectedDriftType || undefined,
+            selectedDriftDate || undefined,
+            rowsPerPage,
+            page * rowsPerPage
+          );
+          
+          setDriftImages(response.images);
+          setTotalDriftImages(response.total);
+        } else {
+          // For "All Devices" option - we need to fetch for each device with images
+          const deviceIdsWithDriftImages = await getDriftImageDevices();
+          let allDriftImages: DriftImage[] = [];
+          
+          // This is a simplified approach - in a real implementation, you might
+          // want to add pagination and more sophisticated fetching
+          for (const deviceId of deviceIdsWithDriftImages) {
+            const response = await getDriftImages(
+              deviceId,
+              selectedDriftType || undefined,
+              selectedDriftDate || undefined,
+              rowsPerPage,
+              0 // For simplicity, just get the first page from each device
+            );
+            
+            allDriftImages = [...allDriftImages, ...response.images];
+          }
+          
+          // Simple client-side pagination
+          const startIndex = page * rowsPerPage;
+          const endIndex = startIndex + rowsPerPage;
+          
+          setTotalDriftImages(allDriftImages.length);
+          setDriftImages(allDriftImages.slice(startIndex, endIndex));
+        }
+      } catch (err) {
+        console.error('Error loading drift images:', err);
+        setDriftError('Failed to load drift images');
+        setDriftImages([]);
+        setTotalDriftImages(0);
+      } finally {
+        setLoadingDriftImages(false);
+      }
+    };
+    
+    loadDriftImages();
+  }, [selectedDeviceId, selectedDriftType, selectedDriftDate, page, rowsPerPage, tabValue]);
   
   // Handle tab change
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
+  };
+
+  // Helper to convert DriftImage to PredictionImage for compatibility
+  const convertDriftToPredictionImage = (image: DriftImage): PredictionImage => {
+    return {
+      ...image,
+      prediction_type: image.drift_type
+    } as PredictionImage;
   };
   
   // Handle device selection
@@ -269,6 +429,21 @@ const DataHub: React.FC = () => {
   const handleDateChange = (event: SelectChangeEvent<string>) => {
     const date = event.target.value;
     setSelectedDate(date);
+    setPage(0);
+  };
+
+  // Handle drift type selection
+  const handleDriftTypeChange = (event: SelectChangeEvent<string>) => {
+    const type = event.target.value;
+    setSelectedDriftType(type);
+    setSelectedDriftDate('');
+    setPage(0);
+  };
+  
+  // Handle drift date selection
+  const handleDriftDateChange = (event: SelectChangeEvent<string>) => {
+    const date = event.target.value;
+    setSelectedDriftDate(date);
     setPage(0);
   };
   
@@ -455,7 +630,136 @@ const DataHub: React.FC = () => {
     );
   };
   
-  // Render image filters
+  // Render drift images gallery
+  const renderDriftImageGallery = () => {
+    if (loadingDriftImages) {
+      return (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+          <CircularProgress />
+        </Box>
+      );
+    }
+    
+    if (driftError) {
+      return (
+        <ErrorDisplay 
+          error={driftError}
+          loading={false}
+          onRetry={() => setLoadingDriftImages(true)}
+          height="50vh"
+        />
+      );
+    }
+    
+    if (driftImages.length === 0) {
+      return (
+        <Box sx={{ textAlign: 'center', p: 4 }}>
+          <Typography variant="body1" color="text.secondary">
+            No drift images found for the selected filters.
+          </Typography>
+          {!selectedDeviceId && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              Please select a device to view available drift images.
+            </Typography>
+          )}
+        </Box>
+      );
+    }
+    
+    return (
+      <Box>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+          {driftImages.map((image) => {
+            // Convert drift image to prediction image for compatibility
+            const compatImage = convertDriftToPredictionImage(image);
+            
+            return (
+              <Box 
+                key={image.key}
+                sx={{ 
+                  flex: '1 1 calc(25% - 16px)',
+                  minWidth: '250px',
+                  maxWidth: 'calc(25% - 16px)'
+                }}
+              >
+                <Card 
+                  sx={{ 
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    '&:hover': { 
+                      transform: 'scale(1.02)',
+                      boxShadow: 3
+                    }
+                  }}
+                  onClick={() => handleImageClick(compatImage)}
+                >
+                  <CardMedia
+                    component="img"
+                    sx={{ 
+                      height: 180,
+                      objectFit: 'cover',
+                      bgcolor: 'rgba(0,0,0,0.05)'
+                    }}
+                    image={image.url}
+                    alt={image.filename}
+                  />
+                  <CardContent sx={{ pb: 1, pt: 1 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Typography variant="body2" noWrap title={image.filename}>
+                        {image.filename}
+                      </Typography>
+                      <Chip 
+                        label={image.drift_type} 
+                        size="small" 
+                        color="warning"
+                        variant="outlined"
+                      />
+                    </Box>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 0.5 }}>
+                      <Typography variant="caption" color="text.secondary">
+                        {formatDateString(image.date)}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {image.device_id}
+                      </Typography>
+                    </Box>
+                    {image.event_id && (
+                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 0.5 }}>
+                        <Button
+                          size="small"
+                          color="primary"
+                          component="a"
+                          href={`/drift/${image.event_id}`}
+                          sx={{ fontSize: '0.7rem', py: 0, px: 1 }}
+                        >
+                          View Event
+                        </Button>
+                      </Box>
+                    )}
+                  </CardContent>
+                </Card>
+              </Box>
+            );
+          })}
+        </Box>
+        
+        {/* Pagination */}
+        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
+          <TablePagination
+            component="div"
+            count={totalDriftImages}
+            page={page}
+            onPageChange={handleChangePage}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={handleChangeRowsPerPage}
+            rowsPerPageOptions={[12, 16, 24, 48]}
+          />
+        </Box>
+      </Box>
+    );
+  };
+  
+  // Render prediction image filters
   const renderImageFilters = () => (
     <Box sx={{ mb: 2 }}>
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
@@ -498,6 +802,58 @@ const DataHub: React.FC = () => {
             onClick={() => {
               setSelectedType('');
               setSelectedDate('');
+            }}
+          >
+            Clear Filters
+          </Button>
+        </Box>
+      </Box>
+    </Box>
+  );
+
+  // Render drift image filters
+  const renderDriftImageFilters = () => (
+    <Box sx={{ mb: 2 }}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+        <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
+          <FormControl fullWidth size="small" disabled={!selectedDeviceId || driftTypes.length === 0}>
+            <InputLabel id="drift-type-select-label">Drift Type</InputLabel>
+            <Select
+              labelId="drift-type-select-label"
+              value={selectedDriftType}
+              label="Drift Type"
+              onChange={handleDriftTypeChange}
+            >
+              {driftTypes.map(type => (
+                <MenuItem key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Box>
+        
+        <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
+          <FormControl fullWidth size="small" disabled={!selectedDriftType || driftDates.length === 0}>
+            <InputLabel id="drift-date-select-label">Date</InputLabel>
+            <Select
+              labelId="drift-date-select-label"
+              value={selectedDriftDate}
+              label="Date"
+              onChange={handleDriftDateChange}
+            >
+              {driftDates.map(date => (
+                <MenuItem key={date} value={date}>{formatDateString(date)}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Box>
+        
+        <Box sx={{ flex: '1 1 200px', display: 'flex', alignItems: 'center' }}>
+          <Button 
+            variant="outlined" 
+            disabled={!selectedDriftType && !selectedDriftDate}
+            onClick={() => {
+              setSelectedDriftType('');
+              setSelectedDriftDate('');
             }}
           >
             Clear Filters
@@ -566,6 +922,12 @@ const DataHub: React.FC = () => {
               disabled={!selectedDeviceId}
             />
             <Tab
+              icon={<WarningAmber sx={{ color: 'orange' }} />}
+              iconPosition="start"
+              label="Drift Events"
+              disabled={!selectedDeviceId}
+            />
+            <Tab
               icon={<ListIcon />}
               iconPosition="start"
               label="Logs"
@@ -585,6 +947,14 @@ const DataHub: React.FC = () => {
       </TabPanel>
 
       <TabPanel value={tabValue} index={1}>
+        {/* Filters for drift images */}
+        {selectedDeviceId && renderDriftImageFilters()}
+
+        {/* Drift images gallery */}
+        {renderDriftImageGallery()}
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={2}>
         {renderDataPlaceholder("Device Logs")}
       </TabPanel>
       
