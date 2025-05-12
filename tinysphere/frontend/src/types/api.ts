@@ -258,3 +258,24 @@ export interface TopDevice {
   name: string;
   packages: number;
 }
+
+// Prediction Images Types
+export interface PredictionImage {
+  key: string;
+  device_id: string;
+  prediction_type: string;
+  date: string;
+  filename: string;
+  size: number;
+  last_modified: string;
+  url: string;
+}
+
+export interface PredictionImagesResponse {
+  total: number;
+  images: PredictionImage[];
+}
+
+export interface ImageUrlResponse {
+  url: string;
+}

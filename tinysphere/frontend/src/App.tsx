@@ -9,6 +9,7 @@ import Devices from './pages/Devices';
 import Drift from './pages/Drift';
 import DriftEvent from './pages/DriftEvent';
 import Models from './pages/Models';
+import DataHub from './pages/DataHub';
 import theme from './theme';
 
 // Platzhalter-Komponenten für neue Seiten
@@ -103,6 +104,7 @@ function App() {
           <Route path="/models" element={<MainLayout title="Models"><Models /></MainLayout>} />
           <Route path="/drift" element={<MainLayout title="Drift Management"><Drift /></MainLayout>} />
           <Route path="/drift/:eventId" element={<MainLayout title="Drift Event Details"><DriftEvent /></MainLayout>} />
+          <Route path="/data-hub" element={<MainLayout title="Data Hub"><DataHub /></MainLayout>} />
           
           {/* Anwendungen */}
           <Route path="/mlflow" element={
