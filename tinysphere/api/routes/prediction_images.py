@@ -1,10 +1,13 @@
 # api/routes/prediction_images.py
 from typing import List, Optional, Dict, Any
+import logging
+import fastapi
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from tinysphere.api.dependencies.db import get_db
 from tinysphere.api.services.prediction_images_service import PredictionImagesService
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 prediction_images_service = PredictionImagesService()
 
@@ -52,7 +55,7 @@ def list_images(
 @router.get("/url/{image_key:path}", response_model=Dict[str, str])
 def get_image_url(image_key: str):
     """
-    Generate a pre-signed URL for accessing a specific image.
+    Generate a URL for accessing a specific image through the API.
     
     Args:
         image_key: Full S3 key of the image (device_id/prediction_type/date/filename)
@@ -61,4 +64,46 @@ def get_image_url(image_key: str):
     if not url:
         raise HTTPException(status_code=404, detail="Image not found or error generating URL")
     
+    # Return the API proxy URL
     return {"url": url}
+
+@router.get("/image/{image_key:path}", response_class=fastapi.responses.StreamingResponse)
+async def get_image(image_key: str, download: bool = False):
+    """
+    Stream an image directly from MinIO through the API.
+    
+    Args:
+        image_key: Full S3 key of the image (device_id/prediction_type/date/filename)
+        download: Set to true to download the file instead of viewing it
+    """
+    try:
+        # Get the image from MinIO
+        response = prediction_images_service.s3_client.get_object(
+            Bucket=prediction_images_service.bucket_name,
+            Key=image_key
+        )
+        
+        # Get filename from the image key
+        filename = image_key.split("/")[-1]
+        
+        # Determine content type based on file extension
+        content_type = "image/jpeg"  # Default
+        if image_key.lower().endswith(".png"):
+            content_type = "image/png"
+        elif image_key.lower().endswith(".gif"):
+            content_type = "image/gif"
+        
+        # Set content disposition based on whether we're downloading or viewing
+        content_disposition = f'attachment; filename="{filename}"' if download else f'inline; filename="{filename}"'
+        
+        # Stream the image back
+        return fastapi.responses.StreamingResponse(
+            response["Body"],
+            media_type=content_type,
+            headers={
+                "Content-Disposition": content_disposition
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error retrieving image {image_key}: {e}")
+        raise HTTPException(status_code=404, detail="Image not found")

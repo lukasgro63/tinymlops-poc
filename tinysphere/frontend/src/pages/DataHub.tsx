@@ -296,9 +296,13 @@ const DataHub: React.FC = () => {
   };
   
   // Download image
-  const handleDownload = (url: string, filename: string) => {
+  const handleDownload = (imageKey: string, filename: string) => {
+    // Create a download URL by adding the download parameter
+    const downloadUrl = `/api/prediction-images/image/${imageKey}?download=true`;
+
+    // Create a link and click it to start the download
     const link = document.createElement('a');
-    link.href = url;
+    link.href = downloadUrl;
     link.download = filename;
     document.body.appendChild(link);
     link.click();
@@ -619,7 +623,7 @@ const DataHub: React.FC = () => {
               <Typography variant="h6">{selectedImage.filename}</Typography>
               <Box>
                 <Tooltip title="Download">
-                  <IconButton onClick={() => handleDownload(selectedImage.url, selectedImage.filename)}>
+                  <IconButton onClick={() => handleDownload(selectedImage.key, selectedImage.filename)}>
                     <DownloadIcon />
                   </IconButton>
                 </Tooltip>

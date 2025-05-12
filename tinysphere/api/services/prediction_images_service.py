@@ -1,6 +1,7 @@
 # api/services/prediction_images_service.py
 import os
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 
@@ -14,7 +15,9 @@ class PredictionImagesService:
         """Initialize S3 client for MinIO access."""
         self.s3_client = self._init_s3_client()
         self.bucket_name = "prediction-images"
-    
+        # The endpoint URL that will be used for presigned URLs - accessible to browsers
+        self.public_endpoint = "http://localhost:9000"
+
     def _init_s3_client(self):
         """Initialize the S3 client for MinIO."""
         return boto3.client(
@@ -157,15 +160,8 @@ class PredictionImagesService:
                     img_date = path_parts[2]
                     img_filename = path_parts[3]
                     
-                    # Generate pre-signed URL for temporary access
-                    url = self.s3_client.generate_presigned_url(
-                        'get_object',
-                        Params={
-                            'Bucket': self.bucket_name,
-                            'Key': obj['Key']
-                        },
-                        ExpiresIn=3600  # URL valid for 1 hour
-                    )
+                    # Use our API proxy URL instead of direct MinIO access
+                    url = f"/api/prediction-images/image/{obj['Key']}"
                     
                     # Add to results
                     images.append({
@@ -202,15 +198,8 @@ class PredictionImagesService:
             Pre-signed URL for the image or None if error
         """
         try:
-            # Generate pre-signed URL for temporary access
-            url = self.s3_client.generate_presigned_url(
-                'get_object',
-                Params={
-                    'Bucket': self.bucket_name,
-                    'Key': image_key
-                },
-                ExpiresIn=3600  # URL valid for 1 hour
-            )
+            # Use our API proxy URL instead of direct MinIO access
+            url = f"/api/prediction-images/image/{image_key}"
             
             return url
         except Exception as e:
