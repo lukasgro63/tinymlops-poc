@@ -12,7 +12,10 @@ import os
 import tempfile  # Add this import
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+import shutil
+from datetime import datetime
 
 from tinylcm.client.sync_client import SyncClient as TinyLCMSyncClient
 from tinylcm.client.sync_interface import SyncInterface, SyncPackage
@@ -27,7 +30,7 @@ config = None
 
 class ExtendedSyncClient:
     """Extended SyncClient for the TinyLCM application."""
-    
+
     def __init__(
         self,
         server_url: str,
@@ -39,7 +42,7 @@ class ExtendedSyncClient:
         auto_register: bool = True
     ):
         """Initialize the extended SyncClient.
-        
+
         Args:
             server_url: URL of the TinySphere server
             device_id: Unique device identifier
@@ -76,7 +79,11 @@ class ExtendedSyncClient:
         self.sync_dir = sync_dir
         self.last_sync_time = 0
         self._running = False
-        
+
+        # Image transfer attributes (disabled by default)
+        self.enable_prediction_images = False
+        self.pending_prediction_images = []
+
         logger.info(f"Extended SyncClient initialized for device {device_id}")
     
     def check_connection(self) -> bool:
@@ -242,13 +249,26 @@ class ExtendedSyncClient:
             return False
     
     def sync_all_pending_packages(self) -> List[Dict[str, Any]]:
-        """Synchronize all pending packages.
-        
+        """Synchronize all pending packages and prediction images.
+
         Returns:
             List of results for each package
         """
         try:
-            results = self.client.sync_all_pending_packages()
+            results = []
+
+            # First sync prediction images if enabled
+            if self.enable_prediction_images and self.pending_prediction_images:
+                logger.info(f"Syncing {len(self.pending_prediction_images)} pending prediction images")
+                img_results = self.sync_prediction_images()
+                if img_results:
+                    results.extend(img_results)
+
+            # Then sync all other pending packages
+            pkg_results = self.client.sync_all_pending_packages()
+            if pkg_results:
+                results.extend(pkg_results)
+
             self.last_sync_time = time.time()
             return results
         except Exception as e:
@@ -398,6 +418,227 @@ class ExtendedSyncClient:
             logger.error(f"Failed to create and send metrics package: {e}")
             return False
     
+    def add_prediction_image(self, image_path: str, prediction: str, confidence: float) -> bool:
+        """Add a prediction image to the queue for synchronization.
+
+        Args:
+            image_path: Path to the image file
+            prediction: Prediction label (e.g., "lego", "stone")
+            confidence: Confidence score for the prediction (0-1)
+
+        Returns:
+            True if the image was added to the queue, False otherwise
+        """
+        if not self.enable_prediction_images:
+            logger.debug(f"Prediction image transfer is disabled, not adding image {image_path}")
+            return False
+
+        try:
+            if not os.path.exists(image_path):
+                logger.warning(f"Image file not found: {image_path}")
+                return False
+
+            # Add to pending images queue
+            self.pending_prediction_images.append({
+                "path": image_path,
+                "prediction": prediction,
+                "confidence": confidence,
+                "timestamp": time.time()
+            })
+
+            logger.debug(f"Added prediction image to sync queue: {image_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to add prediction image: {str(e)}")
+            return False
+
+    def sync_prediction_images(self) -> List[Dict[str, Any]]:
+        """Synchronize all pending prediction images.
+
+        Returns:
+            List of results for each image batch
+        """
+        if not self.enable_prediction_images or not self.pending_prediction_images:
+            return []
+
+        try:
+            results = []
+            max_images_per_batch = 10  # Limit number of images per batch
+
+            # Group images by prediction class
+            prediction_groups = {}
+            for img in self.pending_prediction_images:
+                pred = img["prediction"]
+                if pred not in prediction_groups:
+                    prediction_groups[pred] = []
+                prediction_groups[pred].append(img)
+
+            # Process each prediction group
+            for prediction, images in prediction_groups.items():
+                # Process images in batches
+                for i in range(0, len(images), max_images_per_batch):
+                    batch = images[i:i+max_images_per_batch]
+                    result = self._create_and_send_prediction_images_package(prediction, batch)
+                    results.append(result)
+
+            # Identify successfully processed images
+            processed_images = []
+            for result in results:
+                if result.get("status") == "success":
+                    processed_images.extend(result.get("processed_images", []))
+
+            # Remove processed images from the pending list
+            self.pending_prediction_images = [img for img in self.pending_prediction_images
+                                          if img["path"] not in processed_images]
+
+            # Log results
+            if processed_images:
+                logger.info(f"Synchronized {len(processed_images)} prediction images")
+            if self.pending_prediction_images:
+                logger.warning(f"{len(self.pending_prediction_images)} prediction images still pending")
+
+            return results
+        except Exception as e:
+            logger.error(f"Failed to sync prediction images: {str(e)}")
+            return []
+
+    def _create_and_send_prediction_images_package(self, prediction: str, images: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Create and send a package containing prediction images.
+
+        Args:
+            prediction: Prediction class
+            images: List of images with metadata
+
+        Returns:
+            Result dictionary
+        """
+        if not images:
+            return {"status": "error", "message": "No images provided"}
+
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            description = f"Prediction '{prediction}' images from device {self.device_id}"
+            package_id = self.sync_interface.create_package(
+                device_id=self.device_id,
+                package_type="prediction_images",
+                description=description
+            )
+
+            # Create metadata
+            metadata = {
+                "device_id": self.device_id,
+                "timestamp": time.time(),
+                "prediction": prediction,
+                "image_count": len(images),
+                "confidence_avg": sum(img["confidence"] for img in images) / len(images) if images else 0,
+            }
+
+            # Write metadata to a temp file
+            temp_dir = tempfile.mkdtemp()
+            metadata_file_path = os.path.join(temp_dir, "prediction_images.json")
+
+            with open(metadata_file_path, 'w') as metadata_file:
+                json.dump(metadata, metadata_file)
+
+            # Add the metadata file to the package
+            self.sync_interface.add_file_to_package(
+                package_id=package_id,
+                file_path=metadata_file_path,
+                file_type="metadata"
+            )
+
+            # Add each image with a proper name
+            processed_images = []
+            for idx, img in enumerate(images):
+                image_path = img["path"]
+                if os.path.exists(image_path):
+                    # Get image extension
+                    _, ext = os.path.splitext(image_path)
+
+                    # Create a meaningful image name
+                    conf_str = f"{img['confidence']:.2f}".replace(".", "")
+                    ts_str = datetime.fromtimestamp(img["timestamp"]).strftime("%H%M%S")
+                    new_filename = f"{prediction}_{ts_str}_{conf_str}_{idx}{ext}"
+
+                    # Create a temporary copy with the new name
+                    temp_img_path = os.path.join(temp_dir, new_filename)
+                    shutil.copy(image_path, temp_img_path)
+
+                    # Add to package
+                    success = self.sync_interface.add_file_to_package(
+                        package_id=package_id,
+                        file_path=temp_img_path,
+                        file_type="image"
+                    )
+
+                    if success:
+                        processed_images.append(img["path"])
+                    else:
+                        logger.warning(f"Failed to add image {image_path} to package")
+
+            # Clean up temp directory
+            try:
+                shutil.rmtree(temp_dir)
+            except Exception as e:
+                logger.warning(f"Failed to clean up temp directory: {e}")
+
+            # Finalize package
+            self.sync_interface.finalize_package(package_id)
+
+            # Send the package
+            result = self.send_package(package_id)
+            if result:
+                logger.info(f"Successfully sent {len(processed_images)} prediction images to server")
+                # Return list of image paths that were successfully processed
+                return {
+                    "status": "success",
+                    "message": f"Successfully sent {len(processed_images)} prediction images",
+                    "image_count": len(processed_images),
+                    "prediction": prediction,
+                    "processed_images": processed_images,
+                    "package_type": "prediction_images",
+                    "package_id": package_id
+                }
+            else:
+                logger.error(f"Failed to send prediction images package to server")
+                return {
+                    "status": "error",
+                    "message": "Failed to send prediction images package",
+                    "prediction": prediction
+                }
+
+        except Exception as e:
+            logger.error(f"Failed to create prediction images package: {str(e)}")
+            return {"status": "error", "message": str(e)}
+
+    def delete_transferred_images(self, image_paths: List[str]) -> Tuple[int, int]:
+        """Delete images that have been successfully transferred to the server.
+
+        Args:
+            image_paths: List of image file paths to delete
+
+        Returns:
+            Tuple of (success_count, fail_count)
+        """
+        success_count = 0
+        fail_count = 0
+
+        for path in image_paths:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+                    success_count += 1
+                    logger.debug(f"Deleted transferred image: {path}")
+                else:
+                    logger.warning(f"Image file not found: {path}")
+                    fail_count += 1
+            except Exception as e:
+                logger.error(f"Failed to delete image {path}: {e}")
+                fail_count += 1
+
+        logger.info(f"Deleted {success_count} transferred images, {fail_count} failed")
+        return success_count, fail_count
+
     def close(self):
         """Close the connection and clean up resources."""
         try:

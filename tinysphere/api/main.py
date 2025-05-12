@@ -83,3 +83,8 @@ app.include_router(notifications_router, prefix="/api/notifications", tags=["not
 from tinysphere.api.routes.drift import router as drift_router
 
 app.include_router(drift_router, prefix="/api/drift", tags=["drift"])
+
+# Add prediction images router
+from tinysphere.api.routes.prediction_images import router as prediction_images_router
+
+app.include_router(prediction_images_router, prefix="/api/prediction-images", tags=["prediction-images"])

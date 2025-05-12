@@ -15,7 +15,8 @@ from tinysphere.importer.package_processor import PackageImporter
 from tinysphere.importer.transformers import (DriftTransformer,
                                               LogsTransformer,
                                               MetricsTransformer,
-                                              ModelTransformer)
+                                              ModelTransformer,
+                                              PredictionImagesTransformer)
 from tinysphere.importer.transformers.base import DataTransformer
 
 logging.basicConfig(level=logging.INFO)
@@ -29,7 +30,8 @@ class MLflowService:
             ModelTransformer(),
             MetricsTransformer(),
             DriftTransformer(),
-            LogsTransformer()
+            LogsTransformer(),
+            PredictionImagesTransformer()
         ]
         
         # Try to initialize MLflow

@@ -62,10 +62,13 @@
       "sync_interval_seconds": 30,
       "max_retries": 3,
       "auto_register": true,
-      "sync_dir": "./sync_data"
+      "sync_dir": "./sync_data",
+      "enable_prediction_images": true,
+      "cleanup_transferred_images": true
     },
     "features": {
-      "save_drift_images": true
+      "save_drift_images": true,
+      "save_prediction_images": true
     },
     "state_manager": {
       "state_dir": "./state"

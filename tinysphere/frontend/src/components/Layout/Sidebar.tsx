@@ -10,6 +10,7 @@ import MenuBookIcon from '@mui/icons-material/MenuBook';
 import ModelTrainingIcon from '@mui/icons-material/ModelTraining';
 import PsychologyIcon from '@mui/icons-material/Psychology';
 import TimelineIcon from '@mui/icons-material/Timeline';
+import StorageIcon from '@mui/icons-material/Storage';
 import {
   Box,
   Divider,
@@ -56,7 +57,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, variant }) => {
     { text: 'Devices', icon: <MemoryIcon />, path: '/devices', external: false },
     { text: 'Models', icon: <PsychologyIcon />, path: '/models', external: false },
     { text: 'Drift', icon: <TimelineIcon />, path: '/drift', external: false },
-    
+    { text: 'Data Hub', icon: <StorageIcon />, path: '/data-hub', external: false },
   ];
   
   // Section 2: Applications

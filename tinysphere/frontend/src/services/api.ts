@@ -20,7 +20,10 @@ import {
   PackageTimelineData,
   PlatformDistribution,
   SystemStatus,
-  TopDevice
+  TopDevice,
+  PredictionImage,
+  PredictionImagesResponse,
+  ImageUrlResponse
 } from '../types/api';
 
 const API_BASE_URL = '/api';
@@ -186,6 +189,50 @@ export const getDeviceConnectivityTrends = async (days: number = 7): Promise<Dev
 // Get top devices by package count
 export const getTopDevices = async (limit: number = 5): Promise<TopDevice[]> => {
   const response = await axios.get<TopDevice[]>(`${API_BASE_URL}/devices/top?limit=${limit}`);
+  return response.data;
+};
+
+// Prediction Images API methods
+export const getPredictionImageDevices = async (): Promise<string[]> => {
+  const response = await axios.get<string[]>(`${API_BASE_URL}/prediction-images/devices`);
+  return response.data;
+};
+
+export const getPredictionTypes = async (deviceId: string): Promise<string[]> => {
+  const response = await axios.get<string[]>(
+    `${API_BASE_URL}/prediction-images/devices/${deviceId}/types`
+  );
+  return response.data;
+};
+
+export const getPredictionDates = async (deviceId: string, predictionType: string): Promise<string[]> => {
+  const response = await axios.get<string[]>(
+    `${API_BASE_URL}/prediction-images/devices/${deviceId}/types/${predictionType}/dates`
+  );
+  return response.data;
+};
+
+export const getPredictionImages = async (
+  deviceId?: string,
+  predictionType?: string,
+  date?: string,
+  limit: number = 100,
+  offset: number = 0
+): Promise<PredictionImagesResponse> => {
+  let url = `${API_BASE_URL}/prediction-images/list?limit=${limit}&offset=${offset}`;
+
+  if (deviceId) url += `&device_id=${deviceId}`;
+  if (predictionType) url += `&prediction_type=${predictionType}`;
+  if (date) url += `&date=${date}`;
+
+  const response = await axios.get<PredictionImagesResponse>(url);
+  return response.data;
+};
+
+export const getPredictionImageUrl = async (imageKey: string): Promise<ImageUrlResponse> => {
+  const response = await axios.get<ImageUrlResponse>(
+    `${API_BASE_URL}/prediction-images/url/${encodeURIComponent(imageKey)}`
+  );
   return response.data;
 };
 

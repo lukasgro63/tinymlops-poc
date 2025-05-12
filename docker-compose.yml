@@ -89,9 +89,11 @@ services:
       /usr/bin/mc mb minio/drift;
       /usr/bin/mc mb minio/drift-samples;
       /usr/bin/mc mb minio/drift-features;
+      /usr/bin/mc mb minio/prediction-images;
       /usr/bin/mc policy set download minio/drift;
       /usr/bin/mc policy set download minio/drift-samples;
       /usr/bin/mc policy set download minio/drift-features;
+      /usr/bin/mc policy set download minio/prediction-images;
       exit 0;
       "
     networks:
