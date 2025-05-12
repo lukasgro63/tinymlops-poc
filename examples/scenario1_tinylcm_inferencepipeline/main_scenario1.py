@@ -833,11 +833,11 @@ def main():
         
         # Warm-up: Wait for camera to initialize and provide frames
         logger.info("Warming up camera...")
-        for _ in range(10):
+        for _ in range(20):  # Increase warm-up frames
             frame = camera.get_frame()
             if frame is not None:
                 break
-            time.sleep(0.1)
+            time.sleep(0.2)  # Longer delay between warm-up attempts
         
         if frame is None:
             logger.error("Failed to get frames from camera. Exiting.")
@@ -850,7 +850,7 @@ def main():
         inference_interval = config["application"]["inference_interval_ms"] / 1000.0
         
         last_drift_check_time = time.time()
-        drift_check_interval = 1.0  # Check for drift every 1 second
+        drift_check_interval = 0.1  # Check for drift very frequently (now used for logging only)
         
         last_sync_time = time.time()
         sync_interval = sync_config["sync_interval_seconds"]
@@ -977,11 +977,13 @@ def main():
                 fps = frame_count / elapsed
                 logger.info(f"Processed {frame_count} frames. Current FPS: {fps:.2f}")
             
-            # Periodically check for drift
+            # Periodically check for drift - ensure we do this on every frame for more sensitivity
             current_time = time.time()
-            if current_time - last_drift_check_time >= drift_check_interval:
-                pipeline.check_autonomous_drifts()
-                last_drift_check_time = current_time
+            # Force check for drift with every frame for testing
+            drift_results = pipeline.check_autonomous_drifts()
+            if drift_results:
+                logger.info(f"Autonomous drift check results: {drift_results}")
+            last_drift_check_time = current_time
             
             # Periodically sync with TinySphere
             if current_time - last_sync_time >= sync_interval:
