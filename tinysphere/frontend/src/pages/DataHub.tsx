@@ -25,17 +25,14 @@ import {
   FormHelperText,
   Button
 } from '@mui/material';
-import { 
+import {
   Storage as DataHubIcon,
-  CameraAlt as CameraIcon,
-  Refresh as RefreshIcon, 
-  FilterList as FilterIcon, 
-  Close as CloseIcon, 
+  Refresh as RefreshIcon,
+  FilterList as FilterIcon,
+  Close as CloseIcon,
   DownloadForOffline as DownloadIcon,
-  SmartToy as DeviceIcon,
   Image as GalleryIcon,
-  List as ListIcon,
-  Dashboard as DashboardIcon
+  List as ListIcon
 } from '@mui/icons-material';
 import { format, parseISO } from 'date-fns';
 
@@ -189,8 +186,8 @@ const DataHub: React.FC = () => {
   useEffect(() => {
     const loadImages = async () => {
       // Only load images on the Gallery tab
-      if (tabValue !== 1) return;
-      
+      if (tabValue !== 0) return;
+
       setLoadingImages(true);
       setError(null);
       
@@ -553,36 +550,25 @@ const DataHub: React.FC = () => {
         
         {/* Tabs */}
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-          <Tabs 
-            value={tabValue} 
-            onChange={handleTabChange} 
+          <Tabs
+            value={tabValue}
+            onChange={handleTabChange}
             aria-label="data hub tabs"
             indicatorColor="primary"
             textColor="primary"
             variant="scrollable"
             scrollButtons="auto"
           >
-            <Tab 
-              icon={<DashboardIcon />} 
-              iconPosition="start" 
-              label="Overview" 
-            />
-            <Tab 
-              icon={<GalleryIcon />} 
-              iconPosition="start" 
-              label="Prediction Images" 
+            <Tab
+              icon={<GalleryIcon />}
+              iconPosition="start"
+              label="Prediction Images"
               disabled={!selectedDeviceId}
             />
-            <Tab 
-              icon={<ListIcon />} 
-              iconPosition="start" 
-              label="Logs" 
-              disabled={!selectedDeviceId}
-            />
-            <Tab 
-              icon={<DeviceIcon />} 
-              iconPosition="start" 
-              label="Device Data" 
+            <Tab
+              icon={<ListIcon />}
+              iconPosition="start"
+              label="Logs"
               disabled={!selectedDeviceId}
             />
           </Tabs>
@@ -591,23 +577,15 @@ const DataHub: React.FC = () => {
       
       {/* Tab content */}
       <TabPanel value={tabValue} index={0}>
-        {renderDataPlaceholder("Device Data Overview")}
-      </TabPanel>
-      
-      <TabPanel value={tabValue} index={1}>
         {/* Filters for prediction images */}
         {selectedDeviceId && renderImageFilters()}
-        
+
         {/* Images gallery */}
         {renderImageGallery()}
       </TabPanel>
-      
-      <TabPanel value={tabValue} index={2}>
+
+      <TabPanel value={tabValue} index={1}>
         {renderDataPlaceholder("Device Logs")}
-      </TabPanel>
-      
-      <TabPanel value={tabValue} index={3}>
-        {renderDataPlaceholder("Device Telemetry Data")}
       </TabPanel>
       
       {/* Image detail dialog */}
