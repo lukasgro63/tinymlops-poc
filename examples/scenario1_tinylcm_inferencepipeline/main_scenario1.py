@@ -983,6 +983,12 @@ def main():
             drift_results = pipeline.check_autonomous_drifts()
             if drift_results:
                 logger.info(f"Autonomous drift check results: {drift_results}")
+                # Important: manually call on_drift_detected for each detected drift
+                for result in drift_results:
+                    if result.get("drift_detected", False):
+                        # Extract the drift info and call the callback directly
+                        logger.warning(f"MANUALLY TRIGGERING DRIFT CALLBACK for {result.get('detector_type', 'unknown')}")
+                        on_drift_detected(result)
             last_drift_check_time = current_time
             
             # Periodically sync with TinySphere
