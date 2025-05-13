@@ -269,34 +269,53 @@ class InferencePipeline:
             "sample_id": sample_id,
             "timestamp": timestamp,
             "label": label,  # This may be None, which is expected for autonomous detection
-            "metadata": metadata or {}
+            "metadata": metadata or {},
+            "classifier": self.classifier  # Include direct reference to classifier for KNNDistanceMonitor
         }
+        
+        # Add KNN distances to the record if they exist
+        if isinstance(self.classifier, LightweightKNN) and hasattr(self.classifier, '_last_distances'):
+            # Include distances directly in record for easier access by drift detectors
+            autonomous_record['_knn_distances'] = self.classifier._last_distances
         
         # Update autonomous monitors if enabled and warmup period is complete
         autonomous_drift_detected = False
         drift_info = None
-        
+
         if self.enable_autonomous_detection and self.autonomous_monitors and self.n_samples_processed > self.autonomous_monitor_warmup_samples:
-            for monitor in self.autonomous_monitors:
+            for monitor_idx, monitor in enumerate(self.autonomous_monitors):
                 try:
                     # Update the monitor with the record
                     drift_detected, monitor_drift_info = monitor.update(autonomous_record)
-                    
+
                     if drift_detected:
                         autonomous_drift_detected = True
+
+                        # Create comprehensive drift info
                         drift_info = {
-                            "detector": type(monitor).__name__,
+                            "detector_id": monitor_idx,
+                            "detector_type": type(monitor).__name__,
+                            "detector": type(monitor).__name__,  # For backwards compatibility
                             "sample_id": sample_id,
                             "timestamp": timestamp,
                             "metric": monitor_drift_info.get("metric", "unknown"),
                             "current_value": monitor_drift_info.get("current_value", 0.0),
                             "threshold": monitor_drift_info.get("threshold", 0.0),
-                            "details": monitor_drift_info
+                            "details": monitor_drift_info,
+                            "drift_detected": True
                         }
+
+                        # Instead of just collecting drift info, we'll handle the callback through the detector's
+                        # _notify_callbacks method to respect its built-in cooldown mechanism
+
+                        # However, the detector.update() method should already handle this correctly
+                        # by calling _notify_callbacks internally when drift is detected.
+                        # We won't need to do anything extra here.
+
                         # Don't break here - we want to update all monitors
                 except Exception as e:
                     logger.warning(f"Error updating autonomous monitor {type(monitor).__name__}: {str(e)}")
-            
+
             result["autonomous_drift_detected"] = autonomous_drift_detected
             if autonomous_drift_detected:
                 result["drift_info"] = drift_info
@@ -310,12 +329,11 @@ class InferencePipeline:
                 logger.warning(f"Error in prediction callback: {str(e)}")
         
         # Notify drift callbacks if autonomous drift was detected
-        if autonomous_drift_detected and self.drift_callbacks:
-            for callback in self.drift_callbacks:
-                try:
-                    callback(drift_info, result)
-                except Exception as e:
-                    logger.warning(f"Error in drift callback: {str(e)}")
+        # We won't call drift callbacks directly here because we now rely on the
+        # detector's internal _notify_callbacks method to handle drift notifications
+        # with proper cooldown management. The callbacks should have already been
+        # notified during the calls to monitor.update() above if drift was detected
+        # and the detector wasn't in cooldown period.
         
         return result
     
@@ -373,23 +391,23 @@ class InferencePipeline:
     
     def check_autonomous_drifts(self) -> List[Dict[str, Any]]:
         """Check autonomous drift detectors for drift.
-        
+
         This method can be called periodically to explicitly check for drift
         in all autonomous monitors, regardless of the incoming samples.
-        
+
         Returns:
             List of drift detection results, one for each monitor
         """
         if not self.enable_autonomous_detection or not self.autonomous_monitors:
             logger.info("Autonomous drift detection is disabled or no monitors configured")
             return []
-        
+
         drift_results = []
         for i, monitor in enumerate(self.autonomous_monitors):
             try:
                 # Check monitor for drift
                 drift_detected, drift_info = monitor.check_for_drift()
-                
+
                 # Create result record
                 result = {
                     "detector_id": i,
@@ -397,24 +415,70 @@ class InferencePipeline:
                     "drift_detected": drift_detected,
                     "timestamp": time.time()
                 }
-                
+
                 # Add drift info if available
                 if drift_info:
                     result.update(drift_info)
-                
+
                 # Handle drift if detected
                 if drift_detected:
                     self.n_autonomous_drift_detected += 1
-                    
-                    # Notify drift callbacks
-                    for callback in self.drift_callbacks:
-                        try:
-                            callback(result, {})
-                        except Exception as e:
-                            logger.warning(f"Error in drift callback: {str(e)}")
-                
+
+                    # To respect the detector's built-in cooldown mechanism,
+                    # instead of directly calling our callbacks, we'll temporarily
+                    # register our callbacks with the detector and use its
+                    # _notify_callbacks method which respects the cooldown period
+
+                    # First, backup the detector's original callbacks
+                    original_callbacks = monitor.callbacks.copy() if hasattr(monitor, "callbacks") else []
+
+                    try:
+                        # Temporarily register our pipeline callbacks with the detector
+                        if hasattr(monitor, "callbacks"):
+                            # Convert our callbacks to the detector's format
+                            adapted_callbacks = []
+                            for callback in self.drift_callbacks:
+                                # Create a wrapper to handle the different signatures
+                                def create_adapter(cb):
+                                    def adapter(drift_info_arg):
+                                        cb(drift_info_arg, {})
+                                    return adapter
+
+                                adapted_callbacks.append(create_adapter(callback))
+
+                            # Replace detector's callbacks temporarily
+                            monitor.callbacks = adapted_callbacks
+
+                            # Call detector's notify method which respects cooldown
+                            # The method returns True if callbacks were notified, False if in cooldown
+                            callbacks_notified = monitor._notify_callbacks(result)
+                            if not callbacks_notified:
+                                # Cooldown information should already be in the result dictionary
+                                # from the _notify_callbacks method, but let's ensure it's properly set
+                                samples_since = result.get("samples_since_last_drift", "unknown")
+                                cooldown_period = result.get("drift_cooldown_period", "unknown")
+
+                                logger.debug(f"Detector {result.get('detector_type', 'unknown')} is in cooldown period "
+                                             f"({samples_since}/{cooldown_period} samples since last drift), "
+                                             f"drift will be ignored")
+
+                                # Modify result to reflect that we're in cooldown
+                                result["drift_detected"] = False
+                                result["in_cooldown_period"] = True
+                        else:
+                            # Fallback if detector doesn't have callbacks attribute
+                            for callback in self.drift_callbacks:
+                                try:
+                                    callback(result, {})
+                                except Exception as e:
+                                    logger.warning(f"Error in drift callback: {str(e)}")
+                    finally:
+                        # Restore original callbacks
+                        if hasattr(monitor, "callbacks"):
+                            monitor.callbacks = original_callbacks
+
                 drift_results.append(result)
-                
+
             except Exception as e:
                 logger.error(f"Error checking drift in monitor {type(monitor).__name__}: {str(e)}")
                 drift_results.append({
@@ -424,7 +488,7 @@ class InferencePipeline:
                     "error": str(e),
                     "timestamp": time.time()
                 })
-        
+
         return drift_results
     
     def register_prediction_callback(self, callback: Callable[[FeatureSample, Dict[str, Any]], None]) -> None:
@@ -437,11 +501,22 @@ class InferencePipeline:
     
     def register_drift_callback(self, callback: Callable[[Dict[str, Any], Dict[str, Any]], None]) -> None:
         """Register a callback to be notified of autonomous drift detection.
-        
+
         Args:
             callback: Function to call when drift is detected by autonomous detectors
         """
         self.drift_callbacks.append(callback)
+
+        # Also register a wrapped version of this callback with each autonomous monitor
+        # to ensure proper cooldown mechanism is used
+        if self.autonomous_monitors:
+            for monitor in self.autonomous_monitors:
+                if hasattr(monitor, "register_callback"):
+                    # We need to adapt our callback to the monitor's expected format
+                    def adapted_callback(drift_info):
+                        callback(drift_info, {})
+
+                    monitor.register_callback(adapted_callback)
     
     def get_metrics(self) -> Dict[str, Any]:
         """Get current operational metrics.

@@ -46,8 +46,8 @@ from utils.sync_client import \
 from tinylcm.core.classifiers.knn import LightweightKNN
 from tinylcm.core.data_logger.logger import DataLogger
 from tinylcm.core.data_structures import FeatureSample
-from tinylcm.core.drift_detection.features import PageHinkleyFeatureMonitor
-from tinylcm.core.drift_detection.confidence import EWMAConfidenceMonitor
+from tinylcm.core.drift_detection.features import PageHinkleyFeatureMonitor, FeatureMonitor, KNNDistanceMonitor
+from tinylcm.core.drift_detection.confidence import EWMAConfidenceMonitor, PageHinkleyConfidenceMonitor
 # Import tinylcm components
 from tinylcm.core.feature_extractors.tflite import TFLiteFeatureExtractor
 from tinylcm.core.operational_monitor.monitor import OperationalMonitor
@@ -122,31 +122,49 @@ def create_directory_structure(config: Dict) -> None:
         drift_dir.mkdir(exist_ok=True)
 
 
-def on_drift_detected(drift_info: Dict[str, Any]) -> None:
+def on_drift_detected(drift_info: Dict[str, Any], *args) -> None:
     """Callback function for drift detection events.
-    
+
     Args:
         drift_info: Dictionary containing information about the detected drift
+        *args: Additional arguments (ignored, but needed to handle the callback)
     """
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
+
+    # Check if we're in cooldown - this shouldn't happen normally since this callback
+    # should only be called when NOT in cooldown, but let's be safe
+    if drift_info.get("in_cooldown_period", False):
+        # This is informational only as it shouldn't normally happen
+        logger.debug(f"Drift callback executed while in cooldown period - this is unexpected")
+        return
+
     # Extract information from drift info
     detector_name = drift_info.get("detector", "Unknown")
-    
+    detector_type = drift_info.get("detector_type", detector_name)
+
     # Determine reason based on the detector type
     if "metric" in drift_info:
         metric = drift_info["metric"]
         current_value = drift_info.get("current_value", "unknown")
-        reason = f"{metric} drift detected (current: {current_value})"
+        threshold = drift_info.get("threshold", "unknown")
+        reason = f"{metric} drift detected (current: {current_value}, threshold: {threshold})"
     else:
         reason = "Drift detected"
+
+    # Log the drift detection with more visibility (use WARNING level)
+    logger.warning(f"DRIFT DETECTED by {detector_type}: {reason}")
     
-    # Log the drift detection
-    logger.warning(f"DRIFT DETECTED by {detector_name}: {reason}")
-    
-    # Extract metrics from drift info
-    metrics = {k: v for k, v in drift_info.items() if k not in ["detector", "timestamp"]}
-    
+    # Add specific indicators based on detector type
+    if detector_type == "KNNDistanceMonitor" and "neighbor_distance" in reason:
+        logger.warning(f"!!! KNN DISTANCE-BASED DRIFT DETECTED !!! Capturing image for analysis...")
+
+    # Extract metrics from drift info - but exclude some known keys to reduce noise
+    excluded_keys = ["detector", "detector_type", "detector_id", "timestamp", "sample_id",
+                     "drift_detected", "in_cooldown_period"]
+    metrics = {k: v for k, v in drift_info.items() if k not in excluded_keys}
+
+    # Log detailed drift metrics
+    logger.info(f"Drift detailed metrics from {detector_type}:")
     for key, value in metrics.items():
         logger.info(f"  {key}: {value}")
     
@@ -171,7 +189,15 @@ def on_drift_detected(drift_info: Dict[str, Any]) -> None:
 
         # Create drift directory structure for compatibility with tinysphere bucket format:
         # device_id/drift_type/date/filename.jpg
-        drift_type = detector_name.lower().replace("monitor", "").replace(" ", "_")
+        if detector_type == "KNNDistanceMonitor":
+            drift_type = "knn_distance"  # Specific KNN distance-based drift type
+        elif detector_type == "EWMAConfidenceMonitor":
+            drift_type = "confidence"    # Confidence-based drift
+        elif detector_type == "FeatureMonitor":
+            drift_type = "feature"       # Feature-based drift
+        else:
+            # Default fallback
+            drift_type = detector_name.lower().replace("monitor", "").replace(" ", "_")
 
         # Create base drift directory
         drift_dir = Path("./drift_images")
@@ -199,7 +225,7 @@ def on_drift_detected(drift_info: Dict[str, Any]) -> None:
         # Full path to the image
         image_path = date_dir / image_filename
         cv2.imwrite(str(image_path), rgb_frame)
-        logger.info(f"Saved drift image to {image_path}")
+        logger.warning(f"DRIFT EVENT IMAGE SAVED ({drift_type}): {image_path} - Will be sent to server during next sync cycle")
     
     # If sync client is available, create and send a drift event package
     if sync_client:
@@ -271,7 +297,7 @@ def on_drift_detected(drift_info: Dict[str, Any]) -> None:
                     image_path=str(image_path) if image_path else None
                 )
 
-                logger.info(f"Drift event sent using extended client: {'Success' if success else 'Failed'}")
+                logger.warning(f"DRIFT EVENT ({drift_type}) SENT: {'Success' if success else 'Failed'} - Package sent to server with image")
                 return  # Exit early if we used this method
 
             # Fall back to manual package creation
@@ -646,47 +672,9 @@ def main():
                     reference_update_interval=detector_config["warmup_samples"]
                 )
 
-                # Add a filter to prevent multiple sequential drift detections
-                # Increase the cooldown period significantly to reduce frequent drift events
-                feature_detector.drift_cooldown_period = 500  # Samples to wait before detecting drift again (5x more)
-                feature_detector.samples_since_last_drift = 0
-
-                # Override update method to handle detection cooldown
-                original_update = feature_detector.update
-                def update_with_cooldown(record, *args, **kwargs):
-                    # Increment counter since last drift
-                    feature_detector.samples_since_last_drift += 1
-
-                    # Check if we're in cooldown period after drift detected
-                    if hasattr(feature_detector, 'drift_detected') and feature_detector.drift_detected:
-                        # During cooldown period, don't try to update stats
-                        if feature_detector.samples_since_last_drift < feature_detector.drift_cooldown_period:
-                            return False, {}
-                        else:
-                            # Cooldown period over, reset drift flag
-                            feature_detector.drift_detected = False
-
-                    try:
-                        # Try to extract feature safely
-                        if not record or 'features' not in record:
-                            return False, {}
-
-                        # Call original update
-                        result = original_update(record, *args, **kwargs)
-
-                        # If drift detected, set flag
-                        is_drift, _ = result
-                        if is_drift:
-                            feature_detector.drift_detected = True
-                            feature_detector.samples_since_last_drift = 0
-
-                        return result
-                    except Exception as e:
-                        logger.warning(f"Error in feature detector update: {e}")
-                        return False, {}
-
-                # Replace the update method
-                feature_detector.update = update_with_cooldown
+                # Set the cooldown period to a higher value to reduce frequent drift events
+                # The cooldown mechanism is now properly implemented in the library
+                feature_detector.drift_cooldown_period = 500  # Samples to wait before detecting drift again
 
                 # Register drift callback
                 feature_detector.register_callback(on_drift_detected)
@@ -712,6 +700,25 @@ def main():
                 # Add to detector list
                 drift_detectors.append(confidence_monitor)
                 logger.info(f"Initialized EWMAConfidenceMonitor to detect confidence changes")
+                
+            elif detector_type == "KNNDistanceMonitor":
+                # Create KNN distance monitor to detect when neighbor distances increase
+                knn_distance_monitor = KNNDistanceMonitor(
+                    delta=detector_config.get("delta", 0.1),
+                    lambda_threshold=detector_config.get("lambda_threshold", 5.0),
+                    warm_up_samples=detector_config.get("warm_up_samples", 10),
+                    reference_update_interval=detector_config.get("reference_update_interval", 30),
+                    reference_update_factor=detector_config.get("reference_update_factor", 0.05),
+                    pause_reference_update_during_drift=detector_config.get("pause_reference_update_during_drift", True),
+                    drift_cooldown_period=detector_config.get("drift_cooldown_period", 20)
+                )
+                
+                # Register drift callback
+                knn_distance_monitor.register_callback(on_drift_detected)
+                
+                # Add to detector list
+                drift_detectors.append(knn_distance_monitor)
+                logger.info(f"Initialized KNNDistanceMonitor to detect neighbor distance changes")
 
             else:
                 logger.warning(f"Unknown drift detector type: {detector_type}")
@@ -810,6 +817,10 @@ def main():
             operational_monitor=operational_monitor,
             data_logger=data_logger
         )
+
+        # Also register the drift callback at the pipeline level to ensure it's called
+        # when drift is detected during both normal processing and explicit drift checks
+        pipeline.register_drift_callback(on_drift_detected)
         
         # Perform initial connection test to TinySphere
         try:
@@ -983,23 +994,46 @@ def main():
 
             # Only check for drift every 10 frames to reduce processing overhead and event frequency
             if frame_count % 10 == 0:
+                # The updated pipeline.check_autonomous_drifts() method now handles cooldown internally,
+                # so we don't need to manually call callbacks anymore. If drift is detected,
+                # and the detector is not in cooldown, it will automatically call our registered
+                # callbacks through its _notify_callbacks mechanism.
                 drift_results = pipeline.check_autonomous_drifts()
                 if drift_results:
-                    logger.info(f"Autonomous drift check results: {drift_results}")
-
-                    # Important: manually call on_drift_detected for each detected drift
+                    # Just log information about the drift results
                     drift_count = 0
+                    cooldown_count = 0
+
                     for result in drift_results:
+                        detector_name = result.get('detector_type', 'unknown')
+
                         if result.get("drift_detected", False):
-                            # Extract the drift info and call the callback directly
-                            logger.warning(f"MANUALLY TRIGGERING DRIFT CALLBACK for {result.get('detector_type', 'unknown')}")
-                            on_drift_detected(result)
                             drift_count += 1
 
-                            # Only process one drift event per check to avoid flooding
-                            if drift_count >= 1:
-                                logger.info("Breaking after processing one drift event to avoid flooding")
-                                break
+                            # Log more detailed information about the detected drift
+                            metric = result.get("metric", "unknown")
+                            current = result.get("current_value", "unknown")
+                            threshold = result.get("threshold", "unknown")
+
+                            logger.debug(f"Drift detected by {detector_name} - "
+                                        f"Metric: {metric}, Current: {current}, Threshold: {threshold}")
+                        elif result.get("in_cooldown_period", False):
+                            cooldown_count += 1
+
+                            # Log detailed cooldown information
+                            samples_since = result.get("samples_since_last_drift", "unknown")
+                            cooldown_period = result.get("drift_cooldown_period", "unknown")
+
+                            logger.debug(f"Detector {detector_name} in cooldown period "
+                                        f"({samples_since}/{cooldown_period} samples since last drift)")
+
+                    if drift_count > 0:
+                        logger.debug(f"Found {drift_count} drift detections (callbacks handled internally by library)")
+                    if cooldown_count > 0:
+                        logger.debug(f"Found {cooldown_count} detectors in cooldown period")
+
+                    # No need to manually call on_drift_detected - the library now handles
+                    # this with proper cooldown mechanisms
 
             last_drift_check_time = current_time
             

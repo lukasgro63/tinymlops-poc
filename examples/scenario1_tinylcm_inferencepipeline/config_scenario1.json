@@ -33,21 +33,14 @@
     },
     "drift_detectors": [
       {
-        "type": "PageHinkleyFeatureMonitor",
-        "feature_index": 1,
-        "delta": 0.00001,
-        "lambda_param": 3.0,
-        "min_samples": 30,
-        "warmup_samples": 50
-      },
-      {
-        "type": "EWMAConfidenceMonitor",
-        "lambda_param": 0.3,
-        "threshold_factor": 2.0,
-        "drift_window": 3,
-        "min_confidence": 0.6,
-        "warm_up_samples": 30,
-        "reference_update_interval": 50
+        "type": "KNNDistanceMonitor",
+        "delta": 30.0,
+        "lambda_threshold": 100.0,
+        "warm_up_samples": 3,
+        "reference_update_interval": 5,
+        "reference_update_factor": 0.1,
+        "pause_reference_update_during_drift": true,
+        "drift_cooldown_period": 10
       }
     ],
     "operational_monitor": {

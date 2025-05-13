@@ -255,7 +255,11 @@ class EWMAConfidenceMonitor(AutonomousDriftDetector):
         self.state.drift_detected_at = None
         self.drift_detected = False
         self.recent_violations.clear()
-        
+
+        # Reset drift cooldown tracking
+        self.in_cooldown_period = False
+        self.samples_since_last_drift = 0
+
         logger.debug("EWMAConfidenceMonitor reset")
     
     def _initialize_ewma(self) -> None:
@@ -630,13 +634,17 @@ class PageHinkleyConfidenceMonitor(AutonomousDriftDetector):
     
     def reset(self) -> None:
         """Reset the detector state after drift has been handled."""
-        # Reset drift detection state but keep the reference statistics 
+        # Reset drift detection state but keep the reference statistics
         self.state.sum_pos = 0.0
         self.state.sum_neg = 0.0
         self.drift_detected = False
         self.state.drift_detected_at = None
         self.state.drift_type = None
-        
+
+        # Reset drift cooldown tracking
+        self.in_cooldown_period = False
+        self.samples_since_last_drift = 0
+
         logger.debug("PageHinkleyConfidenceMonitor reset")
     
     def _initialize_reference(self) -> None:
