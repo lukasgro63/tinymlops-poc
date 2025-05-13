@@ -444,7 +444,21 @@ class InferencePipeline:
                             monitor.callbacks = adapted_callbacks
 
                             # Call detector's notify method which respects cooldown
-                            monitor._notify_callbacks(result)
+                            # The method returns True if callbacks were notified, False if in cooldown
+                            callbacks_notified = monitor._notify_callbacks(result)
+                            if not callbacks_notified:
+                                # Cooldown information should already be in the result dictionary
+                                # from the _notify_callbacks method, but let's ensure it's properly set
+                                samples_since = result.get("samples_since_last_drift", "unknown")
+                                cooldown_period = result.get("drift_cooldown_period", "unknown")
+
+                                logger.debug(f"Detector {result.get('detector_type', 'unknown')} is in cooldown period "
+                                             f"({samples_since}/{cooldown_period} samples since last drift), "
+                                             f"drift will be ignored")
+
+                                # Modify result to reflect that we're in cooldown
+                                result["drift_detected"] = False
+                                result["in_cooldown_period"] = True
                         else:
                             # Fallback if detector doesn't have callbacks attribute
                             for callback in self.drift_callbacks:

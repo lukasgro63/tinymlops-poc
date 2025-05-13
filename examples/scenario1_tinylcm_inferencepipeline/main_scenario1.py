@@ -124,29 +124,42 @@ def create_directory_structure(config: Dict) -> None:
 
 def on_drift_detected(drift_info: Dict[str, Any]) -> None:
     """Callback function for drift detection events.
-    
+
     Args:
         drift_info: Dictionary containing information about the detected drift
     """
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
+
+    # Check if we're in cooldown - this shouldn't happen normally since this callback
+    # should only be called when NOT in cooldown, but let's be safe
+    if drift_info.get("in_cooldown_period", False):
+        # This is informational only as it shouldn't normally happen
+        logger.debug(f"Drift callback executed while in cooldown period - this is unexpected")
+        return
+
     # Extract information from drift info
     detector_name = drift_info.get("detector", "Unknown")
-    
+    detector_type = drift_info.get("detector_type", detector_name)
+
     # Determine reason based on the detector type
     if "metric" in drift_info:
         metric = drift_info["metric"]
         current_value = drift_info.get("current_value", "unknown")
-        reason = f"{metric} drift detected (current: {current_value})"
+        threshold = drift_info.get("threshold", "unknown")
+        reason = f"{metric} drift detected (current: {current_value}, threshold: {threshold})"
     else:
         reason = "Drift detected"
-    
-    # Log the drift detection
-    logger.warning(f"DRIFT DETECTED by {detector_name}: {reason}")
-    
-    # Extract metrics from drift info
-    metrics = {k: v for k, v in drift_info.items() if k not in ["detector", "timestamp"]}
-    
+
+    # Log the drift detection with more visibility (use WARNING level)
+    logger.warning(f"DRIFT DETECTED by {detector_type}: {reason}")
+
+    # Extract metrics from drift info - but exclude some known keys to reduce noise
+    excluded_keys = ["detector", "detector_type", "detector_id", "timestamp", "sample_id",
+                     "drift_detected", "in_cooldown_period"]
+    metrics = {k: v for k, v in drift_info.items() if k not in excluded_keys}
+
+    # Log detailed drift metrics
+    logger.info(f"Drift detailed metrics from {detector_type}:")
     for key, value in metrics.items():
         logger.info(f"  {key}: {value}")
     
@@ -955,17 +968,37 @@ def main():
                 # callbacks through its _notify_callbacks mechanism.
                 drift_results = pipeline.check_autonomous_drifts()
                 if drift_results:
-                    logger.info(f"Autonomous drift check results: {drift_results}")
-
                     # Just log information about the drift results
                     drift_count = 0
+                    cooldown_count = 0
+
                     for result in drift_results:
+                        detector_name = result.get('detector_type', 'unknown')
+
                         if result.get("drift_detected", False):
                             drift_count += 1
-                            logger.debug(f"Drift detected by {result.get('detector_type', 'unknown')}")
+
+                            # Log more detailed information about the detected drift
+                            metric = result.get("metric", "unknown")
+                            current = result.get("current_value", "unknown")
+                            threshold = result.get("threshold", "unknown")
+
+                            logger.debug(f"Drift detected by {detector_name} - "
+                                        f"Metric: {metric}, Current: {current}, Threshold: {threshold}")
+                        elif result.get("in_cooldown_period", False):
+                            cooldown_count += 1
+
+                            # Log detailed cooldown information
+                            samples_since = result.get("samples_since_last_drift", "unknown")
+                            cooldown_period = result.get("drift_cooldown_period", "unknown")
+
+                            logger.debug(f"Detector {detector_name} in cooldown period "
+                                        f"({samples_since}/{cooldown_period} samples since last drift)")
 
                     if drift_count > 0:
                         logger.debug(f"Found {drift_count} drift detections (callbacks handled internally by library)")
+                    if cooldown_count > 0:
+                        logger.debug(f"Found {cooldown_count} detectors in cooldown period")
 
                     # No need to manually call on_drift_detected - the library now handles
                     # this with proper cooldown mechanisms
