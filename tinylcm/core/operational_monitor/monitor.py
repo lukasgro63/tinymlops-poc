@@ -330,12 +330,16 @@ class OperationalMonitor:
         Returns:
             The inference record dictionary
         """
+        # Ensure metadata is a dictionary
+        if metadata is None:
+            metadata = {}
+            
         record = {
             "input_id": input_id,
             "prediction": prediction,
             "timestamp": timestamp if timestamp is not None else time.time(),
             "session_id": self.session_id,
-            "metadata": metadata or {}
+            "metadata": metadata
         }
         
         # Only include optional fields if they are provided

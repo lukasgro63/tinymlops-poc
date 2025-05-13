@@ -501,9 +501,25 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
 
         # Log detailed information about the nearest neighbors for debugging
         debug_str = "NEAREST NEIGHBORS DEBUG:\n"
+        neighbors_debug = []
         for i, (idx, dist) in enumerate(nearest_neighbors):
             label = self.y_train[idx]
+            neighbor_info = {
+                "index": i+1,
+                "label": label,
+                "distance": dist
+            }
+            neighbors_debug.append(neighbor_info)
             debug_str += f"  Neighbor {i+1}: Label={label}, Distance={dist:.6f}\n"
+        
+        # Store in a thread local for operational logging to access
+        if not hasattr(self, '_thread_local'):
+            import threading
+            self._thread_local = threading.local()
+        
+        self._thread_local.neighbors_debug = neighbors_debug
+        self._thread_local.debug_str = debug_str
+        
         logger.info(debug_str)
         
         # Store the distances for drift detection to access directly
