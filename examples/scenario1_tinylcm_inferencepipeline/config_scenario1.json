@@ -33,37 +33,14 @@
     },
     "drift_detectors": [
       {
-        "type": "PageHinkleyFeatureMonitor",
-        "feature_index": 2,
-        "delta": 0.001,
-        "lambda_param": 0.1,
-        "min_samples": 5,
-        "warmup_samples": 10
-      },
-      {
-        "type": "EWMAConfidenceMonitor",
-        "lambda_param": 0.8,
-        "threshold_factor": 0.5,
-        "drift_window": 1,
-        "min_confidence": 0.0,
-        "warm_up_samples": 5,
-        "reference_update_interval": 10
-      },
-      {
-        "type": "FeatureMonitor",
-        "window_size": 10,
-        "threshold": 1.0,
-        "reference_size": 20,
-        "distance_metric": "euclidean",
-        "warm_up_samples": 10
-      },
-      {
         "type": "KNNDistanceMonitor",
-        "delta": 5.0,
-        "lambda_threshold": 50.0,
-        "warm_up_samples": 5,
-        "reference_update_interval": 10,
-        "drift_cooldown_period": 20
+        "delta": 1.0,
+        "lambda_threshold": 25.0,
+        "warm_up_samples": 3,
+        "reference_update_interval": 5,
+        "reference_update_factor": 0.1,
+        "pause_reference_update_during_drift": true,
+        "drift_cooldown_period": 10
       }
     ],
     "operational_monitor": {

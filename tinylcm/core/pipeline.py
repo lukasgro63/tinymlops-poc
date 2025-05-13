@@ -269,8 +269,14 @@ class InferencePipeline:
             "sample_id": sample_id,
             "timestamp": timestamp,
             "label": label,  # This may be None, which is expected for autonomous detection
-            "metadata": metadata or {}
+            "metadata": metadata or {},
+            "classifier": self.classifier  # Include direct reference to classifier for KNNDistanceMonitor
         }
+        
+        # Add KNN distances to the record if they exist
+        if isinstance(self.classifier, LightweightKNN) and hasattr(self.classifier, '_last_distances'):
+            # Include distances directly in record for easier access by drift detectors
+            autonomous_record['_knn_distances'] = self.classifier._last_distances
         
         # Update autonomous monitors if enabled and warmup period is complete
         autonomous_drift_detected = False

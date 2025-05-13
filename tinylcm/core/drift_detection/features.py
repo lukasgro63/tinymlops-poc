@@ -1094,6 +1094,11 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         Returns:
             Tuple of (drift_detected, drift_info)
         """
+        # Safety check - record should not be None
+        if record is None:
+            logger.warning("Record is None, skipping update")
+            return False, None
+            
         # Process base sample counting and warm-up phase
         self._process_sample(record)
         
@@ -1183,38 +1188,62 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         Returns:
             List of distances or None if not found
         """
-        # Case 1: Direct distances in record
-        if '_knn_distances' in record and isinstance(record['_knn_distances'], (list, tuple, np.ndarray)):
-            return list(record['_knn_distances'])
-        
-        # Case 2: Classifier object with distances attribute
-        if 'classifier' in record and hasattr(record['classifier'], '_last_distances'):
-            distances = record['classifier']._last_distances
-            if distances is not None:
-                return list(distances)
-        
-        # Case 3: Last distances in record
-        if '_last_distances' in record and isinstance(record['_last_distances'], (list, tuple, np.ndarray)):
-            return list(record['_last_distances'])
-        
-        # Case 4: Extract from raw result if available
-        if 'raw_result' in record and isinstance(record['raw_result'], dict):
-            raw = record['raw_result']
-            if 'distances' in raw and isinstance(raw['distances'], (list, tuple, np.ndarray)):
-                return list(raw['distances'])
-        
-        # Final fallback: confidence-based estimation (less accurate)
-        if 'confidence' in record and isinstance(record['confidence'], (int, float)):
-            conf = record['confidence']
-            # Rough heuristic: confidence 1.0 → small distance, 0.5 → large distance
-            if conf == 1.0:
-                return [10.0]  # Arbitrary small value
-            elif conf <= 0.7:
-                return [100.0]  # Arbitrary large value
-            else:
-                return [20.0]  # Medium value
-        
-        return None
+        try:
+            # Case 1: Direct distances in record
+            if '_knn_distances' in record and isinstance(record['_knn_distances'], (list, tuple, np.ndarray)):
+                return list(record['_knn_distances'])
+            
+            # Case 2: Classifier object with distances attribute
+            if 'classifier' in record and record['classifier'] is not None:
+                if hasattr(record['classifier'], '_last_distances'):
+                    distances = record['classifier']._last_distances
+                    if distances is not None:
+                        return list(distances)
+                # Some classifiers store distances in a different attribute
+                if hasattr(record['classifier'], 'last_distances'):
+                    distances = record['classifier'].last_distances
+                    if distances is not None:
+                        return list(distances)
+            
+            # Case 3: Last distances in record
+            if '_last_distances' in record and isinstance(record['_last_distances'], (list, tuple, np.ndarray)):
+                return list(record['_last_distances'])
+            
+            # Case 4: Extract from raw result if available
+            if 'raw_result' in record and isinstance(record['raw_result'], dict):
+                raw = record['raw_result']
+                if 'distances' in raw and isinstance(raw['distances'], (list, tuple, np.ndarray)):
+                    return list(raw['distances'])
+            
+            # Case 5: Try to extract from metadata if present
+            if 'metadata' in record and isinstance(record['metadata'], dict):
+                meta = record['metadata']
+                if 'distances' in meta and isinstance(meta['distances'], (list, tuple, np.ndarray)):
+                    return list(meta['distances'])
+                if 'neighbor_distances' in meta and isinstance(meta['neighbor_distances'], (list, tuple, np.ndarray)):
+                    return list(meta['neighbor_distances'])
+            
+            # Final fallback: confidence-based estimation (less accurate)
+            if 'confidence' in record and isinstance(record['confidence'], (int, float)):
+                conf = record['confidence']
+                # Rough heuristic: confidence 1.0 → small distance, 0.5 → large distance
+                if conf >= 0.95:
+                    return [10.0]  # Very small distance (high confidence)
+                elif conf <= 0.7:
+                    return [100.0]  # Large distance (low confidence)
+                else:
+                    return [30.0]  # Medium value
+            
+            # Log record keys to help debug
+            logger.debug(f"KNNDistanceMonitor could not extract distances. Record keys: {list(record.keys())}")
+            
+            # Last resort - if nothing else works, just return a constant value
+            # to prevent errors but this won't be useful for drift detection
+            return [50.0]
+            
+        except Exception as e:
+            logger.warning(f"Error extracting distances from record: {str(e)}")
+            return [50.0]  # Return a default value instead of None
     
     def check_for_drift(self) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """Check if drift has been detected.

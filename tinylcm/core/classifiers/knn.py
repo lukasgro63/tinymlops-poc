@@ -76,6 +76,9 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
         self.timestamps = []  # Timestamps for each sample (for tie-breaking)
         self._classes = set()  # Set of unique classes
         
+        # Stored information for drift detection
+        self._last_distances = []  # Most recent neighbor distances (for drift detection)
+        
         # Performance metrics
         self._total_prediction_time = 0.0
         self._total_predictions = 0
@@ -502,6 +505,9 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
             label = self.y_train[idx]
             debug_str += f"  Neighbor {i+1}: Label={label}, Distance={dist:.6f}\n"
         logger.info(debug_str)
+        
+        # Store the distances for drift detection to access directly
+        self._last_distances = [dist for _, dist in nearest_neighbors]
 
         return nearest_neighbors
     
