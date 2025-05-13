@@ -1297,4 +1297,3 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         # Restore distance history if available
         if 'recent_distance_history' in state:
             self.distance_history = state['recent_distance_history']
-EOF < /dev/null
