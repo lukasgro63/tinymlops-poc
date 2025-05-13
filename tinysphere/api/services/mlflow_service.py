@@ -17,7 +17,8 @@ from tinysphere.importer.transformers import (DriftTransformer,
                                               MetricsTransformer,
                                               ModelTransformer,
                                               PredictionImagesTransformer,
-                                              DriftEventsTransformer)
+                                              DriftEventsTransformer,
+                                              OperationalLogsTransformer)
 from tinysphere.importer.transformers.base import DataTransformer
 
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +34,8 @@ class MLflowService:
             DriftTransformer(),
             DriftEventsTransformer(),  # Add our new transformer for drift event images
             LogsTransformer(),
-            PredictionImagesTransformer()
+            PredictionImagesTransformer(),
+            OperationalLogsTransformer()  # Add transformer for operational logs
         ]
         
         # Try to initialize MLflow
