@@ -33,7 +33,10 @@ import {
   DownloadForOffline as DownloadIcon,
   Image as GalleryIcon,
   List as ListIcon,
-  WarningAmber
+  WarningAmber,
+  Sort as SortIcon,
+  ArrowUpward as SortAscIcon,
+  ArrowDownward as SortDescIcon
 } from '@mui/icons-material';
 import { format, parseISO } from 'date-fns';
 
@@ -120,6 +123,9 @@ const DataHub: React.FC = () => {
   // Pagination
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(16);
+  
+  // Sorting
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc'); // desc = newest first (default)
   
   // Selected image for details view
   const [selectedImage, setSelectedImage] = useState<PredictionImage | null>(null);
@@ -293,7 +299,19 @@ const DataHub: React.FC = () => {
             page * rowsPerPage
           );
           
-          setImages(response.images);
+          // Sort images according to sort order
+          const sortedImages = [...response.images].sort((a, b) => {
+            // Parse dates from the last_modified field
+            const dateA = new Date(a.last_modified).getTime();
+            const dateB = new Date(b.last_modified).getTime();
+            
+            // Apply sort order - newer dates have larger timestamps
+            return sortOrder === 'desc' 
+              ? dateB - dateA  // Newest first (desc)
+              : dateA - dateB; // Oldest first (asc)
+          });
+          
+          setImages(sortedImages);
           setTotalImages(response.total);
         } else {
           // For "All Devices" option - we need to fetch for each device with images
@@ -314,6 +332,18 @@ const DataHub: React.FC = () => {
             allImages = [...allImages, ...response.images];
           }
           
+          // Sort all images according to sort order
+          allImages.sort((a, b) => {
+            // Parse dates from the last_modified field
+            const dateA = new Date(a.last_modified).getTime();
+            const dateB = new Date(b.last_modified).getTime();
+            
+            // Apply sort order - newer dates have larger timestamps
+            return sortOrder === 'desc' 
+              ? dateB - dateA  // Newest first (desc)
+              : dateA - dateB; // Oldest first (asc)
+          });
+          
           // Simple client-side pagination
           const startIndex = page * rowsPerPage;
           const endIndex = startIndex + rowsPerPage;
@@ -332,7 +362,7 @@ const DataHub: React.FC = () => {
     };
     
     loadImages();
-  }, [selectedDeviceId, selectedType, selectedDate, page, rowsPerPage, tabValue]);
+  }, [selectedDeviceId, selectedType, selectedDate, page, rowsPerPage, tabValue, sortOrder]);
 
   // Load drift images based on filters and pagination
   useEffect(() => {
@@ -355,7 +385,7 @@ const DataHub: React.FC = () => {
           );
 
           // Process images to set event_id from folder name if available
-          const processedImages = response.images.map(image => {
+          let processedImages = response.images.map(image => {
             // Check if the image is in a folder that starts with "event_"
             const pathParts = image.key.split('/');
             if (pathParts.length > 3) {
@@ -370,6 +400,18 @@ const DataHub: React.FC = () => {
               }
             }
             return image;
+          });
+
+          // Sort images according to sort order
+          processedImages = processedImages.sort((a, b) => {
+            // Parse dates from the last_modified field
+            const dateA = new Date(a.last_modified).getTime();
+            const dateB = new Date(b.last_modified).getTime();
+            
+            // Apply sort order - newer dates have larger timestamps
+            return sortOrder === 'desc' 
+              ? dateB - dateA  // Newest first (desc)
+              : dateA - dateB; // Oldest first (asc)
           });
 
           setDriftImages(processedImages);
@@ -411,6 +453,18 @@ const DataHub: React.FC = () => {
             allDriftImages = [...allDriftImages, ...processedImages];
           }
 
+          // Sort all drift images according to sort order
+          allDriftImages.sort((a, b) => {
+            // Parse dates from the last_modified field
+            const dateA = new Date(a.last_modified).getTime();
+            const dateB = new Date(b.last_modified).getTime();
+            
+            // Apply sort order - newer dates have larger timestamps
+            return sortOrder === 'desc' 
+              ? dateB - dateA  // Newest first (desc)
+              : dateA - dateB; // Oldest first (asc)
+          });
+
           // Simple client-side pagination
           const startIndex = page * rowsPerPage;
           const endIndex = startIndex + rowsPerPage;
@@ -429,7 +483,7 @@ const DataHub: React.FC = () => {
     };
 
     loadDriftImages();
-  }, [selectedDeviceId, selectedDriftType, selectedDriftDate, page, rowsPerPage, tabValue]);
+  }, [selectedDeviceId, selectedDriftType, selectedDriftDate, page, rowsPerPage, tabValue, sortOrder]);
   
   // Handle tab change
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
@@ -501,6 +555,12 @@ const DataHub: React.FC = () => {
   // Close details view
   const handleCloseDetails = () => {
     setSelectedImage(null);
+  };
+  
+  // Toggle sort order
+  const handleToggleSortOrder = () => {
+    setSortOrder(prevOrder => prevOrder === 'asc' ? 'desc' : 'asc');
+    setPage(0); // Reset to first page when sorting changes
   };
   
   // Download image
@@ -831,7 +891,7 @@ const DataHub: React.FC = () => {
           </FormControl>
         </Box>
         
-        <Box sx={{ flex: '1 1 200px', display: 'flex', alignItems: 'center' }}>
+        <Box sx={{ flex: '1 1 200px', display: 'flex', alignItems: 'center', gap: 1 }}>
           <Button 
             variant="outlined" 
             disabled={!selectedType && !selectedDate}
@@ -842,6 +902,11 @@ const DataHub: React.FC = () => {
           >
             Clear Filters
           </Button>
+          <Tooltip title={sortOrder === 'desc' ? "Showing newest first - Click to show oldest first" : "Showing oldest first - Click to show newest first"}>
+            <IconButton onClick={handleToggleSortOrder} color="primary">
+              {sortOrder === 'desc' ? <SortDescIcon /> : <SortAscIcon />}
+            </IconButton>
+          </Tooltip>
         </Box>
       </Box>
     </Box>
@@ -883,7 +948,7 @@ const DataHub: React.FC = () => {
           </FormControl>
         </Box>
         
-        <Box sx={{ flex: '1 1 200px', display: 'flex', alignItems: 'center' }}>
+        <Box sx={{ flex: '1 1 200px', display: 'flex', alignItems: 'center', gap: 1 }}>
           <Button 
             variant="outlined" 
             disabled={!selectedDriftType && !selectedDriftDate}
@@ -894,6 +959,11 @@ const DataHub: React.FC = () => {
           >
             Clear Filters
           </Button>
+          <Tooltip title={sortOrder === 'desc' ? "Showing newest first - Click to show oldest first" : "Showing oldest first - Click to show newest first"}>
+            <IconButton onClick={handleToggleSortOrder} color="primary">
+              {sortOrder === 'desc' ? <SortDescIcon /> : <SortAscIcon />}
+            </IconButton>
+          </Tooltip>
         </Box>
       </Box>
     </Box>

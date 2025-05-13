@@ -111,8 +111,11 @@ class DriftService:
         # Extract drift type
         drift_type_str = event_data.get("drift_type", "unknown").lower()
         try:
+            # Log the drift type we're trying to process
+            logger.info(f"Processing drift event with type: {drift_type_str}")
             drift_type = getattr(DriftType, drift_type_str.upper())
         except (AttributeError, KeyError):
+            logger.warning(f"Unknown drift type '{drift_type_str}', falling back to UNKNOWN")
             drift_type = DriftType.UNKNOWN
         
         # Create drift event

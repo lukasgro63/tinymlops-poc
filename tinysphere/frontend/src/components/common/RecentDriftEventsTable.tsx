@@ -85,6 +85,8 @@ const DriftTypeIcon: React.FC<{ type: DriftType }> = ({ type }) => {
       return <OutlierIcon fontSize="small" />;
     case 'custom':
       return <CustomIcon fontSize="small" />;
+    case 'knn_distance':
+      return <ViewIcon fontSize="small" />;
     default:
       return <UnknownIcon fontSize="small" />;
   }

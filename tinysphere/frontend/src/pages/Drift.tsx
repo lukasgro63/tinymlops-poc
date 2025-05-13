@@ -39,7 +39,10 @@ import {
   VisibilityOutlined as ViewIcon,
   TrendingUp as TrendingUpIcon,
   HistoryEdu as HistoryIcon,
-  AssessmentOutlined as AssessmentIcon
+  AssessmentOutlined as AssessmentIcon,
+  Sort as SortIcon,
+  ArrowUpward as SortAscIcon,
+  ArrowDownward as SortDescIcon
 } from '@mui/icons-material';
 import { format, subDays, parseISO } from 'date-fns';
 import { getDriftEvents } from '../services/api';
@@ -73,6 +76,8 @@ const DriftTypeIcon: React.FC<{ type: string }> = ({ type }) => {
       return <FeatureIcon fontSize="small" />;
     case 'outlier':
       return <OutlierIcon fontSize="small" />;
+    case 'knn_distance':
+      return <TrendingUpIcon fontSize="small" />;
     default:
       return <UnknownIcon fontSize="small" />;
   }
@@ -104,6 +109,7 @@ const DriftPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState(0);
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc'); // desc = newest first (default)
   
   // Filter state
   const [filters, setFilters] = useState<{
@@ -142,11 +148,11 @@ const DriftPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [page, rowsPerPage]);
 
-  // Re-fetch when filters change
+  // Re-fetch when filters or sort order change
   useEffect(() => {
-    console.log("Drift Page: Filters changed, re-fetching");
+    console.log("Drift Page: Filters or sort order changed, re-fetching");
     fetchEvents();
-  }, [filters]);
+  }, [filters, sortOrder]);
   
   const fetchEvents = async () => {
     try {
@@ -181,7 +187,20 @@ const DriftPage: React.FC = () => {
 
         if (Array.isArray(data)) {
           console.log("Successfully fetched drift events:", data.length);
-          setEvents(data);
+          
+          // Sort data based on sort order
+          const sortedData = [...data].sort((a, b) => {
+            // Parse dates from the timestamp field
+            const dateA = new Date(a.timestamp).getTime();
+            const dateB = new Date(b.timestamp).getTime();
+            
+            // Apply sort order - newer dates have larger timestamps
+            return sortOrder === 'desc' 
+              ? dateB - dateA  // Newest first (desc)
+              : dateA - dateB; // Oldest first (asc)
+          });
+          
+          setEvents(sortedData);
           // In a real application, we'd set totalCount from API response headers or metadata
           setTotalCount(data.length > rowsPerPage ? 100 : data.length); // Mock total count
         } else {
@@ -237,6 +256,12 @@ const DriftPage: React.FC = () => {
   // Handle row click to navigate to event details
   const handleRowClick = (eventId: string) => {
     navigate(`/drift/${eventId}`);
+  };
+  
+  // Toggle sort order
+  const handleToggleSortOrder = () => {
+    setSortOrder(prevOrder => prevOrder === 'asc' ? 'desc' : 'asc');
+    setPage(0); // Reset to first page when sorting changes
   };
 
   // Handle page-level loading and error states
@@ -318,6 +343,7 @@ const DriftPage: React.FC = () => {
                     <MenuItem value="distribution">Distribution</MenuItem>
                     <MenuItem value="feature">Feature</MenuItem>
                     <MenuItem value="outlier">Outlier</MenuItem>
+                    <MenuItem value="knn_distance">KNN Distance</MenuItem>
                     <MenuItem value="custom">Custom</MenuItem>
                   </Select>
                 </FormControl>
@@ -366,14 +392,19 @@ const DriftPage: React.FC = () => {
                 />
               </Box>
               
-              <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
+              <Box sx={{ flex: '1 1 200px', minWidth: '150px', display: 'flex', alignItems: 'center', gap: 1 }}>
                 <Button 
                   variant="outlined" 
                   onClick={resetFilters}
-                  fullWidth
+                  sx={{ flexGrow: 1 }}
                 >
                   Reset Filters
                 </Button>
+                <Tooltip title={sortOrder === 'desc' ? "Showing newest first - Click to show oldest first" : "Showing oldest first - Click to show newest first"}>
+                  <IconButton onClick={handleToggleSortOrder} color="primary">
+                    {sortOrder === 'desc' ? <SortDescIcon /> : <SortAscIcon />}
+                  </IconButton>
+                </Tooltip>
               </Box>
             </Box>
             
