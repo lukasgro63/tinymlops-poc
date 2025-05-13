@@ -22,8 +22,8 @@ class OperationalLogsTransformer(DataTransformer):
         # Configure S3 client for MinIO
         self.s3_client = self._initialize_s3_client()
         
-        # Ensure the data_logs bucket exists
-        self._ensure_bucket_exists("data_logs")
+        # Ensure the data-logs bucket exists
+        self._ensure_bucket_exists("data-logs")
         
     def _initialize_s3_client(self):
         """Initialize the S3 client for MinIO."""
@@ -149,7 +149,7 @@ class OperationalLogsTransformer(DataTransformer):
             session_id = "unknown_session"
             
         # Upload log files to S3
-        bucket_name = "data_logs"
+        bucket_name = "data-logs"
         uploaded_files = []
         
         try:

@@ -532,7 +532,7 @@ class ExtendedSyncClient:
                 "session_id": session_id,
                 "log_files": [os.path.basename(f) for f in log_files],
                 "file_count": len(log_files),
-                "target_bucket": "data_logs"  # Specify target bucket for the transformer
+                "target_bucket": "data-logs"  # Specify target bucket for the transformer
             }
             
             metadata_file_path = os.path.join(temp_dir, "logs_metadata.json")
