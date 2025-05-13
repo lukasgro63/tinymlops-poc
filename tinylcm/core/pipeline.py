@@ -226,14 +226,27 @@ class InferencePipeline:
             metadata=metadata or {}
         )
         
+        # Prepare metadata for operational monitor
+        op_metadata = metadata or {}
+        
+        # If we're using the KNN classifier, include its debug information
+        if isinstance(self.classifier, LightweightKNN) and hasattr(self.classifier, '_thread_local'):
+            try:
+                # Add KNN debug information if available (only the structured data)
+                if hasattr(self.classifier._thread_local, 'neighbors_debug'):
+                    op_metadata['knn_neighbors'] = self.classifier._thread_local.neighbors_debug
+            except Exception as e:
+                logger.warning(f"Error retrieving KNN debug info: {str(e)}")
+        
         # Track operation in the operational monitor
         self.operational_monitor.track_inference(
             input_id=sample_id,
             prediction=prediction,
             confidence=confidence,
             latency_ms=latency_ms,
-            metadata=metadata,
-            timestamp=timestamp
+            metadata=op_metadata,
+            timestamp=timestamp,
+            features=features  # Include features for drift detection
         )
         
         # Log sample to data logger if available
@@ -940,13 +953,17 @@ class AdaptivePipeline(InferencePipeline):
             logger.info("Adaptation is disabled, feedback ignored")
             return None
         
+        # Process timestamp and sample_id
+        current_timestamp = timestamp or time.time()
+        current_sample_id = sample_id or str(uuid.uuid4())
+        
         # Create feature sample
         sample = FeatureSample(
             features=features,
             label=label,
             prediction=None,  # We don't have a prediction here
-            timestamp=timestamp or time.time(),
-            sample_id=sample_id or str(uuid.uuid4()),
+            timestamp=current_timestamp,
+            sample_id=current_sample_id,
             metadata=metadata or {}
         )
         
@@ -954,6 +971,27 @@ class AdaptivePipeline(InferencePipeline):
         try:
             prediction = self.classifier.predict(np.array([features]))[0]
             sample.prediction = prediction
+            
+            # Prepare operational metadata with KNN debug information
+            op_metadata = metadata or {}
+            if isinstance(self.classifier, LightweightKNN) and hasattr(self.classifier, '_thread_local'):
+                try:
+                    # Add KNN debug information if available (only the structured data)
+                    if hasattr(self.classifier._thread_local, 'neighbors_debug'):
+                        op_metadata['knn_neighbors'] = self.classifier._thread_local.neighbors_debug
+                except Exception as e:
+                    logger.warning(f"Error retrieving KNN debug info: {str(e)}")
+                    
+            # Track in operational monitor for feedback samples
+            self.operational_monitor.track_inference(
+                input_id=current_sample_id,
+                prediction=prediction,
+                confidence=confidence,
+                latency_ms=None,  # We don't have latency for feedback samples
+                metadata=op_metadata,
+                timestamp=current_timestamp,
+                features=features  # Include features for drift detection
+            )
         except Exception as e:
             logger.warning(f"Error getting prediction for feedback sample: {str(e)}")
         
