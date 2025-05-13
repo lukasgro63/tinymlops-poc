@@ -4,12 +4,34 @@ import {
   Card, 
   CardContent, 
   Typography, 
-  Chip
+  Chip,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  IconButton,
+  Tooltip,
+  Link,
+  Divider
 } from '@mui/material';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { AssessmentOutlined as AssessmentIcon } from '@mui/icons-material';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell } from 'recharts';
+import { 
+  AssessmentOutlined as AssessmentIcon,
+  VisibilityOutlined as ViewIcon,
+  Psychology as PsychologyIcon,
+  BubbleChart as DistributionIcon,
+  ViewInAr as FeatureIcon,
+  RemoveCircleOutline as OutlierIcon,
+  Help as UnknownIcon,
+  TrendingUp as TrendingUpIcon
+} from '@mui/icons-material';
+import { Link as RouterLink } from 'react-router-dom';
+import { format, parseISO } from 'date-fns';
 import { getDriftStatistics } from '../../services/api';
-import { DriftStatistics, DriftStatus } from '../../types/api';
+import { DriftStatistics, DriftStatus, DriftType } from '../../types/api';
 import SectionCard from './SectionCard';
 import ErrorDisplay from './ErrorDisplay';
 
@@ -37,7 +59,42 @@ const typeColors: Record<string, string> = {
   feature: '#ffc658',
   outlier: '#ff8042',
   custom: '#a4de6c',
+  knn_distance: '#6495ED', // Add color for knn_distance
   unknown: '#d0d0d0'
+};
+
+// Helper function to get MUI color based on status
+const getStatusColor = (status: DriftStatus): 'success' | 'warning' | 'error' | 'info' | 'default' => {
+  switch (status) {
+    case 'validated':
+      return 'success';
+    case 'pending':
+      return 'warning';
+    case 'rejected':
+      return 'error';
+    case 'resolved':
+      return 'info';
+    case 'ignored':
+      return 'default';
+  }
+};
+
+// Drift type icon mapping
+const DriftTypeIcon: React.FC<{ type: string }> = ({ type }) => {
+  switch (type) {
+    case 'confidence':
+      return <PsychologyIcon fontSize="small" />;
+    case 'distribution':
+      return <DistributionIcon fontSize="small" />;
+    case 'feature':
+      return <FeatureIcon fontSize="small" />;
+    case 'outlier':
+      return <OutlierIcon fontSize="small" />;
+    case 'knn_distance':
+      return <TrendingUpIcon fontSize="small" />;
+    default:
+      return <UnknownIcon fontSize="small" />;
+  }
 };
 
 const DriftStatisticsCard: React.FC<DriftStatisticsCardProps> = ({ 
@@ -169,7 +226,7 @@ const DriftStatisticsCard: React.FC<DriftStatisticsCardProps> = ({
                     height={50}
                   />
                   <YAxis />
-                  <Tooltip />
+                  <RechartsTooltip />
                   <Bar dataKey="count" fill="#0b2a5a" name="Events" />
                 </BarChart>
               </ResponsiveContainer>
@@ -197,7 +254,7 @@ const DriftStatisticsCard: React.FC<DriftStatisticsCardProps> = ({
                       width={80}
                       tick={{ fontSize: 12 }}
                     />
-                    <Tooltip />
+                    <RechartsTooltip />
                     <Bar 
                       dataKey="count" 
                       name="Events" 
@@ -232,7 +289,7 @@ const DriftStatisticsCard: React.FC<DriftStatisticsCardProps> = ({
                       width={80}
                       tick={{ fontSize: 12 }}
                     />
-                    <Tooltip />
+                    <RechartsTooltip />
                     <Bar 
                       dataKey="count" 
                       name="Events" 
@@ -248,6 +305,90 @@ const DriftStatisticsCard: React.FC<DriftStatisticsCardProps> = ({
               </Box>
             </div>
           </div>
+          
+          {/* Recent Drift Events Table */}
+          {statistics.recent_events && statistics.recent_events.length > 0 && (
+            <div>
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle1" gutterBottom>
+                Recent Drift Events
+              </Typography>
+              <TableContainer component={Paper} elevation={0} sx={{ maxHeight: 300 }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Event ID</TableCell>
+                      <TableCell>Device</TableCell>
+                      <TableCell>Type</TableCell>
+                      <TableCell>Status</TableCell>
+                      <TableCell>Timestamp</TableCell>
+                      <TableCell align="center">Samples</TableCell>
+                      <TableCell align="center">Validations</TableCell>
+                      <TableCell align="right">Actions</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {statistics.recent_events.map((event) => (
+                      <TableRow key={event.event_id}>
+                        <TableCell>
+                          <Tooltip title={event.event_id}>
+                            <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+                              {event.event_id.substring(0, 8)}...
+                            </Typography>
+                          </Tooltip>
+                        </TableCell>
+                        <TableCell>
+                          <Link 
+                            component={RouterLink} 
+                            to={`/devices/${event.device_id}`}
+                            underline="hover"
+                          >
+                            {event.device_id}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            icon={<DriftTypeIcon type={event.drift_type} />}
+                            label={event.drift_type.charAt(0).toUpperCase() + event.drift_type.slice(1)}
+                            size="small"
+                            variant="outlined"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={event.status.charAt(0).toUpperCase() + event.status.slice(1)}
+                            size="small"
+                            color={getStatusColor(event.status)}
+                            sx={getStatusColor(event.status) === 'default' ? { backgroundColor: '#FFA500' } : {}}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          {event.timestamp && format(parseISO(event.timestamp), 'MMM d, yyyy HH:mm')}
+                        </TableCell>
+                        <TableCell align="center">
+                          {event.sample_count}
+                        </TableCell>
+                        <TableCell align="center">
+                          {event.validation_count}
+                        </TableCell>
+                        <TableCell align="right">
+                          <Tooltip title="View Details">
+                            <IconButton 
+                              size="small" 
+                              component={RouterLink}
+                              to={`/drift/${event.event_id}`}
+                            >
+                              <ViewIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </div>
+          )}
         </div>
       </CardContent>
     </SectionCard>

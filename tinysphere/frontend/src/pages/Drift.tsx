@@ -166,7 +166,7 @@ const DriftPage: React.FC = () => {
       };
       
       if (filters.deviceId) params.device_id = filters.deviceId;
-      if (filters.driftType) params.drift_type = filters.driftType;
+      if (filters.driftType) params.drift_type = filters.driftType.toLowerCase(); // Ensure lowercase for drift_type
       if (filters.status) params.status = filters.status;
       if (filters.startDate) {
         // For start date, set to beginning of the day in local timezone

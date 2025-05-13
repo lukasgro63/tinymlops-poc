@@ -273,7 +273,12 @@ export const getDriftEvents = async (params?: {
   if (params) {
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined) {
-        queryParams.append(key, value.toString());
+        // Special handling for drift_type to ensure it's lowercase
+        if (key === 'drift_type' && typeof value === 'string') {
+          queryParams.append(key, value.toLowerCase());
+        } else {
+          queryParams.append(key, value.toString());
+        }
       }
     });
   }
@@ -347,13 +352,19 @@ export const updateDriftEventStatus = async (
 
 export const getDriftStatistics = async (
   device_id?: string,
-  days: number = 30
+  days: number = 30,
+  drift_type?: string
 ): Promise<DriftStatistics> => {
   const params = new URLSearchParams();
   if (device_id) {
     params.append('device_id', device_id);
   }
   params.append('days', days.toString());
+  
+  // Add drift_type parameter if provided, ensuring it's lowercase
+  if (drift_type) {
+    params.append('drift_type', drift_type.toLowerCase());
+  }
 
   const response = await axios.get<DriftStatistics>(
     `${API_BASE_URL}/drift/statistics?${params.toString()}`
