@@ -313,10 +313,14 @@ class FeatureMonitor(AutonomousDriftDetector):
         # Reset drift detection flags but keep reference statistics
         self.drift_detected = False
         self.drift_point_index = None
-        
+
+        # Reset drift cooldown tracking
+        self.in_cooldown_period = False
+        self.samples_since_last_drift = 0
+
         # Optionally update reference to current window
         # self._initialize_reference_from_window()
-        
+
         logger.debug("FeatureMonitor reset")
     
     def _initialize_reference(self) -> None:
@@ -743,12 +747,17 @@ class PageHinkleyFeatureMonitor(AutonomousDriftDetector):
     
     def reset(self) -> None:
         """Reset the detector state.
-        
+
         This resets the Page-Hinkley statistics but keeps the reference statistics.
         """
         self.drift_detected = False
         self.cumulative_sum = 0.0
         self.minimum_sum = 0.0
+
+        # Reset drift cooldown tracking
+        self.in_cooldown_period = False
+        self.samples_since_last_drift = 0
+
         logger.debug("Reset Page-Hinkley detector state")
     
     def get_state(self) -> Dict[str, Any]:
@@ -969,10 +978,15 @@ class EWMAFeatureMonitor(AutonomousDriftDetector):
     
     def reset(self) -> None:
         """Reset the detector state.
-        
+
         This resets the drift flag but keeps the reference statistics and current EWMA value.
         """
         self.drift_detected = False
+
+        # Reset drift cooldown tracking
+        self.in_cooldown_period = False
+        self.samples_since_last_drift = 0
+
         logger.debug("Reset EWMA detector state")
     
     def get_state(self) -> Dict[str, Any]:

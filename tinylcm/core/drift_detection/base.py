@@ -63,64 +63,85 @@ class DriftDetector(ABC):
 
 class AutonomousDriftDetector(DriftDetector):
     """Base class for autonomous drift detectors that don't require labels.
-    
+
     This class extends the basic DriftDetector interface with specific methods
     for autonomous drift detection, callback registration, and reference statistics
     management. It implements the warm-up, rolling update, and pausing logic for
     the reference statistics.
     """
-    
+
     def __init__(
         self,
         warm_up_samples: int = 100,
         reference_update_interval: int = 50,
         reference_update_factor: float = 0.05,
         pause_reference_update_during_drift: bool = True,
+        drift_cooldown_period: int = 100,
     ):
         """Initialize the autonomous drift detector.
-        
+
         Args:
             warm_up_samples: Number of samples to collect during the warm-up phase
             reference_update_interval: Number of samples between reference updates
             reference_update_factor: Factor for updating reference (β)
             pause_reference_update_during_drift: Whether to pause updating during detected drift
+            drift_cooldown_period: Number of samples to wait before triggering another drift event
         """
         self.warm_up_samples = warm_up_samples
         self.reference_update_interval = reference_update_interval
         self.reference_update_factor = reference_update_factor
         self.pause_reference_update_during_drift = pause_reference_update_during_drift
-        
+        self.drift_cooldown_period = drift_cooldown_period
+
         # State flags
         self.in_warm_up_phase = True
         self.samples_processed = 0
         self.drift_detected = False
         self.samples_since_last_update = 0
-        
+
+        # Drift cooldown tracking
+        self.samples_since_last_drift = 0
+        self.in_cooldown_period = False
+        self.last_drift_timestamp = 0
+
         # Callback registration
         self.callbacks = []
-    
+
     def register_callback(self, callback: Callable[[Dict[str, Any]], None]) -> None:
         """Register a callback function to be called when drift is detected.
-        
+
         Args:
             callback: Function to call when drift is detected. It receives a dictionary
                     with information about the detected drift.
         """
         self.callbacks.append(callback)
-    
+
     def _notify_callbacks(self, drift_info: Dict[str, Any]) -> None:
         """Notify all registered callbacks about detected drift.
-        
+
         Args:
             drift_info: Dictionary with information about the detected drift
         """
+        # Import logger here to avoid circular imports
+        from tinylcm.utils.logging import setup_logger
+        logger = setup_logger(__name__)
+
+        # Check if we're in the cooldown period
+        if self.in_cooldown_period and self.samples_since_last_drift < self.drift_cooldown_period:
+            logger.debug(f"In drift cooldown period ({self.samples_since_last_drift}/{self.drift_cooldown_period} samples since last drift), skipping callback notifications")
+            return
+
+        # Reset cooldown tracking
+        self.in_cooldown_period = True
+        self.samples_since_last_drift = 0
+        self.last_drift_timestamp = drift_info.get("timestamp", 0) or 0
+
+        # Execute callbacks
         for callback in self.callbacks:
             try:
                 callback(drift_info)
             except Exception as e:
                 # Log the error but don't propagate it to avoid interrupting the detection process
-                from tinylcm.utils.logging import setup_logger
-                logger = setup_logger(__name__)
                 logger.error(f"Error in drift callback: {str(e)}")
     
     def should_update_reference(self) -> bool:
@@ -157,16 +178,24 @@ class AutonomousDriftDetector(DriftDetector):
     
     def _process_sample(self, record: Any) -> None:
         """Process a new sample and update internal state.
-        
+
         This method should be called at the beginning of the update method in subclasses
         to handle the common logic for warm-up phase and reference updates.
-        
+
         Args:
             record: The new data point
         """
         self.samples_processed += 1
         self.samples_since_last_update += 1
-        
+
+        # Increment cooldown counter if in cooldown period
+        if self.in_cooldown_period:
+            self.samples_since_last_drift += 1
+
+            # If we've passed the cooldown period, exit cooldown mode
+            if self.samples_since_last_drift >= self.drift_cooldown_period:
+                self.in_cooldown_period = False
+
         # Handle warm-up phase
         if self.in_warm_up_phase and self.samples_processed >= self.warm_up_samples:
             self.in_warm_up_phase = False
@@ -176,7 +205,7 @@ class AutonomousDriftDetector(DriftDetector):
     
     def _get_base_state(self) -> Dict[str, Any]:
         """Get the base state for the autonomous drift detector.
-        
+
         Returns:
             Dictionary with base state information
         """
@@ -185,15 +214,19 @@ class AutonomousDriftDetector(DriftDetector):
             "reference_update_interval": self.reference_update_interval,
             "reference_update_factor": self.reference_update_factor,
             "pause_reference_update_during_drift": self.pause_reference_update_during_drift,
+            "drift_cooldown_period": self.drift_cooldown_period,
             "in_warm_up_phase": self.in_warm_up_phase,
             "samples_processed": self.samples_processed,
             "drift_detected": self.drift_detected,
-            "samples_since_last_update": self.samples_since_last_update
+            "samples_since_last_update": self.samples_since_last_update,
+            "in_cooldown_period": self.in_cooldown_period,
+            "samples_since_last_drift": self.samples_since_last_drift,
+            "last_drift_timestamp": self.last_drift_timestamp
         }
     
     def _set_base_state(self, state: Dict[str, Any]) -> None:
         """Set the base state for the autonomous drift detector.
-        
+
         Args:
             state: Dictionary with base state information
         """
@@ -203,7 +236,11 @@ class AutonomousDriftDetector(DriftDetector):
         self.pause_reference_update_during_drift = state.get(
             "pause_reference_update_during_drift", self.pause_reference_update_during_drift
         )
+        self.drift_cooldown_period = state.get("drift_cooldown_period", self.drift_cooldown_period)
         self.in_warm_up_phase = state.get("in_warm_up_phase", self.in_warm_up_phase)
         self.samples_processed = state.get("samples_processed", self.samples_processed)
         self.drift_detected = state.get("drift_detected", self.drift_detected)
         self.samples_since_last_update = state.get("samples_since_last_update", self.samples_since_last_update)
+        self.in_cooldown_period = state.get("in_cooldown_period", self.in_cooldown_period)
+        self.samples_since_last_drift = state.get("samples_since_last_drift", self.samples_since_last_drift)
+        self.last_drift_timestamp = state.get("last_drift_timestamp", self.last_drift_timestamp)
