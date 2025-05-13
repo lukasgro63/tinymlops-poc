@@ -875,9 +875,17 @@ def get_models_performance(
                             print(f"[DEBUG] Processing run {run_id} with {len([c for c in row.index if c.startswith('metrics.')])} metrics")
 
                             # Date filtering if required
-                            if date_filter and run_timestamp < date_filter:
-                                print(f"[DEBUG] Skipping run with timestamp {run_timestamp} (before {date_filter})")
-                                continue
+                            if date_filter and run_timestamp:
+                                # Ensure both values are integers for comparison
+                                try:
+                                    timestamp_int = int(run_timestamp)
+                                    date_filter_int = int(date_filter)
+                                    if timestamp_int < date_filter_int:
+                                        print(f"[DEBUG] Skipping run with timestamp {timestamp_int} (before {date_filter_int})")
+                                        continue
+                                except (ValueError, TypeError) as e:
+                                    print(f"[DEBUG] Error comparing timestamps: {e}, run_timestamp type: {type(run_timestamp)}, date_filter type: {type(date_filter)}")
+                                    # Don't filter if we can't compare
 
                             # Extract all metrics from the run
                             all_metrics = {}
@@ -966,6 +974,19 @@ def get_models_performance(
                             # Get run data directly
                             run = client.get_run(version.run_id)
                             run_timestamp = run.info.start_time if hasattr(run.info, "start_time") else 0
+                            
+                            # Date filtering if required
+                            if date_filter and run_timestamp:
+                                # Ensure both values are integers for comparison
+                                try:
+                                    timestamp_int = int(run_timestamp)
+                                    date_filter_int = int(date_filter)
+                                    if timestamp_int < date_filter_int:
+                                        print(f"[DEBUG] Skipping version {version.version} with timestamp {timestamp_int} (before {date_filter_int})")
+                                        continue
+                                except (ValueError, TypeError) as e:
+                                    print(f"[DEBUG] Error comparing timestamps: {e}, run_timestamp type: {type(run_timestamp)}, date_filter type: {type(date_filter)}")
+                                    # Don't filter if we can't compare
 
                             # Extract metrics
                             if hasattr(run, "data") and hasattr(run.data, "metrics"):
