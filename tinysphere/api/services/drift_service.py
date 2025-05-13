@@ -24,7 +24,8 @@ class DriftService:
         status: Optional[str] = None,
         drift_type: Optional[str] = None,
         start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        end_date: Optional[datetime] = None,
+        sort_order: Optional[str] = "desc"  # Neuer Parameter für Sortierreihenfolge (asc oder desc)
     ) -> List[DriftEvent]:
         """
         Get drift events with optional filtering.
@@ -38,6 +39,7 @@ class DriftService:
             drift_type: Filter by drift type
             start_date: Filter by minimum date
             end_date: Filter by maximum date
+            sort_order: Sort direction ('asc' or 'desc'), defaults to 'desc' (newest first)
             
         Returns:
             List of drift events
@@ -58,8 +60,15 @@ class DriftService:
         
         if drift_type:
             try:
-                drift_type_enum = getattr(DriftType, drift_type.upper())
-                query = query.filter(DriftEvent.drift_type == drift_type_enum)
+                # Sicherer Test, ob der Enum-Wert in der Datenbank existiert
+                if drift_type.upper() in [dt.name for dt in DriftType]:
+                    drift_type_enum = getattr(DriftType, drift_type.upper())
+                    query = query.filter(DriftEvent.drift_type == drift_type_enum)
+                else:
+                    # Fallback zu CUSTOM, wenn der Wert nicht in der Datenbank-Enum existiert
+                    logger.warning(f"Requested drift_type '{drift_type}' not in database enum, ignoring filter")
+                    # Filter ignorieren statt einen Fehler zu verursachen
+                    pass
             except (AttributeError, KeyError):
                 # Invalid drift type, ignore filter
                 pass
@@ -70,8 +79,11 @@ class DriftService:
         if end_date:
             query = query.filter(DriftEvent.timestamp <= end_date)
         
-        # Order by timestamp (newest first)
-        query = query.order_by(desc(DriftEvent.timestamp))
+        # Order by timestamp based on sort_order parameter
+        if sort_order and sort_order.lower() == "asc":
+            query = query.order_by(DriftEvent.timestamp)  # Oldest first (aufsteigend)
+        else:
+            query = query.order_by(desc(DriftEvent.timestamp))  # Newest first (absteigend, Standard)
         
         # Apply pagination
         query = query.offset(skip).limit(limit)
@@ -113,7 +125,13 @@ class DriftService:
         try:
             # Log the drift type we're trying to process
             logger.info(f"Processing drift event with type: {drift_type_str}")
-            drift_type = getattr(DriftType, drift_type_str.upper())
+            # Sicherer Test, ob der Enum-Wert in der Datenbank existiert
+            if drift_type_str.upper() in [dt.name for dt in DriftType]:
+                drift_type = getattr(DriftType, drift_type_str.upper())
+            else:
+                # Fallback, wenn der Wert nicht in der Datenbank existiert
+                logger.warning(f"Drift type '{drift_type_str}' not yet in database enum, falling back to CUSTOM")
+                drift_type = DriftType.CUSTOM
         except (AttributeError, KeyError):
             logger.warning(f"Unknown drift type '{drift_type_str}', falling back to UNKNOWN")
             drift_type = DriftType.UNKNOWN

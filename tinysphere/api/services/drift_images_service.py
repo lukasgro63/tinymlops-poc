@@ -101,7 +101,8 @@ class DriftImagesService:
         drift_type: Optional[str] = None, 
         date: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
+        sort_order: Optional[str] = "desc"  # Neuer Parameter für Sortierreihenfolge (asc oder desc)
     ) -> Dict[str, Any]:
         """
         List drift images with optional filtering.
@@ -112,6 +113,7 @@ class DriftImagesService:
             date: Filter by date (YYYYMMDD format)
             limit: Maximum number of images to return
             offset: Number of images to skip
+            sort_order: Sort direction ('asc' or 'desc'), defaults to 'desc' (newest first)
             
         Returns:
             Dictionary with list of images and total count
@@ -144,10 +146,10 @@ class DriftImagesService:
             images = []
             contents = response.get('Contents', [])
             
-            # Apply manual pagination
-            paginated_contents = contents[offset:offset+limit]
-            
-            for obj in paginated_contents:
+            # Sortieren der Ergebnisse nach last modified timestamp
+            # Die S3-API gibt bereits ein 'LastModified' Feld für jedes Objekt zurück
+            sortable_contents = []
+            for obj in contents:
                 # Skip "directory" markers which end with /
                 if obj['Key'].endswith('/'):
                     continue
@@ -155,6 +157,21 @@ class DriftImagesService:
                 # Skip non-image files (check if it's an image by extension)
                 if not any(obj['Key'].lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif']):
                     continue
+                
+                sortable_contents.append(obj)
+            
+            # Aktualisiere die Gesamtzahl basierend auf den tatsächlich verfügbaren Bildern
+            total_count = len(sortable_contents)
+            
+            # Sortierung anwenden
+            reverse = sort_order.lower() != 'asc'  # Bei desc (neueste zuerst) brauchen wir reverse=True
+            sortable_contents.sort(key=lambda x: x['LastModified'], reverse=reverse)
+            
+            # Nach dem Sortieren die Pagination anwenden
+            paginated_contents = sortable_contents[offset:offset+limit]
+            
+            for obj in paginated_contents:
+                # Wir haben bereits Directory-Marker und Nicht-Bilddateien beim Sortieren übersprungen
                 
                 # Parse path components
                 path_parts = obj['Key'].split('/')

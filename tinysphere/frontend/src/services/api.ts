@@ -219,15 +219,35 @@ export const getPredictionImages = async (
   predictionType?: string,
   date?: string,
   limit: number = 100,
-  offset: number = 0
+  offset: number = 0,
+  sortOrder?: 'asc' | 'desc'
 ): Promise<PredictionImagesResponse> => {
   let url = `${API_BASE_URL}/prediction-images/list?limit=${limit}&offset=${offset}`;
 
   if (deviceId) url += `&device_id=${deviceId}`;
   if (predictionType) url += `&prediction_type=${predictionType}`;
   if (date) url += `&date=${date}`;
+  if (sortOrder) url += `&sort_order=${sortOrder}`;
 
   const response = await axios.get<PredictionImagesResponse>(url);
+  
+  // Client-seitige Sortierung, falls das Backend die Sortierung nicht unterstützt
+  if (sortOrder && response.data.images.length > 0) {
+    const sortedImages = [...response.data.images].sort((a, b) => {
+      const dateA = new Date(a.last_modified).getTime();
+      const dateB = new Date(b.last_modified).getTime();
+      
+      return sortOrder === 'desc' 
+        ? dateB - dateA  // Newest first (desc)
+        : dateA - dateB; // Oldest first (asc)
+    });
+    
+    return {
+      ...response.data,
+      images: sortedImages
+    };
+  }
+  
   return response.data;
 };
 
@@ -247,6 +267,7 @@ export const getDriftEvents = async (params?: {
   drift_type?: string;
   start_date?: string;
   end_date?: string;
+  sort_order?: 'asc' | 'desc'; // Neue Parameter für Sortierung
 }): Promise<DriftEvent[]> => {
   const queryParams = new URLSearchParams();
   if (params) {
@@ -260,6 +281,20 @@ export const getDriftEvents = async (params?: {
   const response = await axios.get<DriftEvent[]>(
     `${API_BASE_URL}/drift/events?${queryParams.toString()}`
   );
+  
+  // Client-seitige Sortierung als Fallback, falls Backend-API keine Sortierung unterstützt
+  if (params?.sort_order) {
+    const sortedData = [...response.data].sort((a, b) => {
+      const dateA = new Date(a.timestamp).getTime();
+      const dateB = new Date(b.timestamp).getTime();
+      
+      return params.sort_order === 'desc' 
+        ? dateB - dateA  // Newest first (desc)
+        : dateA - dateB; // Oldest first (asc)
+    });
+    return sortedData;
+  }
+  
   return response.data;
 };
 
@@ -351,15 +386,35 @@ export const getDriftImages = async (
   driftType?: string,
   date?: string,
   limit: number = 100,
-  offset: number = 0
+  offset: number = 0,
+  sortOrder?: 'asc' | 'desc'
 ): Promise<DriftImagesResponse> => {
   let url = `${API_BASE_URL}/drift-images/list?limit=${limit}&offset=${offset}`;
 
   if (deviceId) url += `&device_id=${deviceId}`;
   if (driftType) url += `&drift_type=${driftType}`;
   if (date) url += `&date=${date}`;
+  if (sortOrder) url += `&sort_order=${sortOrder}`;
 
   const response = await axios.get<DriftImagesResponse>(url);
+  
+  // Client-seitige Sortierung, falls das Backend die Sortierung nicht unterstützt
+  if (sortOrder && response.data.images.length > 0) {
+    const sortedImages = [...response.data.images].sort((a, b) => {
+      const dateA = new Date(a.last_modified).getTime();
+      const dateB = new Date(b.last_modified).getTime();
+      
+      return sortOrder === 'desc' 
+        ? dateB - dateA  // Newest first (desc)
+        : dateA - dateB; // Oldest first (asc)
+    });
+    
+    return {
+      ...response.data,
+      images: sortedImages
+    };
+  }
+  
   return response.data;
 };
 

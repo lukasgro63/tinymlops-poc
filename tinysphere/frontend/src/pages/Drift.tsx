@@ -161,7 +161,8 @@ const DriftPage: React.FC = () => {
       // Prepare filter parameters
       const params: any = {
         skip: page * rowsPerPage,
-        limit: rowsPerPage
+        limit: rowsPerPage,
+        sort_order: sortOrder // Übergebe Sortierreihenfolge an API
       };
       
       if (filters.deviceId) params.device_id = filters.deviceId;
@@ -188,19 +189,8 @@ const DriftPage: React.FC = () => {
         if (Array.isArray(data)) {
           console.log("Successfully fetched drift events:", data.length);
           
-          // Sort data based on sort order
-          const sortedData = [...data].sort((a, b) => {
-            // Parse dates from the timestamp field
-            const dateA = new Date(a.timestamp).getTime();
-            const dateB = new Date(b.timestamp).getTime();
-            
-            // Apply sort order - newer dates have larger timestamps
-            return sortOrder === 'desc' 
-              ? dateB - dateA  // Newest first (desc)
-              : dateA - dateB; // Oldest first (asc)
-          });
-          
-          setEvents(sortedData);
+          // Die Sortierung erfolgt jetzt auf Server-Ebene durch den sort_order Parameter
+          setEvents(data);
           // In a real application, we'd set totalCount from API response headers or metadata
           setTotalCount(data.length > rowsPerPage ? 100 : data.length); // Mock total count
         } else {

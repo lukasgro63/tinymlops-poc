@@ -296,22 +296,12 @@ const DataHub: React.FC = () => {
             selectedType || undefined,
             selectedDate || undefined,
             rowsPerPage,
-            page * rowsPerPage
+            page * rowsPerPage,
+            sortOrder // Sortierparameter übergeben
           );
           
-          // Sort images according to sort order
-          const sortedImages = [...response.images].sort((a, b) => {
-            // Parse dates from the last_modified field
-            const dateA = new Date(a.last_modified).getTime();
-            const dateB = new Date(b.last_modified).getTime();
-            
-            // Apply sort order - newer dates have larger timestamps
-            return sortOrder === 'desc' 
-              ? dateB - dateA  // Newest first (desc)
-              : dateA - dateB; // Oldest first (asc)
-          });
-          
-          setImages(sortedImages);
+          // Die Sortierung erfolgt jetzt auf Server-Ebene durch den sort_order Parameter
+          setImages(response.images);
           setTotalImages(response.total);
         } else {
           // For "All Devices" option - we need to fetch for each device with images
@@ -326,19 +316,18 @@ const DataHub: React.FC = () => {
               selectedType || undefined,
               selectedDate || undefined,
               rowsPerPage,
-              0 // For simplicity, just get the first page from each device
+              0, // For simplicity, just get the first page from each device
+              sortOrder // Sortierparameter übergeben
             );
             
             allImages = [...allImages, ...response.images];
           }
           
-          // Sort all images according to sort order
+          // Sortieren der kombinierten Bilder von allen Geräten
           allImages.sort((a, b) => {
-            // Parse dates from the last_modified field
             const dateA = new Date(a.last_modified).getTime();
             const dateB = new Date(b.last_modified).getTime();
             
-            // Apply sort order - newer dates have larger timestamps
             return sortOrder === 'desc' 
               ? dateB - dateA  // Newest first (desc)
               : dateA - dateB; // Oldest first (asc)
@@ -381,11 +370,12 @@ const DataHub: React.FC = () => {
             selectedDriftType || undefined,
             selectedDriftDate || undefined,
             rowsPerPage,
-            page * rowsPerPage
+            page * rowsPerPage,
+            sortOrder // Sortierparameter übergeben
           );
 
           // Process images to set event_id from folder name if available
-          let processedImages = response.images.map(image => {
+          const processedImages = response.images.map(image => {
             // Check if the image is in a folder that starts with "event_"
             const pathParts = image.key.split('/');
             if (pathParts.length > 3) {
@@ -402,18 +392,7 @@ const DataHub: React.FC = () => {
             return image;
           });
 
-          // Sort images according to sort order
-          processedImages = processedImages.sort((a, b) => {
-            // Parse dates from the last_modified field
-            const dateA = new Date(a.last_modified).getTime();
-            const dateB = new Date(b.last_modified).getTime();
-            
-            // Apply sort order - newer dates have larger timestamps
-            return sortOrder === 'desc' 
-              ? dateB - dateA  // Newest first (desc)
-              : dateA - dateB; // Oldest first (asc)
-          });
-
+          // Die Sortierung erfolgt jetzt auf Server-Ebene durch den sort_order Parameter
           setDriftImages(processedImages);
           setTotalDriftImages(response.total);
         } else {
@@ -429,7 +408,8 @@ const DataHub: React.FC = () => {
               selectedDriftType || undefined,
               selectedDriftDate || undefined,
               rowsPerPage,
-              0 // For simplicity, just get the first page from each device
+              0, // For simplicity, just get the first page from each device
+              sortOrder // Sortierparameter übergeben
             );
 
             // Process images to set event_id from folder name if available
@@ -453,13 +433,11 @@ const DataHub: React.FC = () => {
             allDriftImages = [...allDriftImages, ...processedImages];
           }
 
-          // Sort all drift images according to sort order
+          // Sortieren der kombinierten Drift-Bilder von allen Geräten
           allDriftImages.sort((a, b) => {
-            // Parse dates from the last_modified field
             const dateA = new Date(a.last_modified).getTime();
             const dateB = new Date(b.last_modified).getTime();
             
-            // Apply sort order - newer dates have larger timestamps
             return sortOrder === 'desc' 
               ? dateB - dateA  // Newest first (desc)
               : dateA - dateB; // Oldest first (asc)

@@ -31,13 +31,14 @@ def get_drift_events(
     drift_type: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    sort_order: Optional[str] = "desc",  # Neuer Parameter für Sortierreihenfolge
     db: Session = Depends(get_db)
 ):
     """
     Get drift events with optional filtering.
     """
     events = DriftService.get_drift_events(
-        db, skip, limit, device_id, status, drift_type, start_date, end_date
+        db, skip, limit, device_id, status, drift_type, start_date, end_date, sort_order
     )
     
     # Add computed fields
