@@ -4,7 +4,8 @@ import {
   BugReport as BugReportIcon,
   CheckCircle as CheckCircleIcon,
   CompareArrows as CompareArrowsIcon,
-  HourglassEmpty as HourglassEmptyIcon
+  HourglassEmpty as HourglassEmptyIcon,
+  Refresh as RefreshIcon
 } from '@mui/icons-material';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
 import StorageIcon from '@mui/icons-material/Storage';
@@ -13,6 +14,7 @@ import {
   Button,
   Chip,
   CircularProgress,
+  IconButton,
   Paper,
   Table,
   TableBody,
@@ -20,6 +22,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  Tooltip,
   Typography
 } from '@mui/material';
 import React, { useEffect, useState } from 'react';
@@ -33,7 +36,8 @@ import {
   getModelMetrics,
   getModelVersions,
   getModels,
-  getModelsSummary
+  getModelsSummary,
+  getModelsPerformance
 } from '../services/api';
 import {
   MetricRow,
@@ -61,36 +65,42 @@ const Models: React.FC = () => {
   const [metricsLoading, setMetricsLoading] = useState<boolean>(false);
   const [comparisonLoading, setComparisonLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   
   // Fetch initial data on load
-  useEffect(() => {
-    const fetchInitialData = async () => {
-      try {
-        setLoading(true);
-        
-        // Parallel requests for model list and summaries
-        const [summaries, models] = await Promise.all([
-          getModelsSummary(),
-          getModels()
-        ]);
-        
-        setModelSummaries(summaries);
-        setModelList(models);
-        
-        // Select the first model if available
-        if (models.length > 0) {
-          setSelectedModel(models[0]);
-        }
-        
-      } catch (err) {
-        console.error('Error fetching model data:', err);
-        setError('Failed to load model data. Please try again later.');
-      } finally {
-        setLoading(false);
+  // Function to fetch all models data
+  const fetchModelsData = async () => {
+    try {
+      setLoading(true);
+      
+      // Parallel requests for model list and summaries
+      const [summaries, models] = await Promise.all([
+        getModelsSummary(),
+        getModels()
+      ]);
+      
+      setModelSummaries(summaries);
+      setModelList(models);
+      
+      // Select the first model if available and no model is currently selected
+      if (models.length > 0 && !selectedModel) {
+        setSelectedModel(models[0]);
       }
-    };
-    
-    fetchInitialData();
+      
+      // Update last updated timestamp
+      setLastUpdated(new Date());
+      
+    } catch (err) {
+      console.error('Error fetching model data:', err);
+      setError('Failed to load model data. Please try again later.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch initial data on load
+  useEffect(() => {
+    fetchModelsData();
   }, []);
   
   // Fetch versions when selected model changes
@@ -169,15 +179,80 @@ const Models: React.FC = () => {
     }
   };
   
-  // Fetch model metrics from MLflow
+  // Fetch model metrics from MLflow using dashboard endpoint
   const fetchModelMetrics = async (modelName: string) => {
     try {
       setMetricsLoading(true);
-      const metrics = await getModelMetrics(modelName);
-      setVersionMetrics(metrics);
+      
+      // First try using the dashboard performance endpoint which is more robust
+      // This endpoint works better with experiment data
+      console.log(`Fetching metrics for model ${modelName} using dashboard endpoint`);
+      const performanceData = await getModelsPerformance(
+        selectedMetric,  // Use current selected metric
+        30,              // Get data for last 30 days
+        100,             // Get up to 100 data points
+        modelName,       // Filter to just this model
+        undefined,       // No tag filtering
+        true             // Include operational metrics
+      );
+      
+      if (performanceData && performanceData.length > 0) {
+        console.log(`Found ${performanceData.length} performance data points for model ${modelName}`);
+        
+        // Convert performance data format to version metrics format
+        const versionMap = new Map();
+        
+        // Group metrics by version
+        performanceData.forEach(item => {
+          if (!versionMap.has(item.version)) {
+            versionMap.set(item.version, {
+              version: item.version,
+              stage: item.stage,
+              run_id: item.run_id || '',
+              created_at: item.timestamp || Date.now(),
+              metrics: {}
+            });
+          }
+          
+          // Add this metric to the version's metrics
+          const versionData = versionMap.get(item.version);
+          versionData.metrics[item.metric_name] = item.value;
+        });
+        
+        // Convert map to array
+        const processedMetrics = Array.from(versionMap.values());
+        console.log(`Processed ${processedMetrics.length} versions with metrics`);
+        
+        setVersionMetrics(processedMetrics);
+      } else {
+        console.warn(`No performance data found, falling back to model metrics endpoint`);
+        
+        // Fallback to the original metrics endpoint
+        const metrics = await getModelMetrics(modelName);
+        
+        if (metrics && metrics.length > 0) {
+          console.log(`Found ${metrics.length} metrics from model endpoint`);
+          setVersionMetrics(metrics);
+        } else {
+          console.warn(`No metrics found for model ${modelName} from either endpoint`);
+          // Create empty metrics for existing versions
+          if (modelVersions.length > 0) {
+            const emptyMetrics = modelVersions.map(version => ({
+              version: version.version,
+              stage: version.stage,
+              run_id: version.run_id || '',
+              created_at: Date.now(),
+              metrics: {}
+            }));
+            setVersionMetrics(emptyMetrics);
+          } else {
+            setVersionMetrics([]);
+          }
+        }
+      }
     } catch (err) {
       console.error('Error fetching model metrics:', err);
-      // Don't set global error for just the metrics
+      setVersionMetrics([]);
     } finally {
       setMetricsLoading(false);
     }
@@ -239,6 +314,20 @@ const Models: React.FC = () => {
         <SectionCard 
           title="Model Registry" 
           icon={<StorageIcon style={{ fontSize: 20, color: '#00647D' }} />}
+          action={
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Tooltip title="Last updated">
+                <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
+                  {lastUpdated ? `Updated: ${lastUpdated.toLocaleTimeString()}` : ''}
+                </Typography>
+              </Tooltip>
+              <Tooltip title="Refresh data">
+                <IconButton size="small" onClick={() => fetchModelsData()} disabled={loading}>
+                  <RefreshIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          }
         >
           <ModelRegistryTable 
             initialData={modelSummaries}

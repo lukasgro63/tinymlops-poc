@@ -18,6 +18,16 @@ import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, X
 import { getModelsPerformance } from '../../services/api';
 import { ModelPerformanceData } from '../../types/api';
 
+// Extended chart data interface
+interface ChartDataItem {
+  name: string;
+  value: number | null;
+  stage?: string;
+  timestamp?: number;
+  run_id?: string;
+  isEmpty?: boolean; // Flag for empty data display
+}
+
 interface ModelPerformanceChartProps {
   // For Dashboard mode (fetches data internally)
   models?: string[];
@@ -48,7 +58,7 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
   // Internal state
   const [selectedModel, setSelectedModel] = useState<string>(models.length > 0 ? models[0] : '');
   const [selectedMetric, setSelectedMetric] = useState<string>(externalSelectedMetric || 'accuracy');
-  const [chartData, setChartData] = useState<any[]>([]);
+  const [chartData, setChartData] = useState<ChartDataItem[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -118,11 +128,30 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
 
   // Transform performance data for chart when model or metric changes in model list mode
   useEffect(() => {
-    if (isModelListMode && selectedModel && performanceData.length > 0) {
-      const filteredData = performanceData.filter(item =>
-        item.model_name === selectedModel &&
-        item.metric_name === selectedMetric
-      );
+    if (isModelListMode && selectedModel) {
+      let filteredData: ModelPerformanceData[] = [];
+      
+      // Only filter if we have performance data
+      if (performanceData.length > 0) {
+        filteredData = performanceData.filter(item =>
+          item.model_name === selectedModel &&
+          item.metric_name === selectedMetric
+        );
+      }
+
+      // Handle case where no data is available for this model/metric combination
+      if (filteredData.length === 0) {
+        console.warn(`No performance data found for model ${selectedModel} and metric ${selectedMetric}`);
+        setChartData([
+          { 
+            name: 'No Data Available', 
+            value: null,
+            stage: '',
+            isEmpty: true // Custom flag to identify empty data for rendering
+          }
+        ]);
+        return;
+      }
 
       // Transform for chart display
       const formattedData = filteredData.map(item => {
@@ -164,6 +193,16 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
       });
 
       setChartData(formattedData);
+    } else if (isModelListMode) {
+      // No model selected
+      setChartData([
+        { 
+          name: 'Select Model', 
+          value: null,
+          stage: '',
+          isEmpty: true
+        }
+      ]);
     }
   }, [isModelListMode, selectedModel, selectedMetric, performanceData]);
 
@@ -215,15 +254,21 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
 
       // Extract available metrics from the data
       const metricsSet = new Set<string>();
+      
+      // First try getting metrics from the performance data
       data.forEach(item => {
         if (item.metric_name) {
           metricsSet.add(item.metric_name);
         }
       });
-
-      // Update available metrics if we found any
+      
+      // If we found any metrics in the data, update the available metrics
       if (metricsSet.size > 0) {
+        console.log(`Found ${metricsSet.size} metric types in performance data`);
         setAvailableMetrics(Array.from(metricsSet));
+      } else {
+        // Use default metrics as a fallback
+        console.log("No metrics found in performance data, using defaults");
       }
 
       // Don't update performanceData here as we're using the prop
@@ -504,9 +549,13 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
             <Typography color="error">{error}</Typography>
           </Box>
-        ) : chartData.length === 0 ? (
+        ) : chartData.length === 0 || (chartData.length === 1 && chartData[0].isEmpty) ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-            <Typography>No performance data available for this model</Typography>
+            <Typography>
+              {chartData.length === 0 ? 
+                'No performance data available for this model' : 
+                chartData[0].name}
+            </Typography>
           </Box>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
