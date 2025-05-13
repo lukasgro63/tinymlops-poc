@@ -1081,6 +1081,21 @@ def main():
                             logger.info("Sending metrics to TinySphere")
                             success = sync_client.create_and_send_metrics_package(metrics)
                             logger.info(f"Metrics package sent: {'Success' if success else 'Failed'}")
+                            
+                            # Send operational logs to TinySphere (raw JSONL files)
+                            try:
+                                # Get operational logs directory from the operational monitor
+                                operational_logs_dir = operational_monitor.storage_dir
+                                session_id = operational_monitor.session_id
+                                
+                                logger.info(f"Sending operational logs from {operational_logs_dir}")
+                                success = sync_client.create_and_send_operational_logs_package(
+                                    operational_logs_dir=str(operational_logs_dir),
+                                    session_id=session_id
+                                )
+                                logger.info(f"Operational logs package sent: {'Success' if success else 'Failed'}")
+                            except Exception as e:
+                                logger.error(f"Error sending operational logs: {e}", exc_info=True)
                         except Exception as e:
                             logger.error(f"Error getting or sending metrics: {e}", exc_info=True)
 
@@ -1137,6 +1152,27 @@ def main():
         logger.info("Performing final sync with TinySphere")
         if 'sync_client' in locals() and sync_client:
             try:
+                # Get final operational metrics and logs
+                if 'operational_monitor' in locals() and operational_monitor:
+                    try:
+                        # Send final metrics
+                        metrics = operational_monitor.get_current_metrics()
+                        success = sync_client.create_and_send_metrics_package(metrics)
+                        logger.info(f"Final metrics package sent: {'Success' if success else 'Failed'}")
+                        
+                        # Send all operational logs for the entire session
+                        operational_logs_dir = operational_monitor.storage_dir
+                        session_id = operational_monitor.session_id
+                        
+                        logger.info(f"Sending final operational logs from {operational_logs_dir}")
+                        success = sync_client.create_and_send_operational_logs_package(
+                            operational_logs_dir=str(operational_logs_dir),
+                            session_id=session_id
+                        )
+                        logger.info(f"Final operational logs package sent: {'Success' if success else 'Failed'}")
+                    except Exception as e:
+                        logger.error(f"Error sending final operational data: {e}", exc_info=True)
+
                 # Sync all pending packages
                 sync_results = sync_client.sync_all_pending_packages()
                 logger.info("Final sync completed")
