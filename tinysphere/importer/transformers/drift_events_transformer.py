@@ -145,19 +145,38 @@ class DriftEventsTransformer(DataTransformer):
         for meta_file in image_metadata_files:
             try:
                 with open(meta_file, 'r') as f:
+                    # Log the full metadata file content for diagnosis
                     metadata_content = json.load(f)
+                    logger.info(f"FULL METADATA CONTENT: {json.dumps(metadata_content)}")
+                    
                     if "drift_type" in metadata_content:
-                        drift_type = metadata_content.get("drift_type", "unknown")
+                        drift_type_from_metadata = metadata_content.get("drift_type", "unknown")
+                        logger.info(f"Found raw drift_type in metadata: {drift_type_from_metadata}")
+                        
+                        # Normalize drift type - convert all to lowercase for consistency
+                        drift_type = drift_type_from_metadata.lower()
+                        
+                        # Map 'knn distance monitor' to 'knn_distance'
+                        if "knn" in drift_type and ("distance" in drift_type or "monitor" in drift_type):
+                            drift_type = "knn_distance"
+                            logger.info(f"Mapped KNN/Distance detector to drift_type: {drift_type}")
                     
                     # Check for relative path which might include drift type
                     rel_path = metadata_content.get("relative_path")
                     if rel_path and isinstance(rel_path, str):
+                        logger.info(f"Found relative_path in metadata: {rel_path}")
                         path_parts = rel_path.split("/")
                         if len(path_parts) >= 2:
                             # Structure usually: device_id/drift_type/date/filename
-                            drift_type = path_parts[1]
+                            rel_path_drift_type = path_parts[1].lower()
+                            logger.info(f"Extracted drift_type from relative_path: {rel_path_drift_type}")
+                            
+                            # If we had no drift_type before or had 'unknown', use this one
+                            if drift_type == "unknown":
+                                drift_type = rel_path_drift_type
+                                logger.info(f"Using drift_type from relative_path: {drift_type}")
                     
-                    logger.info(f"Found drift type in image metadata: {drift_type}")
+                    logger.info(f"Final drift type from image metadata: {drift_type}")
                     break
             except Exception as e:
                 logger.warning(f"Error reading image metadata file: {e}")
@@ -166,19 +185,49 @@ class DriftEventsTransformer(DataTransformer):
         if drift_type == "unknown" and drift_metadata_files:
             try:
                 with open(drift_metadata_files[0], 'r') as f:
+                    # Log the full drift event file content for diagnosis
                     metadata_content = json.load(f)
+                    logger.info(f"FULL DRIFT EVENT CONTENT: {json.dumps(metadata_content)}")
                     
-                    # Try to get drift type from detector name
-                    detector_name = metadata_content.get("detector_name", "")
-                    if detector_name:
-                        detector_lower = detector_name.lower()
-                        # Check for KNN distance monitor specifically
-                        if "knn" in detector_lower and "distance" in detector_lower:
+                    # Check if drift_type is directly specified in the event
+                    if "drift_type" in metadata_content:
+                        drift_type_from_metadata = metadata_content.get("drift_type", "unknown")
+                        logger.info(f"Found drift_type directly in event file: {drift_type_from_metadata}")
+                        
+                        # Normalize drift type - convert all to lowercase for consistency
+                        drift_type = drift_type_from_metadata.lower()
+                        
+                        # Map 'knn_distance' specifically
+                        if drift_type == "knn_distance" or (("knn" in drift_type) and ("distance" in drift_type)):
                             drift_type = "knn_distance"
-                        else:
-                            # Clean up detector name to create drift type
-                            drift_type = detector_lower.replace("monitor", "").replace(" ", "_")
-                        logger.info(f"Derived drift type from detector name: {drift_type}")
+                            logger.info(f"Using drift_type from event file: {drift_type}")
+                    
+                    # If no drift_type found directly, derive from detector name
+                    if drift_type == "unknown":
+                        # Try to get drift type from detector name
+                        detector_name = metadata_content.get("detector_name", "")
+                        logger.info(f"Deriving drift_type from detector_name: {detector_name}")
+                        
+                        if detector_name:
+                            detector_lower = detector_name.lower()
+                            # Determine drift type from detector name in a consistent way
+                            if "confidence" in detector_lower:
+                                drift_type = "confidence"
+                            elif "distribution" in detector_lower:
+                                drift_type = "distribution"
+                            elif "feature" in detector_lower and not "knn" in detector_lower:
+                                drift_type = "feature"
+                            elif "knn" in detector_lower or "distance" in detector_lower:
+                                drift_type = "knn_distance"
+                            elif "outlier" in detector_lower:
+                                drift_type = "outlier"
+                            elif "concept" in detector_lower:
+                                drift_type = "custom"
+                            elif "performance" in detector_lower:
+                                drift_type = "outlier"
+                            else:
+                                drift_type = "unknown"
+                            logger.info(f"Derived drift type from detector name: {drift_type}")
                     
                     # Extract event ID if available
                     if "event_id" in metadata_content:
@@ -190,10 +239,44 @@ class DriftEventsTransformer(DataTransformer):
         # If we still don't have a drift type, check package description
         if drift_type == "unknown" and "description" in metadata:
             package_description = metadata.get("description", "")
+            logger.info(f"Checking package description for drift type: {package_description}")
+            
+            # Look for "[Package Type] from [detector]" pattern
             if "drift event from" in package_description.lower():
                 parts = package_description.split("from ")[1].split(":")[0]
-                drift_type = parts.lower().replace("monitor", "").strip().replace(" ", "_")
+                detector_lower = parts.lower().strip()
+                logger.info(f"Extracted detector from package description: {detector_lower}")
+                
+                # Use consistent drift type mapping as before
+                if "confidence" in detector_lower:
+                    drift_type = "confidence"
+                elif "distribution" in detector_lower:
+                    drift_type = "distribution"
+                elif "feature" in detector_lower and not "knn" in detector_lower:
+                    drift_type = "feature"
+                elif "knn" in detector_lower or "distance" in detector_lower:
+                    drift_type = "knn_distance"
+                elif "outlier" in detector_lower:
+                    drift_type = "outlier"
+                elif "concept" in detector_lower:
+                    drift_type = "custom"
+                elif "performance" in detector_lower:
+                    drift_type = "outlier"
+                else:
+                    drift_type = "unknown"
+                
                 logger.info(f"Extracted drift type from package description: {drift_type}")
+        
+        # Add a final check to ensure we're using the correct drift type for KNN Distance
+        if drift_type == "unknown" and any("knn" in f.name.lower() for f in files):
+            logger.info(f"Found KNN-related files but drift_type is unknown, forcing to knn_distance")
+            drift_type = "knn_distance"
+        
+        # Final consistency check
+        if drift_type != "unknown":
+            # Ensure lowercase and underscore format
+            drift_type = drift_type.lower().replace(" ", "_")
+            logger.info(f"Final normalized drift type: {drift_type}")
         
         # Upload images to MinIO drift bucket
         uploaded_count = 0

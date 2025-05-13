@@ -489,19 +489,19 @@ class DriftTransformer(DataTransformer):
         detector_lower = detector_name.lower()
         
         if "confidence" in detector_lower:
-            return "CONFIDENCE"
+            return "confidence"  # Lowercase to match enum value string
         elif "distribution" in detector_lower:
-            return "FEATURE_DISTRIBUTION"
+            return "distribution"  # Lowercase to match enum value string
         elif "feature" in detector_lower:
-            return "FEATURE"
+            return "feature"  # Lowercase to match enum value string
         elif "concept" in detector_lower:
-            return "CONCEPT"
+            return "custom"  # Use custom as the concept is not in enum
         elif "performance" in detector_lower:
-            return "PERFORMANCE"
+            return "outlier"  # Use outlier as performance is not in enum
         elif "knn" in detector_lower or "distance" in detector_lower:
-            return "KNN_DISTANCE"
+            return "knn_distance"  # Lowercase to match enum value string
         else:
-            return "UNKNOWN"
+            return "unknown"  # Lowercase to match enum value string
     
     def _log_drift_to_mlflow(self, drift_event: Dict[str, Any], device_id: str, model_name: str, model_version: str, package_id: str, drift_file: Path) -> str:
         """

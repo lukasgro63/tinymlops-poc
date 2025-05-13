@@ -139,8 +139,20 @@ def on_drift_detected(drift_info: Dict[str, Any], *args) -> None:
         return
 
     # Extract information from drift info
-    detector_name = drift_info.get("detector", "Unknown")
-    detector_type = drift_info.get("detector_type", detector_name)
+    detector_name = drift_info.get("detector_type", "Unknown")
+    if detector_name == "Unknown":
+        # Fallback if detector_type is not set
+        detector_name = drift_info.get("detector", "Unknown")
+    
+    # Ensure detector_name is directly usable in logs and drift events
+    if detector_name == "KNNDistanceMonitor":
+        drift_type = "knn_distance"
+    elif detector_name == "EWMAConfidenceMonitor":
+        drift_type = "confidence"
+    elif detector_name == "FeatureMonitor":
+        drift_type = "feature"
+    else:
+        drift_type = detector_name.lower()
 
     # Determine reason based on the detector type
     if "metric" in drift_info:
@@ -152,10 +164,10 @@ def on_drift_detected(drift_info: Dict[str, Any], *args) -> None:
         reason = "Drift detected"
 
     # Log the drift detection with more visibility (use WARNING level)
-    logger.warning(f"DRIFT DETECTED by {detector_type}: {reason}")
+    logger.warning(f"DRIFT DETECTED by {detector_name} (drift_type={drift_type}): {reason}")
     
-    # Add specific indicators based on detector type
-    if detector_type == "KNNDistanceMonitor" and "neighbor_distance" in reason:
+    # Add specific indicators based on detector name
+    if detector_name == "KNNDistanceMonitor" and "neighbor_distance" in reason:
         logger.warning(f"!!! KNN DISTANCE-BASED DRIFT DETECTED !!! Capturing image for analysis...")
 
     # Extract metrics from drift info - but exclude some known keys to reduce noise
@@ -189,15 +201,7 @@ def on_drift_detected(drift_info: Dict[str, Any], *args) -> None:
 
         # Create drift directory structure for compatibility with tinysphere bucket format:
         # device_id/drift_type/date/filename.jpg
-        if detector_type == "KNNDistanceMonitor":
-            drift_type = "knn_distance"  # Specific KNN distance-based drift type
-        elif detector_type == "EWMAConfidenceMonitor":
-            drift_type = "confidence"    # Confidence-based drift
-        elif detector_type == "FeatureMonitor":
-            drift_type = "feature"       # Feature-based drift
-        else:
-            # Default fallback
-            drift_type = detector_name.lower().replace("monitor", "").replace(" ", "_")
+        # drift_type is already set above, no need to recompute it here
 
         # Create base drift directory
         drift_dir = Path("./drift_images")
@@ -238,6 +242,7 @@ def on_drift_detected(drift_info: Dict[str, Any], *args) -> None:
                 "detector_name": detector_name,
                 "reason": reason,
                 "metrics": metrics,
+                "drift_type": drift_type,  # Include the explicitly derived drift_type
                 "timestamp": datetime.now().isoformat()
             }
 
@@ -296,6 +301,9 @@ def on_drift_detected(drift_info: Dict[str, Any], *args) -> None:
                     sample=current_sample_obj,
                     image_path=str(image_path) if image_path else None
                 )
+                
+                # Log the drift type being used for better traceability
+                logger.info(f"Drift event sent with detector_name={detector_name} and drift_type={drift_type}")
 
                 logger.warning(f"DRIFT EVENT ({drift_type}) SENT: {'Success' if success else 'Failed'} - Package sent to server with image")
                 return  # Exit early if we used this method
@@ -346,6 +354,9 @@ def on_drift_detected(drift_info: Dict[str, Any], *args) -> None:
 
                     # Finalize the package
                     sync_client.sync_interface.finalize_package(package_id)
+                    
+                    # Log the drift type being used for better traceability
+                    logger.info(f"Drift event (fallback sync) sent with detector_name={detector_name} and drift_type={drift_type}")
 
                     # We'll use this package_id for future references
                     return  # Exit early - we're done!
@@ -389,6 +400,13 @@ def on_drift_detected(drift_info: Dict[str, Any], *args) -> None:
                 json.dump(metadata, f)
 
             # Create data.json with the drift information
+            # Before writing, make sure it has drift_type
+            if "drift_type" not in drift_data:
+                drift_data["drift_type"] = drift_type
+                
+            # Log the final drift data for debugging
+            logger.info(f"Writing drift data with drift_type={drift_data.get('drift_type')} to data.json")
+                
             data_file = os.path.join(package_dir, "data.json")
             with open(data_file, 'w') as f:
                 json.dump(drift_data, f)
@@ -1005,7 +1023,18 @@ def main():
                     cooldown_count = 0
 
                     for result in drift_results:
-                        detector_name = result.get('detector_type', 'unknown')
+                        # Get detector name, use detector_type as primary key, detector as fallback
+                        detector_name = result.get('detector_type', result.get('detector', 'unknown'))
+                        
+                        # Get consistent drift type
+                        if detector_name == "KNNDistanceMonitor":
+                            drift_type = "knn_distance"
+                        elif detector_name == "EWMAConfidenceMonitor":
+                            drift_type = "confidence"
+                        elif detector_name == "FeatureMonitor":
+                            drift_type = "feature"
+                        else:
+                            drift_type = detector_name.lower()
 
                         if result.get("drift_detected", False):
                             drift_count += 1
@@ -1015,7 +1044,7 @@ def main():
                             current = result.get("current_value", "unknown")
                             threshold = result.get("threshold", "unknown")
 
-                            logger.debug(f"Drift detected by {detector_name} - "
+                            logger.debug(f"Drift detected by {detector_name} (drift_type={drift_type}) - "
                                         f"Metric: {metric}, Current: {current}, Threshold: {threshold}")
                         elif result.get("in_cooldown_period", False):
                             cooldown_count += 1
@@ -1024,7 +1053,7 @@ def main():
                             samples_since = result.get("samples_since_last_drift", "unknown")
                             cooldown_period = result.get("drift_cooldown_period", "unknown")
 
-                            logger.debug(f"Detector {detector_name} in cooldown period "
+                            logger.debug(f"Detector {detector_name} (drift_type={drift_type}) in cooldown period "
                                         f"({samples_since}/{cooldown_period} samples since last drift)")
 
                     if drift_count > 0:
