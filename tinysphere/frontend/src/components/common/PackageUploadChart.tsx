@@ -112,6 +112,14 @@ const PackageUploadChart: React.FC<PackageUploadChartProps> = ({
               fill="#F44336"
               name="Drift Events"
             />
+            <Area
+              type="monotone"
+              dataKey="prediction_images"
+              stackId="1"
+              stroke="#9C27B0"
+              fill="#9C27B0"
+              name="Prediction Images"
+            />
           </AreaChart>
         </ResponsiveContainer>
       </Box>
