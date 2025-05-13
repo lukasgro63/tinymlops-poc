@@ -41,6 +41,7 @@ interface DriftStatisticsCardProps {
   days?: number;
   parentLoading?: boolean;
   parentError?: string | null;
+  showRecentEvents?: boolean; // Control whether to show recent events table
 }
 
 // Status color mapping
@@ -102,7 +103,8 @@ const DriftStatisticsCard: React.FC<DriftStatisticsCardProps> = ({
   deviceId,
   days = 30,
   parentLoading,
-  parentError
+  parentError,
+  showRecentEvents = false // Default to not showing recent events
 }) => {
   const [statistics, setStatistics] = useState<DriftStatistics | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -306,8 +308,8 @@ const DriftStatisticsCard: React.FC<DriftStatisticsCardProps> = ({
             </div>
           </div>
           
-          {/* Recent Drift Events Table */}
-          {statistics.recent_events && statistics.recent_events.length > 0 && (
+          {/* Recent Drift Events Table - Only shown if showRecentEvents is true */}
+          {showRecentEvents && statistics.recent_events && statistics.recent_events.length > 0 && (
             <div>
               <Divider sx={{ my: 2 }} />
               <Typography variant="subtitle1" gutterBottom>
