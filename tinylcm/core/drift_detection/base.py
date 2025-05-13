@@ -163,7 +163,18 @@ class AutonomousDriftDetector(DriftDetector):
         callbacks_executed = 0
         for callback in self.callbacks:
             try:
-                callback(drift_info)
+                # Try different calling conventions to be flexible with callback signatures
+                try:
+                    # First try with just drift_info
+                    callback(drift_info)
+                except TypeError:
+                    try:
+                        # Then try with drift_info and an empty dict
+                        callback(drift_info, {})
+                    except TypeError:
+                        # Finally try with just drift_info wrapped in *args
+                        callback(*(drift_info,))
+                
                 callbacks_executed += 1
             except Exception as e:
                 # Log the error but don't propagate it to avoid interrupting the detection process
@@ -213,6 +224,8 @@ class AutonomousDriftDetector(DriftDetector):
         Args:
             record: The new data point
         """
+        # Just increment counters - don't try to process the record here
+        # That should be handled by the specific drift detector classes
         self.samples_processed += 1
         self.samples_since_last_update += 1
         

@@ -122,11 +122,12 @@ def create_directory_structure(config: Dict) -> None:
         drift_dir.mkdir(exist_ok=True)
 
 
-def on_drift_detected(drift_info: Dict[str, Any]) -> None:
+def on_drift_detected(drift_info: Dict[str, Any], *args) -> None:
     """Callback function for drift detection events.
 
     Args:
         drift_info: Dictionary containing information about the detected drift
+        *args: Additional arguments (ignored, but needed to handle the callback)
     """
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -152,6 +153,10 @@ def on_drift_detected(drift_info: Dict[str, Any]) -> None:
 
     # Log the drift detection with more visibility (use WARNING level)
     logger.warning(f"DRIFT DETECTED by {detector_type}: {reason}")
+    
+    # Add indicator for unknown object detection
+    if detector_type == "KNNDistanceMonitor" and "neighbor_distance" in reason:
+        logger.warning(f"!!! UNKNOWN OBJECT DETECTED !!! Capturing image for analysis...")
 
     # Extract metrics from drift info - but exclude some known keys to reduce noise
     excluded_keys = ["detector", "detector_type", "detector_id", "timestamp", "sample_id",
@@ -212,7 +217,7 @@ def on_drift_detected(drift_info: Dict[str, Any]) -> None:
         # Full path to the image
         image_path = date_dir / image_filename
         cv2.imwrite(str(image_path), rgb_frame)
-        logger.info(f"Saved drift image to {image_path}")
+        logger.warning(f"UNKNOWN OBJECT IMAGE SAVED: {image_path} - Will be sent to server during next sync cycle")
     
     # If sync client is available, create and send a drift event package
     if sync_client:
@@ -284,7 +289,7 @@ def on_drift_detected(drift_info: Dict[str, Any]) -> None:
                     image_path=str(image_path) if image_path else None
                 )
 
-                logger.info(f"Drift event sent using extended client: {'Success' if success else 'Failed'}")
+                logger.warning(f"UNKNOWN OBJECT DRIFT EVENT SENT: {'Success' if success else 'Failed'} - Package sent to server with image")
                 return  # Exit early if we used this method
 
             # Fall back to manual package creation

@@ -34,8 +34,8 @@
     "drift_detectors": [
       {
         "type": "KNNDistanceMonitor",
-        "delta": 1.0,
-        "lambda_threshold": 25.0,
+        "delta": 30.0,
+        "lambda_threshold": 100.0,
         "warm_up_samples": 3,
         "reference_update_interval": 5,
         "reference_update_factor": 0.1,
