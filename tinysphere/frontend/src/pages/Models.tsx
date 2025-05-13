@@ -7,6 +7,7 @@ import {
   HourglassEmpty as HourglassEmptyIcon
 } from '@mui/icons-material';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
+import StorageIcon from '@mui/icons-material/Storage';
 import {
   Box,
   Button,
@@ -25,6 +26,7 @@ import React, { useEffect, useState } from 'react';
 import ErrorDisplay from '../components/common/ErrorDisplay';
 import ModelComparisonTable from '../components/common/ModelComparisonTable';
 import ModelPerformanceChart from '../components/common/ModelPerformanceChart';
+import ModelRegistryTable from '../components/common/ModelRegistryTable';
 import SectionCard from '../components/common/SectionCard';
 import {
   compareModelVersions,
@@ -232,87 +234,82 @@ const Models: React.FC = () => {
   
   return (
     <Box>
-      {/* No header needed */}
+      {/* First row: Model Registry Table */}
+      <Box sx={{ mb: 3 }}>
+        <SectionCard 
+          title="Model Registry" 
+          icon={<StorageIcon style={{ fontSize: 20, color: '#00647D' }} />}
+        >
+          <ModelRegistryTable 
+            initialData={modelSummaries}
+            selectedModel={selectedModel}
+            onModelSelect={(modelName) => setSelectedModel(modelName)}
+          />
+        </SectionCard>
+      </Box>
       
-      {/* First row: Performance chart and Registry status */}
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, mb: 3 }}>
-        {/* Model performance chart */}
-        <Box sx={{ flex: '1 1 600px', minWidth: '300px' }}>
-          <SectionCard 
-            title="Model Performance Trends"
-            icon={<ShowChartIcon style={{ fontSize: 20, color: '#00647D' }} />}
-          >
-            <Box sx={{ height: 300 }}>
-              {metricsLoading ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                  <CircularProgress size={24} />
-                </Box>
-              ) : (
-                <ModelPerformanceChart
-                  models={modelList}
-                  performanceData={versionMetrics.map(metric => ({
+      {/* Second row: Model Performance Trends */}
+      <Box sx={{ mb: 3 }}>
+        <SectionCard 
+          title="Model Performance Trends"
+          icon={<ShowChartIcon style={{ fontSize: 20, color: '#00647D' }} />}
+        >
+          <Box sx={{ height: 300 }}>
+            {metricsLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                <CircularProgress size={24} />
+              </Box>
+            ) : (
+              <ModelPerformanceChart
+                models={modelList}
+                performanceData={versionMetrics.map(metric => {
+                  // Handle potential NaN values in metrics
+                  let metricValue: number | null = null;
+                  
+                  if (metric.metrics && metric.metrics[selectedMetric] !== undefined) {
+                    const value = metric.metrics[selectedMetric];
+                    
+                    // Handle different value types
+                    if (value === null) {
+                      metricValue = null;
+                    } else if (typeof value === 'number') {
+                      // If it's a numeric NaN, set to null
+                      metricValue = isNaN(value) ? null : value;
+                    } else if (typeof value === 'string') {
+                      // If it's a string 'NaN', set to null, otherwise try to parse it
+                      const strValue = value as string;
+                      if (strValue === 'NaN' || strValue === 'nan' || strValue.toLowerCase() === 'nan') {
+                        metricValue = null;
+                      } else {
+                        // Try to parse as number
+                        const parsed = parseFloat(strValue);
+                        metricValue = isNaN(parsed) ? null : parsed;
+                      }
+                    } else {
+                      // Any other type becomes null
+                      metricValue = null;
+                    }
+                  }
+                  
+                  return {
                     model_name: selectedModel,
                     version: metric.version,
                     stage: metric.stage,
                     metric_name: selectedMetric,
-                    value: metric.metrics && metric.metrics[selectedMetric] !== undefined
-                      ? metric.metrics[selectedMetric]
-                      : null,
+                    value: metricValue,
                     timestamp: metric.created_at,
                     run_id: metric.run_id
-                  }))}
-                  selectedMetric={selectedMetric}
-                  onMetricChange={(metric) => setSelectedMetric(metric)}
-                />
-              )}
-            </Box>
-          </SectionCard>
-        </Box>
-        
-        {/* Registry status */}
-        <Box sx={{ flex: '1 1 400px', minWidth: '300px' }}>
-          <SectionCard title="Model Registry Status">
-            <TableContainer component={Paper} sx={{ maxHeight: 350, overflow: 'auto' }}>
-              <Table stickyHeader size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Model Name</TableCell>
-                    <TableCell align="center">Latest</TableCell>
-                    <TableCell align="center">Production</TableCell>
-                    <TableCell align="center">Staging</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {modelSummaries.map((model) => (
-                    <TableRow 
-                      key={model.name}
-                      hover
-                      onClick={() => setSelectedModel(model.name)}
-                      selected={selectedModel === model.name}
-                      sx={{ cursor: 'pointer' }}
-                    >
-                      <TableCell component="th" scope="row">
-                        <Typography variant="body2" fontWeight={selectedModel === model.name ? 'bold' : 'normal'}>
-                          {model.name}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="center">{model.latest_version}</TableCell>
-                      <TableCell align="center">
-                        {model.production_version || '-'}
-                      </TableCell>
-                      <TableCell align="center">
-                        {model.staging_version || '-'}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </SectionCard>
-        </Box>
+                  };
+                })}
+                selectedMetric={selectedMetric}
+                onMetricChange={(metric) => setSelectedMetric(metric)}
+              />
+            )}
+          </Box>
+        </SectionCard>
       </Box>
       
-      {/* Second row: Model versions table */}
+      {/* Third row: Model versions table */}
       <Box sx={{ mb: 3 }}>
         <SectionCard title={`${selectedModel} Versions`}>
           <TableContainer component={Paper} sx={{ maxHeight: 400, overflow: 'auto' }}>
@@ -381,7 +378,7 @@ const Models: React.FC = () => {
         </SectionCard>
       </Box>
       
-      {/* Third row: Model comparison (optional) */}
+      {/* Fourth row: Model comparison (optional) */}
       {selectedVersions.length > 0 && (
         <Box sx={{ mb: 3 }}>
           <SectionCard 
