@@ -176,7 +176,7 @@ def on_drift_detected(drift_info: Dict[str, Any], *args) -> None:
     metrics = {k: v for k, v in drift_info.items() if k not in excluded_keys}
 
     # Log detailed drift metrics
-    logger.info(f"Drift detailed metrics from {detector_type}:")
+    logger.info(f"Drift detailed metrics from {detector_name}:")
     for key, value in metrics.items():
         logger.info(f"  {key}: {value}")
     
@@ -616,9 +616,9 @@ def main():
 
         # Process each drift detector configuration
         for detector_idx, detector_config in enumerate(tinylcm_config["drift_detectors"]):
-            detector_type = detector_config.get("type", "PageHinkleyFeatureMonitor")
+            detector_config_type = detector_config.get("type", "PageHinkleyFeatureMonitor")
 
-            if detector_type == "PageHinkleyFeatureMonitor":
+            if detector_config_type == "PageHinkleyFeatureMonitor":
                 # Get feature index from config
                 feature_index = detector_config["feature_index"]
 
@@ -701,7 +701,7 @@ def main():
                 drift_detectors.append(feature_detector)
                 logger.info(f"Initialized PageHinkleyFeatureMonitor with feature index {feature_index}")
 
-            elif detector_type == "EWMAConfidenceMonitor":
+            elif detector_config_type == "EWMAConfidenceMonitor":
                 # Create confidence monitor to detect when confidence drops
                 confidence_monitor = EWMAConfidenceMonitor(
                     lambda_param=detector_config.get("lambda_param", 0.2),
@@ -719,7 +719,7 @@ def main():
                 drift_detectors.append(confidence_monitor)
                 logger.info(f"Initialized EWMAConfidenceMonitor to detect confidence changes")
                 
-            elif detector_type == "KNNDistanceMonitor":
+            elif detector_config_type == "KNNDistanceMonitor":
                 # Create KNN distance monitor to detect when neighbor distances increase
                 knn_distance_monitor = KNNDistanceMonitor(
                     delta=detector_config.get("delta", 0.1),
@@ -739,7 +739,7 @@ def main():
                 logger.info(f"Initialized KNNDistanceMonitor to detect neighbor distance changes")
 
             else:
-                logger.warning(f"Unknown drift detector type: {detector_type}")
+                logger.warning(f"Unknown drift detector type: {detector_config_type}")
 
         # Make sure we have at least one detector
         if not drift_detectors:
