@@ -299,3 +299,21 @@ export interface DriftImagesResponse {
 export interface ImageUrlResponse {
   url: string;
 }
+
+// Operational Logs Types
+export interface OperationalLog {
+  key: string;
+  device_id: string;
+  session_id: string;
+  filename: string;
+  size: number;
+  last_modified: string;
+  url: string;
+  date?: string; // Date in YYYYMMDD format
+  log_type?: string; // Type of the operational log (e.g., "system", "metrics", "inference")
+}
+
+export interface OperationalLogResponse {
+  total: number;
+  logs: OperationalLog[];
+}

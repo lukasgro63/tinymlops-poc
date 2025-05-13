@@ -23,7 +23,13 @@ import {
   Tooltip, 
   CircularProgress, 
   FormHelperText,
-  Button
+  Button,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow
 } from '@mui/material';
 import {
   Storage as DataHubIcon,
@@ -36,7 +42,8 @@ import {
   WarningAmber,
   Sort as SortIcon,
   ArrowUpward as SortAscIcon,
-  ArrowDownward as SortDescIcon
+  ArrowDownward as SortDescIcon,
+  DataObject as LogFileIcon
 } from '@mui/icons-material';
 import { format, parseISO } from 'date-fns';
 
@@ -49,14 +56,19 @@ import {
   getDriftImageDevices,
   getDriftTypes,
   getDriftDates,
-  getDriftImages
+  getDriftImages,
+  getOperationalLogDevices,
+  getOperationalLogTypes,
+  getOperationalLogs
 } from '../services/api';
 import {
   Device,
   PredictionImage,
   PredictionImagesResponse,
   DriftImage,
-  DriftImagesResponse
+  DriftImagesResponse,
+  OperationalLog,
+  OperationalLogResponse
 } from '../types/api';
 import ErrorDisplay from '../components/common/ErrorDisplay';
 
@@ -107,6 +119,14 @@ const DataHub: React.FC = () => {
   const [totalDriftImages, setTotalDriftImages] = useState(0);
   const [loadingDriftImages, setLoadingDriftImages] = useState(false);
   const [driftError, setDriftError] = useState<string | null>(null);
+  
+  // State for operational logs
+  const [operationalLogs, setOperationalLogs] = useState<OperationalLog[]>([]);
+  const [totalLogs, setTotalLogs] = useState(0);
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [logsError, setLogsError] = useState<string | null>(null);
+  const [logTypes, setLogTypes] = useState<string[]>([]);
+  const [selectedLogType, setSelectedLogType] = useState<string>('');
 
   // State for image filters
   const [predictionTypes, setPredictionTypes] = useState<string[]>([]);
@@ -217,6 +237,37 @@ const DataHub: React.FC = () => {
     // Only load drift types when the drift tab is active
     if (tabValue === 1) {
       loadDriftTypes();
+    }
+  }, [selectedDeviceId, tabValue]);
+  
+  // Load operational log types when device is selected
+  useEffect(() => {
+    const loadLogTypes = async () => {
+      if (!selectedDeviceId || selectedDeviceId === 'all') {
+        setLogTypes([]);
+        setSelectedLogType('');
+        return;
+      }
+      
+      try {
+        const typesList = await getOperationalLogTypes(selectedDeviceId);
+        setLogTypes(typesList);
+        
+        // Auto-select first type if available
+        if (typesList.length > 0) {
+          setSelectedLogType(typesList[0]);
+        } else {
+          setSelectedLogType('');
+        }
+      } catch (err) {
+        console.error('Error loading log types:', err);
+        setLogsError('Failed to load log types');
+      }
+    };
+    
+    // Only load log types when the logs tab is active
+    if (tabValue === 2) {
+      loadLogTypes();
     }
   }, [selectedDeviceId, tabValue]);
   
@@ -352,6 +403,75 @@ const DataHub: React.FC = () => {
     
     loadImages();
   }, [selectedDeviceId, selectedType, selectedDate, page, rowsPerPage, tabValue, sortOrder]);
+
+  // Load operational logs based on filters and pagination
+  useEffect(() => {
+    const loadOperationalLogs = async () => {
+      // Only load logs on the Logs tab
+      if (tabValue !== 2) return;
+
+      setLoadingLogs(true);
+      setLogsError(null);
+
+      try {
+        if (selectedDeviceId && selectedDeviceId !== 'all') {
+          // For a specific device
+          const response = await getOperationalLogs(
+            selectedDeviceId,
+            selectedLogType || undefined,
+            rowsPerPage,
+            page * rowsPerPage,
+            sortOrder
+          );
+          
+          setOperationalLogs(response.logs);
+          setTotalLogs(response.total);
+        } else {
+          // For "All Devices" option
+          const deviceIdsWithLogs = await getOperationalLogDevices();
+          let allLogs: OperationalLog[] = [];
+          
+          for (const deviceId of deviceIdsWithLogs) {
+            const response = await getOperationalLogs(
+              deviceId,
+              undefined,
+              rowsPerPage,
+              0, // For simplicity, just get the first page from each device
+              sortOrder
+            );
+            
+            allLogs = [...allLogs, ...response.logs];
+          }
+          
+          // Sort all logs
+          allLogs.sort((a, b) => {
+            const dateA = new Date(a.last_modified).getTime();
+            const dateB = new Date(b.last_modified).getTime();
+            
+            return sortOrder === 'desc' 
+              ? dateB - dateA  // Newest first (desc)
+              : dateA - dateB; // Oldest first (asc)
+          });
+          
+          // Simple client-side pagination
+          const startIndex = page * rowsPerPage;
+          const endIndex = startIndex + rowsPerPage;
+          
+          setTotalLogs(allLogs.length);
+          setOperationalLogs(allLogs.slice(startIndex, endIndex));
+        }
+      } catch (err) {
+        console.error('Error loading operational logs:', err);
+        setLogsError('Failed to load operational logs');
+        setOperationalLogs([]);
+        setTotalLogs(0);
+      } finally {
+        setLoadingLogs(false);
+      }
+    };
+    
+    loadOperationalLogs();
+  }, [selectedDeviceId, selectedLogType, page, rowsPerPage, tabValue, sortOrder]);
 
   // Load drift images based on filters and pagination
   useEffect(() => {
@@ -512,6 +632,13 @@ const DataHub: React.FC = () => {
   const handleDriftDateChange = (event: SelectChangeEvent<string>) => {
     const date = event.target.value;
     setSelectedDriftDate(date);
+    setPage(0);
+  };
+  
+  // Handle log type selection for operational logs
+  const handleLogTypeChange = (event: SelectChangeEvent<string>) => {
+    const type = event.target.value;
+    setSelectedLogType(type);
     setPage(0);
   };
   
@@ -947,18 +1074,161 @@ const DataHub: React.FC = () => {
     </Box>
   );
   
-  // Render a placeholder for other data sections
-  const renderDataPlaceholder = (title: string) => (
-    <Box sx={{ textAlign: 'center', p: 4, bgcolor: 'background.paper', borderRadius: 1 }}>
-      <Typography variant="h6" gutterBottom>{title}</Typography>
-      <Typography variant="body1" color="text.secondary">
-        This section is under development.
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-        Select a device from the dropdown above to view its data.
-      </Typography>
+  // Render log type selector
+  const renderLogTypeSelector = () => (
+    <Box sx={{ mb: 2 }}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+        <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
+          <FormControl fullWidth size="small" disabled={!selectedDeviceId || logTypes.length === 0}>
+            <InputLabel id="log-type-select-label">Log Type</InputLabel>
+            <Select
+              labelId="log-type-select-label"
+              value={selectedLogType}
+              label="Log Type"
+              onChange={handleLogTypeChange}
+            >
+              {logTypes.map(type => (
+                <MenuItem key={type} value={type}>
+                  {type.charAt(0).toUpperCase() + type.slice(1)}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Box>
+        
+        <Box sx={{ flex: '1 1 200px', display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Button 
+            variant="outlined" 
+            disabled={!selectedLogType}
+            onClick={() => {
+              setSelectedLogType('');
+            }}
+          >
+            Clear Filters
+          </Button>
+          <Tooltip title={sortOrder === 'desc' ? "Showing newest first - Click to show oldest first" : "Showing oldest first - Click to show newest first"}>
+            <IconButton onClick={handleToggleSortOrder} color="primary">
+              {sortOrder === 'desc' ? <SortDescIcon /> : <SortAscIcon />}
+            </IconButton>
+          </Tooltip>
+        </Box>
+      </Box>
     </Box>
   );
+  
+  // Render operational logs table
+  const renderOperationalLogs = () => {
+    if (loadingLogs) {
+      return (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+          <CircularProgress />
+        </Box>
+      );
+    }
+    
+    if (logsError) {
+      return (
+        <ErrorDisplay 
+          error={logsError}
+          loading={false}
+          onRetry={() => setLoadingLogs(true)}
+          height="50vh"
+        />
+      );
+    }
+    
+    if (operationalLogs.length === 0) {
+      return (
+        <Box sx={{ textAlign: 'center', p: 4 }}>
+          <Typography variant="body1" color="text.secondary">
+            No operational logs found for the selected filters.
+          </Typography>
+          {!selectedDeviceId && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              Please select a device to view available logs.
+            </Typography>
+          )}
+        </Box>
+      );
+    }
+    
+    // Convert bytes to human-readable format
+    const formatBytes = (bytes: number): string => {
+      if (bytes === 0) return '0 Bytes';
+      
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(1024));
+      
+      return parseFloat((bytes / Math.pow(1024, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+    
+    // Format the timestamp
+    const formatTimestamp = (timestamp: string): string => {
+      try {
+        return format(parseISO(timestamp), 'MMM d, yyyy HH:mm:ss');
+      } catch {
+        return timestamp;
+      }
+    };
+    
+    return (
+      <Box>
+        <TableContainer>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>File Name</TableCell>
+                <TableCell>Device ID</TableCell>
+                <TableCell>Session ID</TableCell>
+                <TableCell>Size</TableCell>
+                <TableCell>Last Modified</TableCell>
+                <TableCell>Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {operationalLogs.map((log) => (
+                <TableRow key={log.key} hover>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <LogFileIcon sx={{ color: 'primary.main' }} />
+                      <Typography variant="body2">{log.filename}</Typography>
+                    </Box>
+                  </TableCell>
+                  <TableCell>{log.device_id}</TableCell>
+                  <TableCell>{log.session_id}</TableCell>
+                  <TableCell>{formatBytes(log.size)}</TableCell>
+                  <TableCell>{formatTimestamp(log.last_modified)}</TableCell>
+                  <TableCell>
+                    <Tooltip title="Download">
+                      <IconButton
+                        size="small"
+                        onClick={() => window.location.href = log.url}
+                      >
+                        <DownloadIcon />
+                      </IconButton>
+                    </Tooltip>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        
+        {/* Pagination */}
+        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
+          <TablePagination
+            component="div"
+            count={totalLogs}
+            page={page}
+            onPageChange={handleChangePage}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={handleChangeRowsPerPage}
+            rowsPerPageOptions={[10, 25, 50, 100]}
+          />
+        </Box>
+      </Box>
+    );
+  };
   
   return (
     <Box sx={{ p: 0 }}>
@@ -1039,7 +1309,11 @@ const DataHub: React.FC = () => {
       </TabPanel>
 
       <TabPanel value={tabValue} index={2}>
-        {renderDataPlaceholder("Device Logs")}
+        {/* Filters for operational logs */}
+        {selectedDeviceId && renderLogTypeSelector()}
+
+        {/* Operational logs table */}
+        {renderOperationalLogs()}
       </TabPanel>
       
       {/* Image detail dialog */}
