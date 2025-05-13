@@ -154,9 +154,9 @@ def on_drift_detected(drift_info: Dict[str, Any], *args) -> None:
     # Log the drift detection with more visibility (use WARNING level)
     logger.warning(f"DRIFT DETECTED by {detector_type}: {reason}")
     
-    # Add indicator for unknown object detection
+    # Add specific indicators based on detector type
     if detector_type == "KNNDistanceMonitor" and "neighbor_distance" in reason:
-        logger.warning(f"!!! UNKNOWN OBJECT DETECTED !!! Capturing image for analysis...")
+        logger.warning(f"!!! KNN DISTANCE-BASED DRIFT DETECTED !!! Capturing image for analysis...")
 
     # Extract metrics from drift info - but exclude some known keys to reduce noise
     excluded_keys = ["detector", "detector_type", "detector_id", "timestamp", "sample_id",
@@ -189,7 +189,15 @@ def on_drift_detected(drift_info: Dict[str, Any], *args) -> None:
 
         # Create drift directory structure for compatibility with tinysphere bucket format:
         # device_id/drift_type/date/filename.jpg
-        drift_type = detector_name.lower().replace("monitor", "").replace(" ", "_")
+        if detector_type == "KNNDistanceMonitor":
+            drift_type = "knn_distance"  # Specific KNN distance-based drift type
+        elif detector_type == "EWMAConfidenceMonitor":
+            drift_type = "confidence"    # Confidence-based drift
+        elif detector_type == "FeatureMonitor":
+            drift_type = "feature"       # Feature-based drift
+        else:
+            # Default fallback
+            drift_type = detector_name.lower().replace("monitor", "").replace(" ", "_")
 
         # Create base drift directory
         drift_dir = Path("./drift_images")
@@ -217,7 +225,7 @@ def on_drift_detected(drift_info: Dict[str, Any], *args) -> None:
         # Full path to the image
         image_path = date_dir / image_filename
         cv2.imwrite(str(image_path), rgb_frame)
-        logger.warning(f"UNKNOWN OBJECT IMAGE SAVED: {image_path} - Will be sent to server during next sync cycle")
+        logger.warning(f"DRIFT EVENT IMAGE SAVED ({drift_type}): {image_path} - Will be sent to server during next sync cycle")
     
     # If sync client is available, create and send a drift event package
     if sync_client:
@@ -289,7 +297,7 @@ def on_drift_detected(drift_info: Dict[str, Any], *args) -> None:
                     image_path=str(image_path) if image_path else None
                 )
 
-                logger.warning(f"UNKNOWN OBJECT DRIFT EVENT SENT: {'Success' if success else 'Failed'} - Package sent to server with image")
+                logger.warning(f"DRIFT EVENT ({drift_type}) SENT: {'Success' if success else 'Failed'} - Package sent to server with image")
                 return  # Exit early if we used this method
 
             # Fall back to manual package creation

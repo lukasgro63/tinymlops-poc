@@ -1177,16 +1177,31 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         # This helps bypass the PH test for very clear unknown objects
         is_unknown_object = False
         try:
-            # Look for the clear signal of unknown objects - much higher distances
-            # If the average distance is more than 3x the reference mean, it's likely unknown
-            if avg_distance > 250.0:  # Based on logs showing unknown objects with distances ~254.0
+            # Check if this is a "negative" class prediction - those aren't unknown objects
+            is_negative_class = False
+            if 'prediction' in record and record['prediction'] == 'negative':
+                is_negative_class = True
+            
+            # Only consider unknown if:
+            # 1. Distance is high (>250.0 based on logs)
+            # 2. NOT a "negative" class prediction
+            if avg_distance > 250.0 and not is_negative_class:
                 is_unknown_object = True
                 logger.warning(f"KNNDistanceMonitor: Possible unknown object detected with high distance: {avg_distance:.2f}")
+            elif avg_distance > 250.0 and is_negative_class:
+                logger.debug(f"High distance ({avg_distance:.2f}) for 'negative' class - not considering as unknown")
         except Exception as e:
             logger.warning(f"Error in unknown object check: {str(e)}")
         
         # Set drift detected flag if either PH test or direct unknown object detection triggered
         self.drift_detected = self.drift_detected or is_unknown_object
+        
+        # Check if we are in the cooldown period - respect this to avoid too many drift events
+        if self.in_cooldown_period and self.samples_since_last_drift < self.drift_cooldown_period:
+            # We're in cooldown - suppress new drift detections
+            self.drift_detected = False
+            is_unknown_object = False
+            logger.debug(f"In cooldown period ({self.samples_since_last_drift}/{self.drift_cooldown_period}) - suppressing drift detection")
         
         # If drift is newly detected, prepare drift info
         if (self.drift_detected and not was_drift_detected) or is_unknown_object:
@@ -1205,10 +1220,15 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
                 'is_direct_unknown_detection': is_unknown_object
             }
             
+            # Include prediction in log message if available
+            prediction_info = ""
+            if 'prediction' in record:
+                prediction_info = f", Prediction={record['prediction']}"
+                
             logger.info(
                 f"KNNDistanceMonitor: Drift detected! Avg distance={avg_distance:.4f}, "
-                f"Reference={self.reference_mean:.4f}, " +
-                (f"PH value={ph_value:.4f}" if 'ph_value' in locals() else "Direct unknown detection")
+                f"Reference={self.reference_mean:.4f}{prediction_info}, " +
+                (f"PH value={ph_value:.4f}" if 'ph_value' in locals() else "Direct distance-based detection")
             )
             
             # Notify callbacks
