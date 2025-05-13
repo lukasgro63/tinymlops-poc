@@ -48,6 +48,7 @@ from tinylcm.core.data_logger.logger import DataLogger
 from tinylcm.core.data_structures import FeatureSample
 from tinylcm.core.drift_detection.features import PageHinkleyFeatureMonitor
 from tinylcm.core.drift_detection.confidence import EWMAConfidenceMonitor
+from tinylcm.core.drift_detection.distribution import PredictionDistributionMonitor
 # Import tinylcm components
 from tinylcm.core.feature_extractors.tflite import TFLiteFeatureExtractor
 from tinylcm.core.operational_monitor.monitor import OperationalMonitor

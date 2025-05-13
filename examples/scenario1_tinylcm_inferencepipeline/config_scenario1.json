@@ -34,7 +34,7 @@
     "drift_detectors": [
       {
         "type": "PageHinkleyFeatureMonitor",
-        "feature_index": 1,
+        "feature_index": 2,
         "delta": 0.005,
         "lambda_param": 0.5,
         "min_samples": 10,
@@ -48,6 +48,14 @@
         "min_confidence": 0.3,
         "warm_up_samples": 10,
         "reference_update_interval": 20
+      },
+      {
+        "type": "PredictionDistributionMonitor",
+        "window_size": 10,
+        "threshold": 0.1,
+        "method": "ewma",
+        "min_samples": 20,
+        "alpha": 0.05
       }
     ],
     "operational_monitor": {
