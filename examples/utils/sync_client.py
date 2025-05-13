@@ -311,7 +311,7 @@ class ExtendedSyncClient:
                 package_type="drift_event",
                 description=description
             )
-            
+
             # Create the drift event data
             drift_data = {
                 "timestamp": time.time(),
@@ -325,7 +325,7 @@ class ExtendedSyncClient:
                     "timestamp": sample.timestamp if sample else None
                 }
             }
-            
+
             # Create a properly named drift event file
             # Create a temp directory to store our properly named files
             temp_dir = tempfile.mkdtemp()
@@ -348,7 +348,7 @@ class ExtendedSyncClient:
                 os.rmdir(temp_dir)
             except Exception as e:
                 logger.warning(f"Failed to remove temporary drift files: {e}")
-            
+
             # Add image to the package if provided
             if image_path and os.path.exists(image_path):
                 # Path to image is structured as device_id/drift_type/date/filename.jpg
@@ -363,7 +363,8 @@ class ExtendedSyncClient:
                 metadata = {
                     "relative_path": rel_path,  # Store this for the server to reconstruct the path
                     "drift_type": detector_name,
-                    "timestamp": time.time()
+                    "timestamp": time.time(),
+                    "target_bucket": "drift"  # Set target bucket explicitly to 'drift'
                 }
 
                 # Create a temp metadata file
@@ -398,13 +399,13 @@ class ExtendedSyncClient:
                         file_path=image_path,
                         file_type="image"
                     )
-            
+
             # Finalize the package
             self.sync_interface.finalize_package(package_id)
-            
+
             # Send the package
             return self.send_package(package_id)
-            
+
         except Exception as e:
             logger.error(f"Failed to create and send drift event package: {e}")
             return False

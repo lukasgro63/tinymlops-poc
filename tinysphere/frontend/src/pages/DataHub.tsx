@@ -342,7 +342,7 @@ const DataHub: React.FC = () => {
 
       setLoadingDriftImages(true);
       setDriftError(null);
-      
+
       try {
         if (selectedDeviceId && selectedDeviceId !== 'all') {
           // For a specific device
@@ -353,14 +353,32 @@ const DataHub: React.FC = () => {
             rowsPerPage,
             page * rowsPerPage
           );
-          
-          setDriftImages(response.images);
+
+          // Process images to set event_id from folder name if available
+          const processedImages = response.images.map(image => {
+            // Check if the image is in a folder that starts with "event_"
+            const pathParts = image.key.split('/');
+            if (pathParts.length > 3) {
+              const potentialEvent = pathParts[3]; // Check the 4th path component
+              if (potentialEvent.startsWith('event_')) {
+                // Extract event ID from folder name
+                const eventId = potentialEvent.replace('event_', '');
+                return {
+                  ...image,
+                  event_id: eventId
+                };
+              }
+            }
+            return image;
+          });
+
+          setDriftImages(processedImages);
           setTotalDriftImages(response.total);
         } else {
           // For "All Devices" option - we need to fetch for each device with images
           const deviceIdsWithDriftImages = await getDriftImageDevices();
           let allDriftImages: DriftImage[] = [];
-          
+
           // This is a simplified approach - in a real implementation, you might
           // want to add pagination and more sophisticated fetching
           for (const deviceId of deviceIdsWithDriftImages) {
@@ -371,14 +389,32 @@ const DataHub: React.FC = () => {
               rowsPerPage,
               0 // For simplicity, just get the first page from each device
             );
-            
-            allDriftImages = [...allDriftImages, ...response.images];
+
+            // Process images to set event_id from folder name if available
+            const processedImages = response.images.map(image => {
+              // Check if the image is in a folder that starts with "event_"
+              const pathParts = image.key.split('/');
+              if (pathParts.length > 3) {
+                const potentialEvent = pathParts[3]; // Check the 4th path component
+                if (potentialEvent.startsWith('event_')) {
+                  // Extract event ID from folder name
+                  const eventId = potentialEvent.replace('event_', '');
+                  return {
+                    ...image,
+                    event_id: eventId
+                  };
+                }
+              }
+              return image;
+            });
+
+            allDriftImages = [...allDriftImages, ...processedImages];
           }
-          
+
           // Simple client-side pagination
           const startIndex = page * rowsPerPage;
           const endIndex = startIndex + rowsPerPage;
-          
+
           setTotalDriftImages(allDriftImages.length);
           setDriftImages(allDriftImages.slice(startIndex, endIndex));
         }
@@ -391,7 +427,7 @@ const DataHub: React.FC = () => {
         setLoadingDriftImages(false);
       }
     };
-    
+
     loadDriftImages();
   }, [selectedDeviceId, selectedDriftType, selectedDriftDate, page, rowsPerPage, tabValue]);
   
