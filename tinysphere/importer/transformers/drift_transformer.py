@@ -498,6 +498,8 @@ class DriftTransformer(DataTransformer):
             return "CONCEPT"
         elif "performance" in detector_lower:
             return "PERFORMANCE"
+        elif "knn" in detector_lower or "distance" in detector_lower:
+            return "KNN_DISTANCE"
         else:
             return "UNKNOWN"
     

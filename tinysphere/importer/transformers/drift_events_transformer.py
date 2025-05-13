@@ -171,8 +171,13 @@ class DriftEventsTransformer(DataTransformer):
                     # Try to get drift type from detector name
                     detector_name = metadata_content.get("detector_name", "")
                     if detector_name:
-                        # Clean up detector name to create drift type
-                        drift_type = detector_name.lower().replace("monitor", "").replace(" ", "_")
+                        detector_lower = detector_name.lower()
+                        # Check for KNN distance monitor specifically
+                        if "knn" in detector_lower and "distance" in detector_lower:
+                            drift_type = "knn_distance"
+                        else:
+                            # Clean up detector name to create drift type
+                            drift_type = detector_lower.replace("monitor", "").replace(" ", "_")
                         logger.info(f"Derived drift type from detector name: {drift_type}")
                     
                     # Extract event ID if available

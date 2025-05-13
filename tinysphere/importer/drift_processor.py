@@ -213,6 +213,8 @@ class DriftProcessor:
             drift_type = "CONCEPT"
         elif "performance" in detector_lower:
             drift_type = "PERFORMANCE"
+        elif "knn" in detector_lower or "distance" in detector_lower:
+            drift_type = "KNN_DISTANCE"
 
         # Determine drift score
         drift_score = None
