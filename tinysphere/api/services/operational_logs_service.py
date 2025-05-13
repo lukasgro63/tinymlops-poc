@@ -120,7 +120,9 @@ class OperationalLogsService:
         log_type: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
-        sort_order: Optional[str] = "desc"
+        sort_order: Optional[str] = "desc",
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         List operational logs with optional filtering.
@@ -132,6 +134,8 @@ class OperationalLogsService:
             limit: Maximum number of logs to return
             offset: Number of logs to skip
             sort_order: Sort direction ('asc' or 'desc'), defaults to 'desc' (newest first)
+            start_date: Filter logs after this date (YYYY-MM-DD format)
+            end_date: Filter logs before this date (YYYY-MM-DD format)
             
         Returns:
             Dictionary with list of logs and total count
@@ -162,6 +166,28 @@ class OperationalLogsService:
             logs = []
             contents = response.get('Contents', [])
             
+            # For date filtering
+            start_timestamp = None
+            end_timestamp = None
+            
+            # Convert date strings to timestamps if provided
+            import datetime
+            if start_date:
+                try:
+                    start_datetime = datetime.datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=datetime.timezone.utc)
+                    start_timestamp = start_datetime.timestamp()
+                except ValueError:
+                    logger.warning(f"Invalid start_date format: {start_date}, expected YYYY-MM-DD")
+            
+            if end_date:
+                try:
+                    # Set to end of day (23:59:59) for end_date
+                    end_datetime = datetime.datetime.strptime(end_date, '%Y-%m-%d')
+                    end_datetime = end_datetime.replace(hour=23, minute=59, second=59, tzinfo=datetime.timezone.utc)
+                    end_timestamp = end_datetime.timestamp()
+                except ValueError:
+                    logger.warning(f"Invalid end_date format: {end_date}, expected YYYY-MM-DD")
+            
             # Sort the results by last modified timestamp
             sortable_contents = []
             for obj in contents:
@@ -175,6 +201,16 @@ class OperationalLogsService:
                     # Check if the filename starts with the log_type
                     if not (filename.startswith(f"{log_type}_") or filename.startswith(f"{log_type}-")):
                         continue
+                
+                # Apply date filters if provided
+                if start_timestamp or end_timestamp:
+                    obj_timestamp = obj['LastModified'].timestamp()
+                    
+                    if start_timestamp and obj_timestamp < start_timestamp:
+                        continue  # Skip if before start date
+                        
+                    if end_timestamp and obj_timestamp > end_timestamp:
+                        continue  # Skip if after end date
                 
                 sortable_contents.append(obj)
             

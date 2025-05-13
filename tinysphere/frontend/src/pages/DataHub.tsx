@@ -29,7 +29,8 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TableRow
+  TableRow,
+  TextField
 } from '@mui/material';
 import {
   Storage as DataHubIcon,
@@ -113,12 +114,16 @@ const DataHub: React.FC = () => {
   const [totalImages, setTotalImages] = useState(0);
   const [loadingImages, setLoadingImages] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [predictionStartDate, setPredictionStartDate] = useState<string>('');
+  const [predictionEndDate, setPredictionEndDate] = useState<string>('');
 
   // State for drift images
   const [driftImages, setDriftImages] = useState<DriftImage[]>([]);
   const [totalDriftImages, setTotalDriftImages] = useState(0);
   const [loadingDriftImages, setLoadingDriftImages] = useState(false);
   const [driftError, setDriftError] = useState<string | null>(null);
+  const [driftStartDate, setDriftStartDate] = useState<string>('');
+  const [driftEndDate, setDriftEndDate] = useState<string>('');
   
   // State for operational logs
   const [operationalLogs, setOperationalLogs] = useState<OperationalLog[]>([]);
@@ -127,6 +132,8 @@ const DataHub: React.FC = () => {
   const [logsError, setLogsError] = useState<string | null>(null);
   const [logTypes, setLogTypes] = useState<string[]>([]);
   const [selectedLogType, setSelectedLogType] = useState<string>('');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
 
   // State for image filters
   const [predictionTypes, setPredictionTypes] = useState<string[]>([]);
@@ -348,7 +355,9 @@ const DataHub: React.FC = () => {
             selectedDate || undefined,
             rowsPerPage,
             page * rowsPerPage,
-            sortOrder // Sortierparameter übergeben
+            sortOrder,
+            predictionStartDate || undefined,
+            predictionEndDate || undefined
           );
           
           // Die Sortierung erfolgt jetzt auf Server-Ebene durch den sort_order Parameter
@@ -368,10 +377,23 @@ const DataHub: React.FC = () => {
               selectedDate || undefined,
               rowsPerPage,
               0, // For simplicity, just get the first page from each device
-              sortOrder // Sortierparameter übergeben
+              sortOrder,
+              predictionStartDate || undefined,
+              predictionEndDate || undefined
             );
             
             allImages = [...allImages, ...response.images];
+          }
+          
+          // Apply date filtering on client side if needed
+          if (predictionStartDate || predictionEndDate) {
+            const startTimestamp = predictionStartDate ? new Date(predictionStartDate).getTime() : 0;
+            const endTimestamp = predictionEndDate ? new Date(predictionEndDate + 'T23:59:59').getTime() : Infinity;
+            
+            allImages = allImages.filter(image => {
+              const imageTimestamp = new Date(image.last_modified).getTime();
+              return imageTimestamp >= startTimestamp && imageTimestamp <= endTimestamp;
+            });
           }
           
           // Sortieren der kombinierten Bilder von allen Geräten
@@ -402,7 +424,7 @@ const DataHub: React.FC = () => {
     };
     
     loadImages();
-  }, [selectedDeviceId, selectedType, selectedDate, page, rowsPerPage, tabValue, sortOrder]);
+  }, [selectedDeviceId, selectedType, selectedDate, page, rowsPerPage, tabValue, sortOrder, predictionStartDate, predictionEndDate]);
 
   // Load operational logs based on filters and pagination
   useEffect(() => {
@@ -421,7 +443,9 @@ const DataHub: React.FC = () => {
             selectedLogType || undefined,
             rowsPerPage,
             page * rowsPerPage,
-            sortOrder
+            sortOrder,
+            startDate || undefined,
+            endDate || undefined
           );
           
           setOperationalLogs(response.logs);
@@ -437,7 +461,9 @@ const DataHub: React.FC = () => {
               undefined,
               rowsPerPage,
               0, // For simplicity, just get the first page from each device
-              sortOrder
+              sortOrder,
+              startDate || undefined,
+              endDate || undefined
             );
             
             allLogs = [...allLogs, ...response.logs];
@@ -452,6 +478,17 @@ const DataHub: React.FC = () => {
               ? dateB - dateA  // Newest first (desc)
               : dateA - dateB; // Oldest first (asc)
           });
+          
+          // Apply date filtering on client side if needed
+          if (startDate || endDate) {
+            const startTimestamp = startDate ? new Date(startDate).getTime() : 0;
+            const endTimestamp = endDate ? new Date(endDate + 'T23:59:59').getTime() : Infinity;
+            
+            allLogs = allLogs.filter(log => {
+              const logTimestamp = new Date(log.last_modified).getTime();
+              return logTimestamp >= startTimestamp && logTimestamp <= endTimestamp;
+            });
+          }
           
           // Simple client-side pagination
           const startIndex = page * rowsPerPage;
@@ -471,7 +508,7 @@ const DataHub: React.FC = () => {
     };
     
     loadOperationalLogs();
-  }, [selectedDeviceId, selectedLogType, page, rowsPerPage, tabValue, sortOrder]);
+  }, [selectedDeviceId, selectedLogType, page, rowsPerPage, tabValue, sortOrder, startDate, endDate]);
 
   // Load drift images based on filters and pagination
   useEffect(() => {
@@ -491,7 +528,9 @@ const DataHub: React.FC = () => {
             selectedDriftDate || undefined,
             rowsPerPage,
             page * rowsPerPage,
-            sortOrder // Sortierparameter übergeben
+            sortOrder,
+            driftStartDate || undefined,
+            driftEndDate || undefined
           );
 
           // Process images to set event_id from folder name if available
@@ -529,7 +568,9 @@ const DataHub: React.FC = () => {
               selectedDriftDate || undefined,
               rowsPerPage,
               0, // For simplicity, just get the first page from each device
-              sortOrder // Sortierparameter übergeben
+              sortOrder,
+              driftStartDate || undefined,
+              driftEndDate || undefined
             );
 
             // Process images to set event_id from folder name if available
@@ -551,6 +592,17 @@ const DataHub: React.FC = () => {
             });
 
             allDriftImages = [...allDriftImages, ...processedImages];
+          }
+
+          // Apply date filtering on client side if needed
+          if (driftStartDate || driftEndDate) {
+            const startTimestamp = driftStartDate ? new Date(driftStartDate).getTime() : 0;
+            const endTimestamp = driftEndDate ? new Date(driftEndDate + 'T23:59:59').getTime() : Infinity;
+            
+            allDriftImages = allDriftImages.filter(image => {
+              const imageTimestamp = new Date(image.last_modified).getTime();
+              return imageTimestamp >= startTimestamp && imageTimestamp <= endTimestamp;
+            });
           }
 
           // Sortieren der kombinierten Drift-Bilder von allen Geräten
@@ -581,7 +633,7 @@ const DataHub: React.FC = () => {
     };
 
     loadDriftImages();
-  }, [selectedDeviceId, selectedDriftType, selectedDriftDate, page, rowsPerPage, tabValue, sortOrder]);
+  }, [selectedDeviceId, selectedDriftType, selectedDriftDate, page, rowsPerPage, tabValue, sortOrder, driftStartDate, driftEndDate]);
   
   // Handle tab change
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
@@ -619,6 +671,17 @@ const DataHub: React.FC = () => {
     setSelectedDate(date);
     setPage(0);
   };
+  
+  // Handle prediction start/end date changes
+  const handlePredictionStartDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setPredictionStartDate(event.target.value);
+    setPage(0);
+  };
+  
+  const handlePredictionEndDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setPredictionEndDate(event.target.value);
+    setPage(0);
+  };
 
   // Handle drift type selection
   const handleDriftTypeChange = (event: SelectChangeEvent<string>) => {
@@ -635,10 +698,33 @@ const DataHub: React.FC = () => {
     setPage(0);
   };
   
+  // Handle drift start/end date changes
+  const handleDriftStartDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setDriftStartDate(event.target.value);
+    setPage(0);
+  };
+  
+  const handleDriftEndDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setDriftEndDate(event.target.value);
+    setPage(0);
+  };
+  
   // Handle log type selection for operational logs
   const handleLogTypeChange = (event: SelectChangeEvent<string>) => {
     const type = event.target.value;
     setSelectedLogType(type);
+    setPage(0);
+  };
+  
+  // Handle start date change for logs
+  const handleStartDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setStartDate(event.target.value);
+    setPage(0);
+  };
+  
+  // Handle end date change for logs
+  const handleEndDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setEndDate(event.target.value);
     setPage(0);
   };
   
@@ -996,13 +1082,39 @@ const DataHub: React.FC = () => {
           </FormControl>
         </Box>
         
+        <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
+          <TextField
+            label="Start Date"
+            type="date"
+            value={predictionStartDate}
+            onChange={handlePredictionStartDateChange}
+            fullWidth
+            size="small"
+            InputLabelProps={{ shrink: true }}
+          />
+        </Box>
+        
+        <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
+          <TextField
+            label="End Date"
+            type="date"
+            value={predictionEndDate}
+            onChange={handlePredictionEndDateChange}
+            fullWidth
+            size="small"
+            InputLabelProps={{ shrink: true }}
+          />
+        </Box>
+        
         <Box sx={{ flex: '1 1 200px', display: 'flex', alignItems: 'center', gap: 1 }}>
           <Button 
             variant="outlined" 
-            disabled={!selectedType && !selectedDate}
+            disabled={!selectedType && !selectedDate && !predictionStartDate && !predictionEndDate}
             onClick={() => {
               setSelectedType('');
               setSelectedDate('');
+              setPredictionStartDate('');
+              setPredictionEndDate('');
             }}
           >
             Clear Filters
@@ -1053,13 +1165,39 @@ const DataHub: React.FC = () => {
           </FormControl>
         </Box>
         
+        <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
+          <TextField
+            label="Start Date"
+            type="date"
+            value={driftStartDate}
+            onChange={handleDriftStartDateChange}
+            fullWidth
+            size="small"
+            InputLabelProps={{ shrink: true }}
+          />
+        </Box>
+        
+        <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
+          <TextField
+            label="End Date"
+            type="date"
+            value={driftEndDate}
+            onChange={handleDriftEndDateChange}
+            fullWidth
+            size="small"
+            InputLabelProps={{ shrink: true }}
+          />
+        </Box>
+        
         <Box sx={{ flex: '1 1 200px', display: 'flex', alignItems: 'center', gap: 1 }}>
           <Button 
             variant="outlined" 
-            disabled={!selectedDriftType && !selectedDriftDate}
+            disabled={!selectedDriftType && !selectedDriftDate && !driftStartDate && !driftEndDate}
             onClick={() => {
               setSelectedDriftType('');
               setSelectedDriftDate('');
+              setDriftStartDate('');
+              setDriftEndDate('');
             }}
           >
             Clear Filters
@@ -1096,12 +1234,38 @@ const DataHub: React.FC = () => {
           </FormControl>
         </Box>
         
+        <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
+          <TextField
+            label="Start Date"
+            type="date"
+            value={startDate}
+            onChange={handleStartDateChange}
+            fullWidth
+            size="small"
+            InputLabelProps={{ shrink: true }}
+          />
+        </Box>
+        
+        <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
+          <TextField
+            label="End Date"
+            type="date"
+            value={endDate}
+            onChange={handleEndDateChange}
+            fullWidth
+            size="small"
+            InputLabelProps={{ shrink: true }}
+          />
+        </Box>
+        
         <Box sx={{ flex: '1 1 200px', display: 'flex', alignItems: 'center', gap: 1 }}>
           <Button 
             variant="outlined" 
-            disabled={!selectedLogType}
+            disabled={!selectedLogType && !startDate && !endDate}
             onClick={() => {
               setSelectedLogType('');
+              setStartDate('');
+              setEndDate('');
             }}
           >
             Clear Filters
@@ -1173,46 +1337,57 @@ const DataHub: React.FC = () => {
     
     return (
       <Box>
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>File Name</TableCell>
-                <TableCell>Device ID</TableCell>
-                <TableCell>Session ID</TableCell>
-                <TableCell>Size</TableCell>
-                <TableCell>Last Modified</TableCell>
-                <TableCell>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {operationalLogs.map((log) => (
-                <TableRow key={log.key} hover>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <LogFileIcon sx={{ color: 'primary.main' }} />
-                      <Typography variant="body2">{log.filename}</Typography>
-                    </Box>
-                  </TableCell>
-                  <TableCell>{log.device_id}</TableCell>
-                  <TableCell>{log.session_id}</TableCell>
-                  <TableCell>{formatBytes(log.size)}</TableCell>
-                  <TableCell>{formatTimestamp(log.last_modified)}</TableCell>
-                  <TableCell>
-                    <Tooltip title="Download">
-                      <IconButton
-                        size="small"
-                        onClick={() => window.location.href = log.url}
-                      >
-                        <DownloadIcon />
-                      </IconButton>
-                    </Tooltip>
-                  </TableCell>
+        <Paper elevation={2} sx={{ borderRadius: 1, overflow: 'hidden' }}>
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 'bold' }}>File Name</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Device ID</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Session ID</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Size</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Last Modified</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Actions</TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+              </TableHead>
+              <TableBody>
+                {operationalLogs.map((log, index) => (
+                  <TableRow 
+                    key={log.key} 
+                    hover
+                    sx={{ 
+                      bgcolor: 'white',
+                      '&:hover': { 
+                        bgcolor: 'action.hover' 
+                      }
+                    }}
+                  >
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <LogFileIcon sx={{ color: 'primary.main' }} />
+                        <Typography variant="body2">{log.filename}</Typography>
+                      </Box>
+                    </TableCell>
+                    <TableCell>{log.device_id}</TableCell>
+                    <TableCell>{log.session_id}</TableCell>
+                    <TableCell>{formatBytes(log.size)}</TableCell>
+                    <TableCell>{formatTimestamp(log.last_modified)}</TableCell>
+                    <TableCell>
+                      <Tooltip title="Download">
+                        <IconButton
+                          size="small"
+                          onClick={() => window.location.href = log.url}
+                        >
+                          <DownloadIcon />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
         
         {/* Pagination */}
         <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>

@@ -222,7 +222,9 @@ export const getPredictionImages = async (
   date?: string,
   limit: number = 100,
   offset: number = 0,
-  sortOrder?: 'asc' | 'desc'
+  sortOrder?: 'asc' | 'desc',
+  startDate?: string,
+  endDate?: string
 ): Promise<PredictionImagesResponse> => {
   let url = `${API_BASE_URL}/prediction-images/list?limit=${limit}&offset=${offset}`;
 
@@ -230,6 +232,8 @@ export const getPredictionImages = async (
   if (predictionType) url += `&prediction_type=${predictionType}`;
   if (date) url += `&date=${date}`;
   if (sortOrder) url += `&sort_order=${sortOrder}`;
+  if (startDate) url += `&start_date=${startDate}`;
+  if (endDate) url += `&end_date=${endDate}`;
 
   const response = await axios.get<PredictionImagesResponse>(url);
   
@@ -400,7 +404,9 @@ export const getDriftImages = async (
   date?: string,
   limit: number = 100,
   offset: number = 0,
-  sortOrder?: 'asc' | 'desc'
+  sortOrder?: 'asc' | 'desc',
+  startDate?: string,
+  endDate?: string
 ): Promise<DriftImagesResponse> => {
   let url = `${API_BASE_URL}/drift-images/list?limit=${limit}&offset=${offset}`;
 
@@ -408,6 +414,8 @@ export const getDriftImages = async (
   if (driftType) url += `&drift_type=${driftType}`;
   if (date) url += `&date=${date}`;
   if (sortOrder) url += `&sort_order=${sortOrder}`;
+  if (startDate) url += `&start_date=${startDate}`;
+  if (endDate) url += `&end_date=${endDate}`;
 
   const response = await axios.get<DriftImagesResponse>(url);
   
@@ -456,13 +464,17 @@ export const getOperationalLogs = async (
   logType?: string,
   limit: number = 100,
   offset: number = 0,
-  sortOrder?: 'asc' | 'desc'
+  sortOrder?: 'asc' | 'desc',
+  startDate?: string,
+  endDate?: string
 ): Promise<OperationalLogResponse> => {
   let url = `${API_BASE_URL}/operational-logs/list?limit=${limit}&offset=${offset}`;
 
   if (deviceId) url += `&device_id=${deviceId}`;
   if (logType) url += `&log_type=${logType}`;
   if (sortOrder) url += `&sort_order=${sortOrder}`;
+  if (startDate) url += `&start_date=${startDate}`;
+  if (endDate) url += `&end_date=${endDate}`;
 
   const response = await axios.get<OperationalLogResponse>(url);
   

@@ -33,7 +33,9 @@ def list_logs(
     log_type: Optional[str] = None,
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
-    sort_order: Optional[str] = "desc"
+    sort_order: Optional[str] = "desc",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
 ):
     """
     List operational logs with optional filtering.
@@ -45,6 +47,8 @@ def list_logs(
         limit: Maximum number of logs to return
         offset: Number of logs to skip
         sort_order: Sort direction ('asc' or 'desc'), defaults to 'desc' (newest first)
+        start_date: Filter logs after this date (YYYY-MM-DD format)
+        end_date: Filter logs before this date (YYYY-MM-DD format)
     """
     return operational_logs_service.list_logs(
         device_id=device_id,
@@ -52,7 +56,9 @@ def list_logs(
         log_type=log_type,
         limit=limit,
         offset=offset,
-        sort_order=sort_order
+        sort_order=sort_order,
+        start_date=start_date,
+        end_date=end_date
     )
 
 @router.get("/url/{log_key:path}", response_model=Dict[str, str])
