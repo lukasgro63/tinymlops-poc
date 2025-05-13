@@ -33,9 +33,9 @@ class MLflowService:
             MetricsTransformer(),
             DriftTransformer(),
             DriftEventsTransformer(),  # Add our new transformer for drift event images
+            OperationalLogsTransformer(),  # Moved before LogsTransformer to prioritize operational logs processing
             LogsTransformer(),
-            PredictionImagesTransformer(),
-            OperationalLogsTransformer()  # Add transformer for operational logs
+            PredictionImagesTransformer()
         ]
         
         # Try to initialize MLflow
