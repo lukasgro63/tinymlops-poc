@@ -54,26 +54,54 @@ class PredictionImagesTransformer(DataTransformer):
             True if this transformer can handle the package, False otherwise
         """
         logger.info(f"PredictionImagesTransformer.can_transform called with package_type: {package_type}")
-        
+
+        # Skip packages that are drift-related
+        if package_type and any(drift_term in package_type.lower() for drift_term in ["drift", "event"]):
+            logger.info(f"PredictionImagesTransformer will NOT handle drift-related package type: {package_type}")
+            return False
+
         # Check for prediction_images package type
         if package_type and "prediction_images" in package_type.lower():
             logger.info(f"PredictionImagesTransformer will handle package with type: {package_type}")
             return True
-        
-        # Check for image files
+
+        # Check for image files but exclude drift-related packages
         image_files = []
+
+        # Check if any drift-related files exist
+        drift_files = [f for f in files if "drift" in f.name.lower() or "event" in f.name.lower()]
+        if drift_files:
+            logger.info(f"PredictionImagesTransformer will NOT handle package with drift-related files")
+            return False
+
         for file in files:
             if file.suffix.lower() in ['.jpg', '.jpeg', '.png']:
+                # Avoid drift event images
+                if "drift" in str(file).lower() or "event" in str(file).lower():
+                    continue
+
                 image_files.append(file)
                 logger.info(f"PredictionImagesTransformer found image file: {file}")
-                
+
         if image_files:
             # Metadata file should be present to identify prediction type
             metadata_files = [f for f in files if f.name == "prediction_images.json" or "metadata" in f.name.lower()]
+
+            # Skip if any metadata files mention target_bucket=drift
+            for meta_file in metadata_files:
+                try:
+                    with open(meta_file, 'r') as f:
+                        metadata = json.load(f)
+                        if metadata.get("target_bucket") == "drift":
+                            logger.info(f"PredictionImagesTransformer will NOT handle package with drift target_bucket")
+                            return False
+                except Exception:
+                    pass
+
             if metadata_files:
                 logger.info(f"PredictionImagesTransformer found {len(image_files)} image files with metadata")
                 return True
-        
+
         logger.info(f"PredictionImagesTransformer cannot handle package of type: {package_type}")
         return False
         
