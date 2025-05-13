@@ -32,7 +32,8 @@ def list_images(
     drift_type: Optional[str] = None,
     date: Optional[str] = None,
     limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    sort_order: Optional[str] = "desc"  # Neuer Parameter für Sortierrichtung
 ):
     """
     List drift images with optional filtering.
@@ -43,13 +44,15 @@ def list_images(
         date: Filter by date (YYYYMMDD format)
         limit: Maximum number of images to return
         offset: Number of images to skip
+        sort_order: Sort direction ('asc' or 'desc'), defaults to 'desc' (newest first)
     """
     return drift_images_service.list_images(
         device_id=device_id,
         drift_type=drift_type,
         date=date,
         limit=limit,
-        offset=offset
+        offset=offset,
+        sort_order=sort_order
     )
 
 @router.get("/url/{image_key:path}", response_model=Dict[str, str])

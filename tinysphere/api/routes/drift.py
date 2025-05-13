@@ -31,13 +31,14 @@ def get_drift_events(
     drift_type: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    sort_order: Optional[str] = "desc",  # Neuer Parameter für Sortierreihenfolge
     db: Session = Depends(get_db)
 ):
     """
     Get drift events with optional filtering.
     """
     events = DriftService.get_drift_events(
-        db, skip, limit, device_id, status, drift_type, start_date, end_date
+        db, skip, limit, device_id, status, drift_type, start_date, end_date, sort_order
     )
     
     # Add computed fields
@@ -414,9 +415,11 @@ async def create_drift_event_with_data(
         try:
             # Save image file with organized structure
             device_folder = device_id
-            drift_type_folder = drift_type.lower() if drift_type else "unknown"
+            # Use the actual drift type from the event to ensure consistency
+            drift_type_folder = event.drift_type.value if event.drift_type else "unknown"
             date_folder = datetime.now().strftime("%Y%m%d")
             filename = f"event_{event.event_id}_{image_file.filename}"
+            logger.info(f"Storing drift image in folder: {drift_type_folder}")
 
             # Create structured path for the image (device_id/drift_type/date/filename)
             image_path = f"{device_folder}/{drift_type_folder}/{date_folder}/{filename}"

@@ -33,7 +33,10 @@ import {
   DownloadForOffline as DownloadIcon,
   Image as GalleryIcon,
   List as ListIcon,
-  WarningAmber
+  WarningAmber,
+  Sort as SortIcon,
+  ArrowUpward as SortAscIcon,
+  ArrowDownward as SortDescIcon
 } from '@mui/icons-material';
 import { format, parseISO } from 'date-fns';
 
@@ -120,6 +123,9 @@ const DataHub: React.FC = () => {
   // Pagination
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(16);
+  
+  // Sorting
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc'); // desc = newest first (default)
   
   // Selected image for details view
   const [selectedImage, setSelectedImage] = useState<PredictionImage | null>(null);
@@ -290,9 +296,11 @@ const DataHub: React.FC = () => {
             selectedType || undefined,
             selectedDate || undefined,
             rowsPerPage,
-            page * rowsPerPage
+            page * rowsPerPage,
+            sortOrder // Sortierparameter übergeben
           );
           
+          // Die Sortierung erfolgt jetzt auf Server-Ebene durch den sort_order Parameter
           setImages(response.images);
           setTotalImages(response.total);
         } else {
@@ -308,11 +316,22 @@ const DataHub: React.FC = () => {
               selectedType || undefined,
               selectedDate || undefined,
               rowsPerPage,
-              0 // For simplicity, just get the first page from each device
+              0, // For simplicity, just get the first page from each device
+              sortOrder // Sortierparameter übergeben
             );
             
             allImages = [...allImages, ...response.images];
           }
+          
+          // Sortieren der kombinierten Bilder von allen Geräten
+          allImages.sort((a, b) => {
+            const dateA = new Date(a.last_modified).getTime();
+            const dateB = new Date(b.last_modified).getTime();
+            
+            return sortOrder === 'desc' 
+              ? dateB - dateA  // Newest first (desc)
+              : dateA - dateB; // Oldest first (asc)
+          });
           
           // Simple client-side pagination
           const startIndex = page * rowsPerPage;
@@ -332,7 +351,7 @@ const DataHub: React.FC = () => {
     };
     
     loadImages();
-  }, [selectedDeviceId, selectedType, selectedDate, page, rowsPerPage, tabValue]);
+  }, [selectedDeviceId, selectedType, selectedDate, page, rowsPerPage, tabValue, sortOrder]);
 
   // Load drift images based on filters and pagination
   useEffect(() => {
@@ -351,7 +370,8 @@ const DataHub: React.FC = () => {
             selectedDriftType || undefined,
             selectedDriftDate || undefined,
             rowsPerPage,
-            page * rowsPerPage
+            page * rowsPerPage,
+            sortOrder // Sortierparameter übergeben
           );
 
           // Process images to set event_id from folder name if available
@@ -372,6 +392,7 @@ const DataHub: React.FC = () => {
             return image;
           });
 
+          // Die Sortierung erfolgt jetzt auf Server-Ebene durch den sort_order Parameter
           setDriftImages(processedImages);
           setTotalDriftImages(response.total);
         } else {
@@ -387,7 +408,8 @@ const DataHub: React.FC = () => {
               selectedDriftType || undefined,
               selectedDriftDate || undefined,
               rowsPerPage,
-              0 // For simplicity, just get the first page from each device
+              0, // For simplicity, just get the first page from each device
+              sortOrder // Sortierparameter übergeben
             );
 
             // Process images to set event_id from folder name if available
@@ -411,6 +433,16 @@ const DataHub: React.FC = () => {
             allDriftImages = [...allDriftImages, ...processedImages];
           }
 
+          // Sortieren der kombinierten Drift-Bilder von allen Geräten
+          allDriftImages.sort((a, b) => {
+            const dateA = new Date(a.last_modified).getTime();
+            const dateB = new Date(b.last_modified).getTime();
+            
+            return sortOrder === 'desc' 
+              ? dateB - dateA  // Newest first (desc)
+              : dateA - dateB; // Oldest first (asc)
+          });
+
           // Simple client-side pagination
           const startIndex = page * rowsPerPage;
           const endIndex = startIndex + rowsPerPage;
@@ -429,7 +461,7 @@ const DataHub: React.FC = () => {
     };
 
     loadDriftImages();
-  }, [selectedDeviceId, selectedDriftType, selectedDriftDate, page, rowsPerPage, tabValue]);
+  }, [selectedDeviceId, selectedDriftType, selectedDriftDate, page, rowsPerPage, tabValue, sortOrder]);
   
   // Handle tab change
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
@@ -501,6 +533,12 @@ const DataHub: React.FC = () => {
   // Close details view
   const handleCloseDetails = () => {
     setSelectedImage(null);
+  };
+  
+  // Toggle sort order
+  const handleToggleSortOrder = () => {
+    setSortOrder(prevOrder => prevOrder === 'asc' ? 'desc' : 'asc');
+    setPage(0); // Reset to first page when sorting changes
   };
   
   // Download image
@@ -831,7 +869,7 @@ const DataHub: React.FC = () => {
           </FormControl>
         </Box>
         
-        <Box sx={{ flex: '1 1 200px', display: 'flex', alignItems: 'center' }}>
+        <Box sx={{ flex: '1 1 200px', display: 'flex', alignItems: 'center', gap: 1 }}>
           <Button 
             variant="outlined" 
             disabled={!selectedType && !selectedDate}
@@ -842,6 +880,11 @@ const DataHub: React.FC = () => {
           >
             Clear Filters
           </Button>
+          <Tooltip title={sortOrder === 'desc' ? "Showing newest first - Click to show oldest first" : "Showing oldest first - Click to show newest first"}>
+            <IconButton onClick={handleToggleSortOrder} color="primary">
+              {sortOrder === 'desc' ? <SortDescIcon /> : <SortAscIcon />}
+            </IconButton>
+          </Tooltip>
         </Box>
       </Box>
     </Box>
@@ -883,7 +926,7 @@ const DataHub: React.FC = () => {
           </FormControl>
         </Box>
         
-        <Box sx={{ flex: '1 1 200px', display: 'flex', alignItems: 'center' }}>
+        <Box sx={{ flex: '1 1 200px', display: 'flex', alignItems: 'center', gap: 1 }}>
           <Button 
             variant="outlined" 
             disabled={!selectedDriftType && !selectedDriftDate}
@@ -894,6 +937,11 @@ const DataHub: React.FC = () => {
           >
             Clear Filters
           </Button>
+          <Tooltip title={sortOrder === 'desc' ? "Showing newest first - Click to show oldest first" : "Showing oldest first - Click to show newest first"}>
+            <IconButton onClick={handleToggleSortOrder} color="primary">
+              {sortOrder === 'desc' ? <SortDescIcon /> : <SortAscIcon />}
+            </IconButton>
+          </Tooltip>
         </Box>
       </Box>
     </Box>

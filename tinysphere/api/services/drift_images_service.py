@@ -66,7 +66,23 @@ class DriftImagesService:
             if 'CommonPrefixes' in response:
                 for prefix in response['CommonPrefixes']:
                     drift_type = prefix['Prefix'].split('/')[1]
-                    drift_types.append(drift_type)
+                    
+                    # Map from storage drift type to API drift type using normalized names
+                    # The UI and API use detector names, but storage uses drift type names
+                    if drift_type == "knn_distance":
+                        # Map to the detector name used by the client
+                        drift_types.append("KNNDistanceMonitor")
+                    elif drift_type == "confidence":
+                        drift_types.append("EWMAConfidenceMonitor")
+                    elif drift_type == "feature":
+                        drift_types.append("FeatureMonitor")
+                    elif drift_type == "distribution":
+                        drift_types.append("DistributionMonitor")
+                    elif drift_type == "outlier":
+                        drift_types.append("OutlierMonitor")
+                    else:
+                        # Fallback to the original name
+                        drift_types.append(drift_type)
             
             return drift_types
         except Exception as e:
@@ -76,10 +92,14 @@ class DriftImagesService:
     def list_dates(self, device_id: str, drift_type: str) -> List[str]:
         """List all dates with drift images for a device and drift type."""
         try:
+            # Convert from API drift type name to storage drift type
+            storage_drift_type = self._convert_api_drift_type_to_storage(drift_type)
+            logger.info(f"Converting API drift type {drift_type} to storage type {storage_drift_type}")
+            
             # List 'folders' (prefixes) at the drift type level
             response = self.s3_client.list_objects_v2(
                 Bucket=self.bucket_name,
-                Prefix=f"{device_id}/{drift_type}/",
+                Prefix=f"{device_id}/{storage_drift_type}/",
                 Delimiter='/'
             )
             
@@ -94,6 +114,39 @@ class DriftImagesService:
         except Exception as e:
             logger.error(f"Error listing dates for device {device_id} and type {drift_type}: {e}")
             return []
+            
+    def _convert_api_drift_type_to_storage(self, drift_type: str) -> str:
+        """Convert from API drift type (detector name) to storage drift type."""
+        # Map from API/UI detector name to storage drift type
+        if drift_type == "KNNDistanceMonitor":
+            return "knn_distance"
+        elif drift_type == "EWMAConfidenceMonitor":
+            return "confidence"
+        elif drift_type == "FeatureMonitor":
+            return "feature"
+        elif drift_type == "DistributionMonitor":
+            return "distribution"
+        elif drift_type == "OutlierMonitor":
+            return "outlier"
+        # For "unknown" and any other types, keep as is
+        return drift_type.lower()
+        
+    def _convert_storage_drift_type_to_api(self, drift_type: str) -> str:
+        """Convert from storage drift type to API drift type (detector name)."""
+        # Map from storage drift type to API/UI detector name
+        drift_type_lower = drift_type.lower()
+        if drift_type_lower == "knn_distance":
+            return "KNNDistanceMonitor"
+        elif drift_type_lower == "confidence":
+            return "EWMAConfidenceMonitor"
+        elif drift_type_lower == "feature":
+            return "FeatureMonitor"
+        elif drift_type_lower == "distribution":
+            return "DistributionMonitor"
+        elif drift_type_lower == "outlier":
+            return "OutlierMonitor"
+        # For "unknown" and any other types, return capitalized
+        return drift_type.capitalize()
     
     def list_images(
         self, 
@@ -101,7 +154,8 @@ class DriftImagesService:
         drift_type: Optional[str] = None, 
         date: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
+        sort_order: Optional[str] = "desc"  # Neuer Parameter für Sortierreihenfolge (asc oder desc)
     ) -> Dict[str, Any]:
         """
         List drift images with optional filtering.
@@ -112,6 +166,7 @@ class DriftImagesService:
             date: Filter by date (YYYYMMDD format)
             limit: Maximum number of images to return
             offset: Number of images to skip
+            sort_order: Sort direction ('asc' or 'desc'), defaults to 'desc' (newest first)
             
         Returns:
             Dictionary with list of images and total count
@@ -122,7 +177,10 @@ class DriftImagesService:
             if device_id:
                 prefix += f"{device_id}/"
                 if drift_type:
-                    prefix += f"{drift_type}/"
+                    # Convert from API drift type name to storage drift type
+                    storage_drift_type = self._convert_api_drift_type_to_storage(drift_type)
+                    logger.info(f"For list_images: Converting API drift type {drift_type} to storage type {storage_drift_type}")
+                    prefix += f"{storage_drift_type}/"
                     if date:
                         prefix += f"{date}/"
             
@@ -144,10 +202,10 @@ class DriftImagesService:
             images = []
             contents = response.get('Contents', [])
             
-            # Apply manual pagination
-            paginated_contents = contents[offset:offset+limit]
-            
-            for obj in paginated_contents:
+            # Sortieren der Ergebnisse nach last modified timestamp
+            # Die S3-API gibt bereits ein 'LastModified' Feld für jedes Objekt zurück
+            sortable_contents = []
+            for obj in contents:
                 # Skip "directory" markers which end with /
                 if obj['Key'].endswith('/'):
                     continue
@@ -155,6 +213,21 @@ class DriftImagesService:
                 # Skip non-image files (check if it's an image by extension)
                 if not any(obj['Key'].lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif']):
                     continue
+                
+                sortable_contents.append(obj)
+            
+            # Aktualisiere die Gesamtzahl basierend auf den tatsächlich verfügbaren Bildern
+            total_count = len(sortable_contents)
+            
+            # Sortierung anwenden
+            reverse = sort_order.lower() != 'asc'  # Bei desc (neueste zuerst) brauchen wir reverse=True
+            sortable_contents.sort(key=lambda x: x['LastModified'], reverse=reverse)
+            
+            # Nach dem Sortieren die Pagination anwenden
+            paginated_contents = sortable_contents[offset:offset+limit]
+            
+            for obj in paginated_contents:
+                # Wir haben bereits Directory-Marker und Nicht-Bilddateien beim Sortieren übersprungen
                 
                 # Parse path components
                 path_parts = obj['Key'].split('/')
@@ -172,11 +245,15 @@ class DriftImagesService:
                     if len(path_parts) > 4 and path_parts[3].startswith("event_"):
                         event_id = path_parts[3].replace("event_", "")
                     
+                    # Convert from storage drift type to API drift type for consistent UI display
+                    api_drift_type = self._convert_storage_drift_type_to_api(img_drift_type)
+                    logger.info(f"Converting storage drift type {img_drift_type} to API type {api_drift_type}")
+                    
                     # Add to results
                     images.append({
                         'key': obj['Key'],
                         'device_id': img_device_id,
-                        'drift_type': img_drift_type,
+                        'drift_type': api_drift_type,  # Use the API drift type
                         'date': img_date,
                         'filename': img_filename,
                         'size': obj['Size'],

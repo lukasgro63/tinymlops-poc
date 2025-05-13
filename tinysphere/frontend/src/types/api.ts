@@ -14,7 +14,7 @@ export interface Device {
 }
 
 // Drift management types
-export type DriftType = 'confidence' | 'distribution' | 'feature' | 'outlier' | 'custom' | 'unknown';
+export type DriftType = 'confidence' | 'distribution' | 'feature' | 'outlier' | 'custom' | 'knn_distance' | 'unknown';
 export type DriftStatus = 'pending' | 'validated' | 'rejected' | 'resolved' | 'ignored';
 
 export interface DriftEvent {

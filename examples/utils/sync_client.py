@@ -312,11 +312,29 @@ class ExtendedSyncClient:
                 description=description
             )
 
-            # Create the drift event data
+            # Determine drift type from detector name
+            drift_type = "unknown"
+            detector_lower = detector_name.lower()
+            if "confidence" in detector_lower:
+                drift_type = "confidence"
+            elif "distribution" in detector_lower:
+                drift_type = "distribution"
+            elif "feature" in detector_lower and not "knn" in detector_lower:
+                drift_type = "feature"
+            elif "knn" in detector_lower or "distance" in detector_lower:
+                drift_type = "knn_distance"
+            elif "outlier" in detector_lower:
+                drift_type = "outlier"
+                
+            # Log the drift type for debugging
+            logger.info(f"ExtendedSyncClient: Derived drift_type={drift_type} from detector_name={detector_name}")
+                
+            # Create the drift event data with explicit drift_type
             drift_data = {
                 "timestamp": time.time(),
                 "detector_name": detector_name,
                 "reason": reason,
+                "drift_type": drift_type,  # Add explicitly derived drift_type
                 "metrics": metrics,
                 "sample": {
                     "sample_id": sample.sample_id if sample else None,
@@ -359,10 +377,14 @@ class ExtendedSyncClient:
                 logger.info(f"Adding drift image to package: {image_path}")
                 logger.info(f"Relative path for drift image: {rel_path}")
 
+                # Use the drift_type we already calculated above
+                # No need to recalculate it here
+                logger.info(f"Using drift_type={drift_type} for image metadata")
+                
                 # Create a metadata file for the image with the proper destination path
                 metadata = {
                     "relative_path": rel_path,  # Store this for the server to reconstruct the path
-                    "drift_type": detector_name,
+                    "drift_type": drift_type,  # Use the converted drift_type
                     "timestamp": time.time(),
                     "target_bucket": "drift"  # Set target bucket explicitly to 'drift'
                 }

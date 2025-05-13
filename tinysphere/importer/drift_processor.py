@@ -201,18 +201,20 @@ class DriftProcessor:
         sample_data = data.get("sample", {})
 
         # Determine drift type
-        drift_type = "UNKNOWN"
+        drift_type = "unknown"  # Lowercase to match enum value string
         detector_lower = detector_name.lower() if detector_name else ""
         if "confidence" in detector_lower:
-            drift_type = "CONFIDENCE"
+            drift_type = "confidence"  # Lowercase to match enum value string
         elif "distribution" in detector_lower:
-            drift_type = "FEATURE_DISTRIBUTION"
+            drift_type = "distribution"  # Lowercase to match enum value string
         elif "feature" in detector_lower:
-            drift_type = "FEATURE"
+            drift_type = "feature"  # Lowercase to match enum value string
         elif "concept" in detector_lower:
-            drift_type = "CONCEPT"
+            drift_type = "custom"  # Use custom as the concept is not in enum
         elif "performance" in detector_lower:
-            drift_type = "PERFORMANCE"
+            drift_type = "outlier"  # Use outlier as performance is not in enum
+        elif "knn" in detector_lower or "distance" in detector_lower:
+            drift_type = "knn_distance"  # Lowercase to match enum value string
 
         # Determine drift score
         drift_score = None

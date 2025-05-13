@@ -34,6 +34,7 @@ class DriftType(str, PyEnum):
     FEATURE = "feature"
     OUTLIER = "outlier"
     CUSTOM = "custom"
+    KNN_DISTANCE = "knn_distance"
     UNKNOWN = "unknown"
 
 
