@@ -517,9 +517,10 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
             import threading
             self._thread_local = threading.local()
         
+        # Only store the structured data for operational logging
         self._thread_local.neighbors_debug = neighbors_debug
-        self._thread_local.debug_str = debug_str
         
+        # Log debug info to console but don't store the string in thread_local
         logger.info(debug_str)
         
         # Store the distances for drift detection to access directly

@@ -232,11 +232,9 @@ class InferencePipeline:
         # If we're using the KNN classifier, include its debug information
         if isinstance(self.classifier, LightweightKNN) and hasattr(self.classifier, '_thread_local'):
             try:
-                # Add KNN debug information if available
+                # Add KNN debug information if available (only the structured data)
                 if hasattr(self.classifier._thread_local, 'neighbors_debug'):
                     op_metadata['knn_neighbors'] = self.classifier._thread_local.neighbors_debug
-                if hasattr(self.classifier._thread_local, 'debug_str'):
-                    op_metadata['knn_debug'] = self.classifier._thread_local.debug_str
             except Exception as e:
                 logger.warning(f"Error retrieving KNN debug info: {str(e)}")
         
@@ -978,11 +976,9 @@ class AdaptivePipeline(InferencePipeline):
             op_metadata = metadata or {}
             if isinstance(self.classifier, LightweightKNN) and hasattr(self.classifier, '_thread_local'):
                 try:
-                    # Add KNN debug information if available
+                    # Add KNN debug information if available (only the structured data)
                     if hasattr(self.classifier._thread_local, 'neighbors_debug'):
                         op_metadata['knn_neighbors'] = self.classifier._thread_local.neighbors_debug
-                    if hasattr(self.classifier._thread_local, 'debug_str'):
-                        op_metadata['knn_debug'] = self.classifier._thread_local.debug_str
                 except Exception as e:
                     logger.warning(f"Error retrieving KNN debug info: {str(e)}")
                     
