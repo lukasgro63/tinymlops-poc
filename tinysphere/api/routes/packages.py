@@ -72,6 +72,7 @@ def mlflow_diagnostics():
 
 @router.get("/", response_model=List[Package])
 def get_packages(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    # Pass the limit parameter through to the service
     packages = PackageService.get_all_packages(db, skip=skip, limit=limit)
     return packages
 
@@ -156,6 +157,7 @@ def get_package_progress(package_id: str, db: Session = Depends(get_db)):
 
 @router.get("/device/{device_id}", response_model=List[Package])
 def get_packages_by_device(device_id: str, skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    # Pass the limit parameter through to the service
     packages = PackageService.get_packages_by_device(db, device_id=device_id, skip=skip, limit=limit)
     return packages
 

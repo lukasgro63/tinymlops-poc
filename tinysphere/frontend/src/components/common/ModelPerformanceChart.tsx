@@ -18,6 +18,16 @@ import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, X
 import { getModelsPerformance } from '../../services/api';
 import { ModelPerformanceData } from '../../types/api';
 
+// Extended chart data interface
+interface ChartDataItem {
+  name: string;
+  value: number | null;
+  stage?: string;
+  timestamp?: number;
+  run_id?: string;
+  isEmpty?: boolean; // Flag for empty data display
+}
+
 interface ModelPerformanceChartProps {
   // For Dashboard mode (fetches data internally)
   models?: string[];
@@ -48,7 +58,7 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
   // Internal state
   const [selectedModel, setSelectedModel] = useState<string>(models.length > 0 ? models[0] : '');
   const [selectedMetric, setSelectedMetric] = useState<string>(externalSelectedMetric || 'accuracy');
-  const [chartData, setChartData] = useState<any[]>([]);
+  const [chartData, setChartData] = useState<ChartDataItem[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,36 +68,122 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
   const [maxRuns, setMaxRuns] = useState<number>(10); // Default 10 runs
   const [tags, setTags] = useState<string>(''); // Tags filter in key=value format
 
-  // Metric options
+  // Metric options - include all known operational metrics from MLflow
   const [availableMetrics, setAvailableMetrics] = useState<string[]>([
+    // ML metrics
     'accuracy', 'precision', 'recall', 'f1', 'loss',
-    'confidence_mean', 'latency_mean_ms', 'system_cpu_percent_avg', 'system_memory_percent_avg',
-    'total_inferences'
+    
+    // Confidence metrics
+    'confidence_mean', 'confidence_median', 'confidence_min', 'confidence_max', 
+    'confidence_std', 'confidence_p5',
+    
+    // Latency metrics
+    'latency_mean_ms', 'latency_median_ms', 'latency_min_ms', 'latency_max_ms',
+    'latency_p95_ms', 'latency_p99_ms', 'latency_std_ms',
+    'latency_mean', 'latency_median', 'latency_min', 'latency_max',
+    'latency_p95', 'latency_p99', 'latency_std',
+    
+    // System metrics
+    'system_cpu_percent_avg', 'system_cpu_percent_max', 'system_cpu_percent_current',
+    'system_memory_percent_avg', 'system_memory_percent_max', 'system_memory_percent_current',
+    'system_timestamp_avg', 'system_timestamp_max', 'system_timestamp_current',
+    
+    // Operation metrics
+    'total_inferences', 'uptime_seconds',
+    
+    // Distribution metrics (may contain NaN values)
+    'prediction_distribution_negative', 'prediction_distribution_stone',
+    'prediction_distribution_lego'
   ]);
 
   // Use data directly if provided
   useEffect(() => {
     if (data && data.length > 0) {
-      setChartData(data);
+      // Pre-process data to handle NaN values
+      const processedData = data.map(item => {
+        const newItem = {...item};
+        // Convert any NaN values to null so they're properly handled by the chart
+        Object.keys(newItem).forEach(key => {
+          const value = newItem[key];
+          
+          // Handle number NaN
+          if (typeof value === 'number' && isNaN(value)) {
+            newItem[key] = null;
+          }
+          
+          // Handle string NaN values with explicit casting
+          if (value !== null && typeof value === 'string') {
+            const strValue = value as string;
+            if (strValue.toLowerCase() === 'nan') {
+              newItem[key] = null;
+            }
+          }
+        });
+        return newItem;
+      });
+      
+      setChartData(processedData);
     }
   }, [data]);
 
   // Transform performance data for chart when model or metric changes in model list mode
   useEffect(() => {
-    if (isModelListMode && selectedModel && performanceData.length > 0) {
-      const filteredData = performanceData.filter(item =>
-        item.model_name === selectedModel &&
-        item.metric_name === selectedMetric
-      );
+    if (isModelListMode && selectedModel) {
+      let filteredData: ModelPerformanceData[] = [];
+      
+      // Only filter if we have performance data
+      if (performanceData.length > 0) {
+        filteredData = performanceData.filter(item =>
+          item.model_name === selectedModel &&
+          item.metric_name === selectedMetric
+        );
+      }
+
+      // Handle case where no data is available for this model/metric combination
+      if (filteredData.length === 0) {
+        console.warn(`No performance data found for model ${selectedModel} and metric ${selectedMetric}`);
+        setChartData([
+          { 
+            name: 'No Data Available', 
+            value: null,
+            stage: '',
+            isEmpty: true // Custom flag to identify empty data for rendering
+          }
+        ]);
+        return;
+      }
 
       // Transform for chart display
-      const formattedData = filteredData.map(item => ({
-        name: `v${item.version}`,
-        value: item.value,
-        stage: item.stage,
-        timestamp: item.timestamp,
-        run_id: item.run_id
-      }));
+      const formattedData = filteredData.map(item => {
+        // Per the interface, item.value should be number | null
+        // But we'll handle any type safely
+        let processedValue: number | null = null;
+        
+        if (item.value !== null) {
+          if (typeof item.value === 'number') {
+            // If it's a number but NaN, use null
+            processedValue = isNaN(item.value) ? null : item.value;
+          } else if (typeof item.value === 'string') {
+            // If it's a string, check for NaN or try to parse it
+            const str = item.value as string;
+            if (str.toLowerCase() === 'nan') {
+              processedValue = null;
+            } else {
+              const parsed = parseFloat(str);
+              processedValue = isNaN(parsed) ? null : parsed;
+            }
+          }
+          // All other types become null
+        }
+        
+        return {
+          name: `v${item.version}`,
+          value: processedValue,
+          stage: item.stage,
+          timestamp: item.timestamp,
+          run_id: item.run_id
+        };
+      });
 
       // Sort by version
       formattedData.sort((a, b) => {
@@ -97,6 +193,16 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
       });
 
       setChartData(formattedData);
+    } else if (isModelListMode) {
+      // No model selected
+      setChartData([
+        { 
+          name: 'Select Model', 
+          value: null,
+          stage: '',
+          isEmpty: true
+        }
+      ]);
     }
   }, [isModelListMode, selectedModel, selectedMetric, performanceData]);
 
@@ -148,15 +254,21 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
 
       // Extract available metrics from the data
       const metricsSet = new Set<string>();
+      
+      // First try getting metrics from the performance data
       data.forEach(item => {
         if (item.metric_name) {
           metricsSet.add(item.metric_name);
         }
       });
-
-      // Update available metrics if we found any
+      
+      // If we found any metrics in the data, update the available metrics
       if (metricsSet.size > 0) {
+        console.log(`Found ${metricsSet.size} metric types in performance data`);
         setAvailableMetrics(Array.from(metricsSet));
+      } else {
+        // Use default metrics as a fallback
+        console.log("No metrics found in performance data, using defaults");
       }
 
       // Don't update performanceData here as we're using the prop
@@ -221,7 +333,7 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
   };
 
   // Format the tooltip value
-  const formatTooltipValue = (value: any) => {
+  const formatTooltipValue = (value: any): string => {
     // Handle null, undefined or NaN values
     if (value === null || value === undefined || Number.isNaN(value)) {
       return 'N/A';
@@ -231,7 +343,27 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
 
     try {
       // Convert to number if string for consistent handling
-      const numValue = typeof value === 'string' ? parseFloat(value) : value;
+      let numValue: number;
+      
+      if (typeof value === 'string') {
+        // Explicitly cast to string to ensure TypeScript knows it's a string
+        const strValue = value as string;
+        
+        // Check for string 'NaN' values
+        if (strValue === 'NaN' || strValue === 'nan' || strValue.toLowerCase() === 'nan') {
+          return 'N/A';
+        }
+        
+        // Try to parse as number
+        numValue = parseFloat(strValue);
+        if (isNaN(numValue)) {
+          return strValue; // Return original string if it can't be parsed
+        }
+      } else if (typeof value === 'number') {
+        numValue = value as number;
+      } else {
+        return 'N/A'; // For any other type (like null, undefined, etc.)
+      }
 
       // Special formatting based on metric type
       if (metricToCheck.includes('latency') || metricToCheck.includes('time')) {
@@ -248,8 +380,11 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
         return `${(numValue * 100).toFixed(2)}%`;
       } else if (metricToCheck === 'total_inferences' || metricToCheck.includes('count')) {
         // Format counts as integers
-        return Math.round(numValue);
-      } else if (typeof numValue === 'number') {
+        return Math.round(numValue).toString();
+      } else if (metricToCheck.includes('distribution')) {
+        // Format distribution values as percentages with 1 decimal place
+        return `${(numValue * 100).toFixed(1)}%`;
+      } else {
         // Standard metrics like accuracy are typically between 0-1
         if (numValue >= 0 && numValue <= 1) {
           return `${(numValue * 100).toFixed(2)}%`;
@@ -262,7 +397,8 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
       return 'Error';
     }
 
-    return value;
+    // This is a fallback that should never be reached, but to satisfy TypeScript:
+    return typeof value === 'string' ? value : String(value);
   };
 
   // Format metric name for display
@@ -413,9 +549,13 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
             <Typography color="error">{error}</Typography>
           </Box>
-        ) : chartData.length === 0 ? (
+        ) : chartData.length === 0 || (chartData.length === 1 && chartData[0].isEmpty) ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-            <Typography>No performance data available for this model</Typography>
+            <Typography>
+              {chartData.length === 0 ? 
+                'No performance data available for this model' : 
+                chartData[0].name}
+            </Typography>
           </Box>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -427,7 +567,7 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
               <XAxis dataKey="name" />
               <YAxis domain={getYAxisDomain()} />
               <Tooltip
-                formatter={(value) => [
+                formatter={(value: any): [string, string] => [
                   formatTooltipValue(value),
                   formatMetricName(selectedMetric)
                 ]}
@@ -439,7 +579,8 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
                 stroke="#00647D"
                 activeDot={{ r: 8 }}
                 name={formatMetricName(selectedMetric)}
-                connectNulls={true}  // Skip null/undefined values in line connection
+                connectNulls={true}  // Skip null/undefined/NaN values in line connection
+                isAnimationActive={false} // Disable animation to prevent issues with NaN values
               />
             </LineChart>
           </ResponsiveContainer>

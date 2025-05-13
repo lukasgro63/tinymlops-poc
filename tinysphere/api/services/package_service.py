@@ -18,12 +18,20 @@ from tinysphere.db.models import Package
 
 class PackageService:
     @staticmethod
-    def get_all_packages(db: Session, skip: int = 0, limit: int = 100) -> List[Package]:
-        return db.query(Package).offset(skip).limit(limit).all()
+    def get_all_packages(db: Session, skip: int = 0, limit: int = 0) -> List[Package]:
+        # If limit is 0, don't apply a limit (return all packages)
+        query = db.query(Package).offset(skip)
+        if limit > 0:
+            query = query.limit(limit)
+        return query.all()
     
     @staticmethod
-    def get_packages_by_device(db: Session, device_id: str, skip: int = 0, limit: int = 100) -> List[Package]:
-        return db.query(Package).filter(Package.device_id == device_id).offset(skip).limit(limit).all()
+    def get_packages_by_device(db: Session, device_id: str, skip: int = 0, limit: int = 0) -> List[Package]:
+        # If limit is 0, don't apply a limit (return all packages for this device)
+        query = db.query(Package).filter(Package.device_id == device_id).offset(skip)
+        if limit > 0:
+            query = query.limit(limit)
+        return query.all()
     
     @staticmethod
     def get_package_by_id(db: Session, package_id: str) -> Optional[Package]:

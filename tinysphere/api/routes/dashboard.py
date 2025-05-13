@@ -36,7 +36,8 @@ def get_system_status(db: Session = Depends(get_db)):
         
         # Get package data
         try:
-            packages = PackageService.get_all_packages(db)
+            # Get all packages without limit
+            packages = PackageService.get_all_packages(db, limit=0)
             
             package_types = {}
             for p in packages:
@@ -290,7 +291,8 @@ def get_devices_summary(db: Session = Depends(get_db)):
             device_summaries = []
             for device in devices:
                 try:
-                    packages = PackageService.get_packages_by_device(db, device.device_id)
+                    # Get all packages for this device without limit
+                    packages = PackageService.get_packages_by_device(db, device.device_id, limit=0)
 
                     latest_package = None
                     if packages:
@@ -678,7 +680,8 @@ def get_package_timeline(period: str = "week", db: Session = Depends(get_db)):
                             'models': 0,
                             'metrics': 0,
                             'data_logs': 0,
-                            'drift_events': 0
+                            'drift_events': 0,
+                            'prediction_images': 0
                         }
 
                     # Map package types to chart categories
@@ -690,6 +693,8 @@ def get_package_timeline(period: str = "week", db: Session = Depends(get_db)):
                         timeline_data[date_str]['data_logs'] += count
                     elif 'drift' in package_type.lower():
                         timeline_data[date_str]['drift_events'] += count
+                    elif 'prediction' in package_type.lower() or 'image' in package_type.lower():
+                        timeline_data[date_str]['prediction_images'] += count
                 except Exception as item_err:
                     print(f"Error processing timeline item: {item_err}")
                     continue
@@ -703,7 +708,8 @@ def get_package_timeline(period: str = "week", db: Session = Depends(get_db)):
                         'models': 0,
                         'metrics': 0,
                         'data_logs': 0,
-                        'drift_events': 0
+                        'drift_events': 0,
+                        'prediction_images': 0
                     }
             
             # Convert to list and sort by date
@@ -724,7 +730,8 @@ def get_package_timeline(period: str = "week", db: Session = Depends(get_db)):
                     'models': 0,
                     'metrics': 0,
                     'data_logs': 0,
-                    'drift_events': 0
+                    'drift_events': 0,
+                    'prediction_images': 0
                 }
             ]
             

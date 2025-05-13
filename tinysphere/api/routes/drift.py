@@ -316,12 +316,35 @@ def acknowledge_validations(ack: DriftAcknowledgement, db: Session = Depends(get
 def get_drift_statistics(
     device_id: Optional[str] = None,
     days: int = 30,
+    drift_type: Optional[str] = None,  # Allow filtering statistics by drift type
     db: Session = Depends(get_db)
 ):
     """
     Get statistics about drift events.
+    
+    Args:
+        device_id: Optional filter by device
+        days: Number of days to include (default 30)
+        drift_type: Optional filter by drift type (will be converted to lowercase)
     """
-    return DriftService.get_drift_statistics(db, device_id, days)
+    # Log the request parameters for debugging
+    logger.info(f"Getting drift statistics with device_id={device_id}, days={days}, drift_type={drift_type}")
+    
+    # Add drift_type parameter
+    return DriftService.get_drift_statistics(db, device_id, days, drift_type=drift_type)
+
+@router.post("/repair", status_code=200)
+def repair_drift_events(db: Session = Depends(get_db)):
+    """
+    Repair drift events with unknown type that can be inferred from descriptions.
+    
+    This is an admin operation that searches for drift events with UNKNOWN type
+    and attempts to assign the correct type based on the event description or detector name.
+    """
+    logger.info("Starting drift events repair process")
+    results = DriftService.repair_drift_types(db)
+    logger.info(f"Repair process completed: {results['repaired_count']} events repaired")
+    return results
 
 @router.get("/devices/{device_id}/metrics")
 def get_device_drift_metrics(device_id: str, db: Session = Depends(get_db)):

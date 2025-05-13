@@ -171,6 +171,7 @@ export interface PackageTimelineData {
   metrics: number;
   data_logs: number;
   drift_events: number;
+  prediction_images: number;
 }
 
 export interface ModelPerformanceData {

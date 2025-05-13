@@ -4,14 +4,17 @@ import {
   BugReport as BugReportIcon,
   CheckCircle as CheckCircleIcon,
   CompareArrows as CompareArrowsIcon,
-  HourglassEmpty as HourglassEmptyIcon
+  HourglassEmpty as HourglassEmptyIcon,
+  Refresh as RefreshIcon
 } from '@mui/icons-material';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
+import StorageIcon from '@mui/icons-material/Storage';
 import {
   Box,
   Button,
   Chip,
   CircularProgress,
+  IconButton,
   Paper,
   Table,
   TableBody,
@@ -19,19 +22,22 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  Tooltip,
   Typography
 } from '@mui/material';
 import React, { useEffect, useState } from 'react';
 import ErrorDisplay from '../components/common/ErrorDisplay';
 import ModelComparisonTable from '../components/common/ModelComparisonTable';
 import ModelPerformanceChart from '../components/common/ModelPerformanceChart';
+import ModelRegistryTable from '../components/common/ModelRegistryTable';
 import SectionCard from '../components/common/SectionCard';
 import {
   compareModelVersions,
   getModelMetrics,
   getModelVersions,
   getModels,
-  getModelsSummary
+  getModelsSummary,
+  getModelsPerformance
 } from '../services/api';
 import {
   MetricRow,
@@ -59,36 +65,42 @@ const Models: React.FC = () => {
   const [metricsLoading, setMetricsLoading] = useState<boolean>(false);
   const [comparisonLoading, setComparisonLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   
   // Fetch initial data on load
-  useEffect(() => {
-    const fetchInitialData = async () => {
-      try {
-        setLoading(true);
-        
-        // Parallel requests for model list and summaries
-        const [summaries, models] = await Promise.all([
-          getModelsSummary(),
-          getModels()
-        ]);
-        
-        setModelSummaries(summaries);
-        setModelList(models);
-        
-        // Select the first model if available
-        if (models.length > 0) {
-          setSelectedModel(models[0]);
-        }
-        
-      } catch (err) {
-        console.error('Error fetching model data:', err);
-        setError('Failed to load model data. Please try again later.');
-      } finally {
-        setLoading(false);
+  // Function to fetch all models data
+  const fetchModelsData = async () => {
+    try {
+      setLoading(true);
+      
+      // Parallel requests for model list and summaries
+      const [summaries, models] = await Promise.all([
+        getModelsSummary(),
+        getModels()
+      ]);
+      
+      setModelSummaries(summaries);
+      setModelList(models);
+      
+      // Select the first model if available and no model is currently selected
+      if (models.length > 0 && !selectedModel) {
+        setSelectedModel(models[0]);
       }
-    };
-    
-    fetchInitialData();
+      
+      // Update last updated timestamp
+      setLastUpdated(new Date());
+      
+    } catch (err) {
+      console.error('Error fetching model data:', err);
+      setError('Failed to load model data. Please try again later.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch initial data on load
+  useEffect(() => {
+    fetchModelsData();
   }, []);
   
   // Fetch versions when selected model changes
@@ -167,15 +179,80 @@ const Models: React.FC = () => {
     }
   };
   
-  // Fetch model metrics from MLflow
+  // Fetch model metrics from MLflow using dashboard endpoint
   const fetchModelMetrics = async (modelName: string) => {
     try {
       setMetricsLoading(true);
-      const metrics = await getModelMetrics(modelName);
-      setVersionMetrics(metrics);
+      
+      // First try using the dashboard performance endpoint which is more robust
+      // This endpoint works better with experiment data
+      console.log(`Fetching metrics for model ${modelName} using dashboard endpoint`);
+      const performanceData = await getModelsPerformance(
+        selectedMetric,  // Use current selected metric
+        30,              // Get data for last 30 days
+        100,             // Get up to 100 data points
+        modelName,       // Filter to just this model
+        undefined,       // No tag filtering
+        true             // Include operational metrics
+      );
+      
+      if (performanceData && performanceData.length > 0) {
+        console.log(`Found ${performanceData.length} performance data points for model ${modelName}`);
+        
+        // Convert performance data format to version metrics format
+        const versionMap = new Map();
+        
+        // Group metrics by version
+        performanceData.forEach(item => {
+          if (!versionMap.has(item.version)) {
+            versionMap.set(item.version, {
+              version: item.version,
+              stage: item.stage,
+              run_id: item.run_id || '',
+              created_at: item.timestamp || Date.now(),
+              metrics: {}
+            });
+          }
+          
+          // Add this metric to the version's metrics
+          const versionData = versionMap.get(item.version);
+          versionData.metrics[item.metric_name] = item.value;
+        });
+        
+        // Convert map to array
+        const processedMetrics = Array.from(versionMap.values());
+        console.log(`Processed ${processedMetrics.length} versions with metrics`);
+        
+        setVersionMetrics(processedMetrics);
+      } else {
+        console.warn(`No performance data found, falling back to model metrics endpoint`);
+        
+        // Fallback to the original metrics endpoint
+        const metrics = await getModelMetrics(modelName);
+        
+        if (metrics && metrics.length > 0) {
+          console.log(`Found ${metrics.length} metrics from model endpoint`);
+          setVersionMetrics(metrics);
+        } else {
+          console.warn(`No metrics found for model ${modelName} from either endpoint`);
+          // Create empty metrics for existing versions
+          if (modelVersions.length > 0) {
+            const emptyMetrics = modelVersions.map(version => ({
+              version: version.version,
+              stage: version.stage,
+              run_id: version.run_id || '',
+              created_at: Date.now(),
+              metrics: {}
+            }));
+            setVersionMetrics(emptyMetrics);
+          } else {
+            setVersionMetrics([]);
+          }
+        }
+      }
     } catch (err) {
       console.error('Error fetching model metrics:', err);
-      // Don't set global error for just the metrics
+      setVersionMetrics([]);
     } finally {
       setMetricsLoading(false);
     }
@@ -232,87 +309,96 @@ const Models: React.FC = () => {
   
   return (
     <Box>
-      {/* No header needed */}
+      {/* First row: Model Registry Table */}
+      <Box sx={{ mb: 3 }}>
+        <SectionCard 
+          title="Model Registry" 
+          icon={<StorageIcon style={{ fontSize: 20, color: '#00647D' }} />}
+          action={
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Tooltip title="Last updated">
+                <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
+                  {lastUpdated ? `Updated: ${lastUpdated.toLocaleTimeString()}` : ''}
+                </Typography>
+              </Tooltip>
+              <Tooltip title="Refresh data">
+                <IconButton size="small" onClick={() => fetchModelsData()} disabled={loading}>
+                  <RefreshIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          }
+        >
+          <ModelRegistryTable 
+            initialData={modelSummaries}
+            selectedModel={selectedModel}
+            onModelSelect={(modelName) => setSelectedModel(modelName)}
+          />
+        </SectionCard>
+      </Box>
       
-      {/* First row: Performance chart and Registry status */}
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, mb: 3 }}>
-        {/* Model performance chart */}
-        <Box sx={{ flex: '1 1 600px', minWidth: '300px' }}>
-          <SectionCard 
-            title="Model Performance Trends"
-            icon={<ShowChartIcon style={{ fontSize: 20, color: '#00647D' }} />}
-          >
-            <Box sx={{ height: 300 }}>
-              {metricsLoading ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                  <CircularProgress size={24} />
-                </Box>
-              ) : (
-                <ModelPerformanceChart
-                  models={modelList}
-                  performanceData={versionMetrics.map(metric => ({
+      {/* Second row: Model Performance Trends */}
+      <Box sx={{ mb: 3 }}>
+        <SectionCard 
+          title="Model Performance Trends"
+          icon={<ShowChartIcon style={{ fontSize: 20, color: '#00647D' }} />}
+        >
+          <Box sx={{ height: 300 }}>
+            {metricsLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                <CircularProgress size={24} />
+              </Box>
+            ) : (
+              <ModelPerformanceChart
+                models={modelList}
+                performanceData={versionMetrics.map(metric => {
+                  // Handle potential NaN values in metrics
+                  let metricValue: number | null = null;
+                  
+                  if (metric.metrics && metric.metrics[selectedMetric] !== undefined) {
+                    const value = metric.metrics[selectedMetric];
+                    
+                    // Handle different value types
+                    if (value === null) {
+                      metricValue = null;
+                    } else if (typeof value === 'number') {
+                      // If it's a numeric NaN, set to null
+                      metricValue = isNaN(value) ? null : value;
+                    } else if (typeof value === 'string') {
+                      // If it's a string 'NaN', set to null, otherwise try to parse it
+                      const strValue = value as string;
+                      if (strValue === 'NaN' || strValue === 'nan' || strValue.toLowerCase() === 'nan') {
+                        metricValue = null;
+                      } else {
+                        // Try to parse as number
+                        const parsed = parseFloat(strValue);
+                        metricValue = isNaN(parsed) ? null : parsed;
+                      }
+                    } else {
+                      // Any other type becomes null
+                      metricValue = null;
+                    }
+                  }
+                  
+                  return {
                     model_name: selectedModel,
                     version: metric.version,
                     stage: metric.stage,
                     metric_name: selectedMetric,
-                    value: metric.metrics && metric.metrics[selectedMetric] !== undefined
-                      ? metric.metrics[selectedMetric]
-                      : null,
+                    value: metricValue,
                     timestamp: metric.created_at,
                     run_id: metric.run_id
-                  }))}
-                  selectedMetric={selectedMetric}
-                  onMetricChange={(metric) => setSelectedMetric(metric)}
-                />
-              )}
-            </Box>
-          </SectionCard>
-        </Box>
-        
-        {/* Registry status */}
-        <Box sx={{ flex: '1 1 400px', minWidth: '300px' }}>
-          <SectionCard title="Model Registry Status">
-            <TableContainer component={Paper} sx={{ maxHeight: 350, overflow: 'auto' }}>
-              <Table stickyHeader size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Model Name</TableCell>
-                    <TableCell align="center">Latest</TableCell>
-                    <TableCell align="center">Production</TableCell>
-                    <TableCell align="center">Staging</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {modelSummaries.map((model) => (
-                    <TableRow 
-                      key={model.name}
-                      hover
-                      onClick={() => setSelectedModel(model.name)}
-                      selected={selectedModel === model.name}
-                      sx={{ cursor: 'pointer' }}
-                    >
-                      <TableCell component="th" scope="row">
-                        <Typography variant="body2" fontWeight={selectedModel === model.name ? 'bold' : 'normal'}>
-                          {model.name}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="center">{model.latest_version}</TableCell>
-                      <TableCell align="center">
-                        {model.production_version || '-'}
-                      </TableCell>
-                      <TableCell align="center">
-                        {model.staging_version || '-'}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </SectionCard>
-        </Box>
+                  };
+                })}
+                selectedMetric={selectedMetric}
+                onMetricChange={(metric) => setSelectedMetric(metric)}
+              />
+            )}
+          </Box>
+        </SectionCard>
       </Box>
       
-      {/* Second row: Model versions table */}
+      {/* Third row: Model versions table */}
       <Box sx={{ mb: 3 }}>
         <SectionCard title={`${selectedModel} Versions`}>
           <TableContainer component={Paper} sx={{ maxHeight: 400, overflow: 'auto' }}>
@@ -381,7 +467,7 @@ const Models: React.FC = () => {
         </SectionCard>
       </Box>
       
-      {/* Third row: Model comparison (optional) */}
+      {/* Fourth row: Model comparison (optional) */}
       {selectedVersions.length > 0 && (
         <Box sx={{ mb: 3 }}>
           <SectionCard 
