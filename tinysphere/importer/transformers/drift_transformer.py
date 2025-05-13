@@ -40,20 +40,17 @@ class DriftTransformer(DataTransformer):
         """
         logger.info(f"DriftTransformer.can_transform called with package_type: {package_type}")
 
-        # Log all files for debugging
-        for file in files:
-            logger.info(f"DriftTransformer examining file: {file}")
-
-        # Accept packages with drift_event type (with more flexible matching)
-        if package_type and "drift" in package_type.lower():
-            logger.info(f"DriftTransformer will handle package with type: {package_type}")
-            return True
-
-        # Check for drift event files with more robust detection
+        # Check for drift event files with more robust detection first, to enable finding
+        # drift data in any package, including prediction_images packages that might contain drift data
         drift_files = []
         drift_images = []
 
+        # Log a few files for debugging
+        file_count = 0
         for file in files:
+            if file_count < 5:  # Only log first few files to avoid log spam
+                logger.info(f"DriftTransformer examining file: {file}")
+
             # Check drift-related JSON or JSONL files
             if file.name.lower().startswith("drift") or "drift" in file.name.lower():
                 if file.suffix.lower() in [".json", ".jsonl"]:
@@ -63,15 +60,24 @@ class DriftTransformer(DataTransformer):
                 elif file.suffix.lower() in [".jpg", ".jpeg", ".png"]:
                     drift_images.append(file)
                     logger.info(f"DriftTransformer found drift image file: {file}")
+            file_count += 1
 
-        # Even if no drift JSON files, if we have drift images with a package_type containing 'drift', we can process it
+        # If we found actual drift files, we should process them regardless of package type
         if drift_files:
             logger.info(f"DriftTransformer found {len(drift_files)} drift JSON/JSONL files in package with type: {package_type}")
             return True
-        elif drift_images and package_type and "drift" in package_type.lower():
+
+        # Accept packages with drift_event type (with more flexible matching)
+        if package_type and "drift" in package_type.lower():
+            logger.info(f"DriftTransformer will handle package with type: {package_type}")
+            return True
+
+        # If these are drift images in a package with drift in the name, handle them
+        if drift_images and package_type and "drift" in package_type.lower():
             logger.info(f"DriftTransformer found {len(drift_images)} drift image files in package with type: {package_type}")
             return True
 
+        # If no other criteria matched, this isn't a drift package
         logger.info(f"DriftTransformer cannot handle package of type: {package_type}")
         return False
     

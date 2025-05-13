@@ -156,13 +156,48 @@ def on_drift_detected(drift_info: Dict[str, Any]) -> None:
     # Save the current frame if drift image saving is enabled
     image_path = None
     if config["tinylcm"]["features"]["save_drift_images"] and current_frame is not None:
+        # Get device ID
+        device_id = None
+        if 'device_id_manager' in globals() and 'device_id_manager' in locals():
+            device_id = device_id_manager.get_device_id()
+        elif hasattr(sync_client, 'device_id'):
+            device_id = sync_client.device_id
+        else:
+            import socket
+            device_id = f"device-{socket.gethostname()}"
+
+        # Get current date in YYYYMMDD format for bucket structure
+        current_date = datetime.now().strftime("%Y%m%d")
+
+        # Create drift directory structure for compatibility with tinysphere bucket format:
+        # device_id/drift_type/date/filename.jpg
+        drift_type = detector_name.lower().replace("monitor", "").replace(" ", "_")
+
+        # Create base drift directory
         drift_dir = Path("./drift_images")
         drift_dir.mkdir(exist_ok=True)
-        
+
+        # Create device directory
+        device_dir = drift_dir / device_id
+        device_dir.mkdir(exist_ok=True)
+
+        # Create drift type directory
+        drift_type_dir = device_dir / drift_type
+        drift_type_dir.mkdir(exist_ok=True)
+
+        # Create date directory
+        date_dir = drift_type_dir / current_date
+        date_dir.mkdir(exist_ok=True)
+
+        # Create filename with timestamp and event ID
+        event_id = f"event_{timestamp.replace(' ', '_').replace(':', '-')}_{uuid.uuid4().hex[:8]}"
+        image_filename = f"{event_id}.jpg"
+
         # Convert BGR to RGB for correct color visualization
         rgb_frame = cv2.cvtColor(current_frame, cv2.COLOR_BGR2RGB)
 
-        image_path = drift_dir / f"drift_{timestamp.replace(' ', '_').replace(':', '-')}_{detector_name}.jpg"
+        # Full path to the image
+        image_path = date_dir / image_filename
         cv2.imwrite(str(image_path), rgb_frame)
         logger.info(f"Saved drift image to {image_path}")
     
@@ -199,12 +234,32 @@ def on_drift_detected(drift_info: Dict[str, Any]) -> None:
                 # This is the best case - use the extended client's method
                 # Create a FeatureSample-like object for the current state
                 from tinylcm.core.data_structures import FeatureSample
+
+                # For drift detection, make sure we have a consistent path to the image
+                # that follows the drift/device_id/drift_type/date/filename.jpg convention
+                rel_path = None
+                if image_path:
+                    # Get the relative path to use for consistent storage of drift images in the server
+                    # Check if the image_path already follows our convention
+                    if image_path.parent.parent.parent.name == "drift_images":
+                        # Already follows the convention, get relative path
+                        rel_path = str(image_path.relative_to(Path("./drift_images")))
+                    else:
+                        # Doesn't follow convention yet, so we'll use just the filename
+                        rel_path = image_path.name
+
+                    logger.info(f"Using drift image relative path: {rel_path}")
+
+                # Create the sample object with image path information
                 current_sample_obj = FeatureSample(
                     sample_id=f"drift_{int(time.time())}",
                     features=None,
                     prediction=None,
                     timestamp=time.time(),
-                    metadata={"confidence": 0.0}
+                    metadata={
+                        "confidence": 0.0,
+                        "raw_data_path": rel_path if rel_path else None
+                    }
                 )
 
                 # Use the specialized method
@@ -592,7 +647,8 @@ def main():
                 )
 
                 # Add a filter to prevent multiple sequential drift detections
-                feature_detector.drift_cooldown_period = 100  # Samples to wait before detecting drift again
+                # Increase the cooldown period significantly to reduce frequent drift events
+                feature_detector.drift_cooldown_period = 500  # Samples to wait before detecting drift again (5x more)
                 feature_detector.samples_since_last_drift = 0
 
                 # Override update method to handle detection cooldown
@@ -778,11 +834,11 @@ def main():
         
         # Warm-up: Wait for camera to initialize and provide frames
         logger.info("Warming up camera...")
-        for _ in range(10):
+        for _ in range(20):  # Increase warm-up frames
             frame = camera.get_frame()
             if frame is not None:
                 break
-            time.sleep(0.1)
+            time.sleep(0.2)  # Longer delay between warm-up attempts
         
         if frame is None:
             logger.error("Failed to get frames from camera. Exiting.")
@@ -795,7 +851,7 @@ def main():
         inference_interval = config["application"]["inference_interval_ms"] / 1000.0
         
         last_drift_check_time = time.time()
-        drift_check_interval = 1.0  # Check for drift every 1 second
+        drift_check_interval = 0.1  # Check for drift very frequently (now used for logging only)
         
         last_sync_time = time.time()
         sync_interval = sync_config["sync_interval_seconds"]
@@ -922,11 +978,30 @@ def main():
                 fps = frame_count / elapsed
                 logger.info(f"Processed {frame_count} frames. Current FPS: {fps:.2f}")
             
-            # Periodically check for drift
+            # Check for drift only periodically to reduce frequency of drift events
             current_time = time.time()
-            if current_time - last_drift_check_time >= drift_check_interval:
-                pipeline.check_autonomous_drifts()
-                last_drift_check_time = current_time
+
+            # Only check for drift every 10 frames to reduce processing overhead and event frequency
+            if frame_count % 10 == 0:
+                drift_results = pipeline.check_autonomous_drifts()
+                if drift_results:
+                    logger.info(f"Autonomous drift check results: {drift_results}")
+
+                    # Important: manually call on_drift_detected for each detected drift
+                    drift_count = 0
+                    for result in drift_results:
+                        if result.get("drift_detected", False):
+                            # Extract the drift info and call the callback directly
+                            logger.warning(f"MANUALLY TRIGGERING DRIFT CALLBACK for {result.get('detector_type', 'unknown')}")
+                            on_drift_detected(result)
+                            drift_count += 1
+
+                            # Only process one drift event per check to avoid flooding
+                            if drift_count >= 1:
+                                logger.info("Breaking after processing one drift event to avoid flooding")
+                                break
+
+            last_drift_check_time = current_time
             
             # Periodically sync with TinySphere
             if current_time - last_sync_time >= sync_interval:

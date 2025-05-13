@@ -276,6 +276,25 @@ export interface PredictionImagesResponse {
   images: PredictionImage[];
 }
 
+// Drift Images Types
+export interface DriftImage {
+  key: string;
+  device_id: string;
+  drift_type: string;
+  date: string;
+  filename: string;
+  size: number;
+  last_modified: string;
+  url: string;
+  event_id?: string;
+  prediction_type?: string; // Added for type compatibility with PredictionImage
+}
+
+export interface DriftImagesResponse {
+  total: number;
+  images: DriftImage[];
+}
+
 export interface ImageUrlResponse {
   url: string;
 }

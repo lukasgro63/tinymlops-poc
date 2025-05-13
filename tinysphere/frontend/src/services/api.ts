@@ -6,6 +6,8 @@ import {
   DeviceSummary,
   DeviceTrend,
   DriftEvent,
+  DriftImage,
+  DriftImagesResponse,
   DriftSample,
   DriftStatistics,
   DriftValidation,
@@ -317,9 +319,53 @@ export const getDriftStatistics = async (
     params.append('device_id', device_id);
   }
   params.append('days', days.toString());
-  
+
   const response = await axios.get<DriftStatistics>(
     `${API_BASE_URL}/drift/statistics?${params.toString()}`
+  );
+  return response.data;
+};
+
+// Drift Images API methods
+export const getDriftImageDevices = async (): Promise<string[]> => {
+  const response = await axios.get<string[]>(`${API_BASE_URL}/drift-images/devices`);
+  return response.data;
+};
+
+export const getDriftTypes = async (deviceId: string): Promise<string[]> => {
+  const response = await axios.get<string[]>(
+    `${API_BASE_URL}/drift-images/devices/${deviceId}/types`
+  );
+  return response.data;
+};
+
+export const getDriftDates = async (deviceId: string, driftType: string): Promise<string[]> => {
+  const response = await axios.get<string[]>(
+    `${API_BASE_URL}/drift-images/devices/${deviceId}/types/${driftType}/dates`
+  );
+  return response.data;
+};
+
+export const getDriftImages = async (
+  deviceId?: string,
+  driftType?: string,
+  date?: string,
+  limit: number = 100,
+  offset: number = 0
+): Promise<DriftImagesResponse> => {
+  let url = `${API_BASE_URL}/drift-images/list?limit=${limit}&offset=${offset}`;
+
+  if (deviceId) url += `&device_id=${deviceId}`;
+  if (driftType) url += `&drift_type=${driftType}`;
+  if (date) url += `&date=${date}`;
+
+  const response = await axios.get<DriftImagesResponse>(url);
+  return response.data;
+};
+
+export const getDriftImageUrl = async (imageKey: string): Promise<ImageUrlResponse> => {
+  const response = await axios.get<ImageUrlResponse>(
+    `${API_BASE_URL}/drift-images/url/${encodeURIComponent(imageKey)}`
   );
   return response.data;
 };

@@ -154,6 +154,33 @@ const ValidationDialog: React.FC<ValidationDialogProps> = ({
                   Confidence: {(sample.confidence * 100).toFixed(2)}%
                 </Typography>
               )}
+
+              {/* Preview image if available */}
+              {sample.raw_data_path && (
+                <Box sx={{
+                  mt: 2,
+                  display: 'flex',
+                  justifyContent: 'center',
+                  bgcolor: 'rgba(0,0,0,0.03)',
+                  p: 2,
+                  borderRadius: 1,
+                  mb: 2
+                }}>
+                  <img
+                    src={`/api/drift-images/image/${sample.raw_data_path}`}
+                    alt="Sample raw data"
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '200px',
+                      objectFit: 'contain'
+                    }}
+                    onError={(e) => {
+                      console.error(`Error loading drift image: ${sample.raw_data_path}`);
+                      e.currentTarget.style.display = 'none';
+                    }}
+                  />
+                </Box>
+              )}
             </Box>
 
             <Box>
@@ -751,7 +778,16 @@ const DriftEventPage: React.FC = () => {
                       <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
                         {sample.raw_data_path && (
                           <Tooltip title="View Raw Data">
-                            <IconButton size="small" sx={{ ml: 1 }}>
+                            <IconButton
+                              size="small"
+                              sx={{ ml: 1 }}
+                              onClick={() => {
+                                // URLs from the drift-images API should use the proper bucket path structure
+                                const imageUrl = `/api/drift-images/image/${sample.raw_data_path}`;
+                                window.open(imageUrl, '_blank');
+                                console.log(`Opening drift image: ${imageUrl}`);
+                              }}
+                            >
                               <ImageIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>

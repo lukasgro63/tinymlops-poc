@@ -88,3 +88,8 @@ app.include_router(drift_router, prefix="/api/drift", tags=["drift"])
 from tinysphere.api.routes.prediction_images import router as prediction_images_router
 
 app.include_router(prediction_images_router, prefix="/api/prediction-images", tags=["prediction-images"])
+
+# Add drift images router
+from tinysphere.api.routes.drift_images import router as drift_images_router
+
+app.include_router(drift_images_router, prefix="/api/drift-images", tags=["drift-images"])
