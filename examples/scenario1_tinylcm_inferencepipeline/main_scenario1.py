@@ -646,47 +646,9 @@ def main():
                     reference_update_interval=detector_config["warmup_samples"]
                 )
 
-                # Add a filter to prevent multiple sequential drift detections
-                # Increase the cooldown period significantly to reduce frequent drift events
-                feature_detector.drift_cooldown_period = 500  # Samples to wait before detecting drift again (5x more)
-                feature_detector.samples_since_last_drift = 0
-
-                # Override update method to handle detection cooldown
-                original_update = feature_detector.update
-                def update_with_cooldown(record, *args, **kwargs):
-                    # Increment counter since last drift
-                    feature_detector.samples_since_last_drift += 1
-
-                    # Check if we're in cooldown period after drift detected
-                    if hasattr(feature_detector, 'drift_detected') and feature_detector.drift_detected:
-                        # During cooldown period, don't try to update stats
-                        if feature_detector.samples_since_last_drift < feature_detector.drift_cooldown_period:
-                            return False, {}
-                        else:
-                            # Cooldown period over, reset drift flag
-                            feature_detector.drift_detected = False
-
-                    try:
-                        # Try to extract feature safely
-                        if not record or 'features' not in record:
-                            return False, {}
-
-                        # Call original update
-                        result = original_update(record, *args, **kwargs)
-
-                        # If drift detected, set flag
-                        is_drift, _ = result
-                        if is_drift:
-                            feature_detector.drift_detected = True
-                            feature_detector.samples_since_last_drift = 0
-
-                        return result
-                    except Exception as e:
-                        logger.warning(f"Error in feature detector update: {e}")
-                        return False, {}
-
-                # Replace the update method
-                feature_detector.update = update_with_cooldown
+                # Set the cooldown period to a higher value to reduce frequent drift events
+                # The cooldown mechanism is now properly implemented in the library
+                feature_detector.drift_cooldown_period = 500  # Samples to wait before detecting drift again
 
                 # Register drift callback
                 feature_detector.register_callback(on_drift_detected)
@@ -810,6 +772,10 @@ def main():
             operational_monitor=operational_monitor,
             data_logger=data_logger
         )
+
+        # Also register the drift callback at the pipeline level to ensure it's called
+        # when drift is detected during both normal processing and explicit drift checks
+        pipeline.register_drift_callback(on_drift_detected)
         
         # Perform initial connection test to TinySphere
         try:
@@ -983,23 +949,26 @@ def main():
 
             # Only check for drift every 10 frames to reduce processing overhead and event frequency
             if frame_count % 10 == 0:
+                # The updated pipeline.check_autonomous_drifts() method now handles cooldown internally,
+                # so we don't need to manually call callbacks anymore. If drift is detected,
+                # and the detector is not in cooldown, it will automatically call our registered
+                # callbacks through its _notify_callbacks mechanism.
                 drift_results = pipeline.check_autonomous_drifts()
                 if drift_results:
                     logger.info(f"Autonomous drift check results: {drift_results}")
 
-                    # Important: manually call on_drift_detected for each detected drift
+                    # Just log information about the drift results
                     drift_count = 0
                     for result in drift_results:
                         if result.get("drift_detected", False):
-                            # Extract the drift info and call the callback directly
-                            logger.warning(f"MANUALLY TRIGGERING DRIFT CALLBACK for {result.get('detector_type', 'unknown')}")
-                            on_drift_detected(result)
                             drift_count += 1
+                            logger.debug(f"Drift detected by {result.get('detector_type', 'unknown')}")
 
-                            # Only process one drift event per check to avoid flooding
-                            if drift_count >= 1:
-                                logger.info("Breaking after processing one drift event to avoid flooding")
-                                break
+                    if drift_count > 0:
+                        logger.debug(f"Found {drift_count} drift detections (callbacks handled internally by library)")
+
+                    # No need to manually call on_drift_detected - the library now handles
+                    # this with proper cooldown mechanisms
 
             last_drift_check_time = current_time
             
