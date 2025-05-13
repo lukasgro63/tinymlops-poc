@@ -137,15 +137,11 @@ const DataHub: React.FC = () => {
 
   // State for image filters
   const [predictionTypes, setPredictionTypes] = useState<string[]>([]);
-  const [dates, setDates] = useState<string[]>([]);
   const [selectedType, setSelectedType] = useState<string>('');
-  const [selectedDate, setSelectedDate] = useState<string>('');
 
   // State for drift image filters
   const [driftTypes, setDriftTypes] = useState<string[]>([]);
-  const [driftDates, setDriftDates] = useState<string[]>([]);
   const [selectedDriftType, setSelectedDriftType] = useState<string>('');
-  const [selectedDriftDate, setSelectedDriftDate] = useState<string>('');
   
   // Pagination
   const [page, setPage] = useState(0);
@@ -278,62 +274,21 @@ const DataHub: React.FC = () => {
     }
   }, [selectedDeviceId, tabValue]);
   
-  // Load prediction dates when prediction type is selected
+  // No longer need to load dates for dropdown
   useEffect(() => {
-    const loadDates = async () => {
-      if (!selectedDeviceId || selectedDeviceId === 'all' || !selectedType) {
-        setDates([]);
-        setSelectedDate('');
-        return;
-      }
-      
-      try {
-        const datesList = await getPredictionDates(selectedDeviceId, selectedType);
-        setDates(datesList);
-        
-        // Auto-select first date if available
-        if (datesList.length > 0) {
-          setSelectedDate(datesList[0]);
-        } else {
-          setSelectedDate('');
-        }
-      } catch (err) {
-        console.error('Error loading dates:', err);
-        setError('Failed to load dates');
-      }
-    };
-    
-    loadDates();
+    // Reset any date filters when device or prediction type changes
+    if (!selectedDeviceId || selectedDeviceId === 'all' || !selectedType) {
+      setPredictionStartDate('');
+      setPredictionEndDate('');
+    }
   }, [selectedDeviceId, selectedType]);
 
-  // Load drift dates when drift type is selected
+  // No longer need to load dates for dropdown
   useEffect(() => {
-    const loadDriftDates = async () => {
-      if (!selectedDeviceId || selectedDeviceId === 'all' || !selectedDriftType) {
-        setDriftDates([]);
-        setSelectedDriftDate('');
-        return;
-      }
-      
-      try {
-        const datesList = await getDriftDates(selectedDeviceId, selectedDriftType);
-        setDriftDates(datesList);
-        
-        // Auto-select first date if available
-        if (datesList.length > 0) {
-          setSelectedDriftDate(datesList[0]);
-        } else {
-          setSelectedDriftDate('');
-        }
-      } catch (err) {
-        console.error('Error loading drift dates:', err);
-        setDriftError('Failed to load drift dates');
-      }
-    };
-    
-    // Only load drift dates when the drift tab is active
-    if (tabValue === 1) {
-      loadDriftDates();
+    // Reset any date filters when device or drift type changes
+    if (!selectedDeviceId || selectedDeviceId === 'all' || !selectedDriftType) {
+      setDriftStartDate('');
+      setDriftEndDate('');
     }
   }, [selectedDeviceId, selectedDriftType, tabValue]);
   
@@ -352,7 +307,7 @@ const DataHub: React.FC = () => {
           const response = await getPredictionImages(
             selectedDeviceId,
             selectedType || undefined,
-            selectedDate || undefined,
+            undefined, // Removed date parameter
             rowsPerPage,
             page * rowsPerPage,
             sortOrder,
@@ -374,7 +329,7 @@ const DataHub: React.FC = () => {
             const response = await getPredictionImages(
               deviceId,
               selectedType || undefined,
-              selectedDate || undefined,
+              undefined, // Removed date parameter
               rowsPerPage,
               0, // For simplicity, just get the first page from each device
               sortOrder,
@@ -424,7 +379,7 @@ const DataHub: React.FC = () => {
     };
     
     loadImages();
-  }, [selectedDeviceId, selectedType, selectedDate, page, rowsPerPage, tabValue, sortOrder, predictionStartDate, predictionEndDate]);
+  }, [selectedDeviceId, selectedType, page, rowsPerPage, tabValue, sortOrder, predictionStartDate, predictionEndDate]);
 
   // Load operational logs based on filters and pagination
   useEffect(() => {
@@ -525,7 +480,7 @@ const DataHub: React.FC = () => {
           const response = await getDriftImages(
             selectedDeviceId,
             selectedDriftType || undefined,
-            selectedDriftDate || undefined,
+            undefined, // Removed date parameter
             rowsPerPage,
             page * rowsPerPage,
             sortOrder,
@@ -565,7 +520,7 @@ const DataHub: React.FC = () => {
             const response = await getDriftImages(
               deviceId,
               selectedDriftType || undefined,
-              selectedDriftDate || undefined,
+              undefined, // Removed date parameter
               rowsPerPage,
               0, // For simplicity, just get the first page from each device
               sortOrder,
@@ -633,7 +588,7 @@ const DataHub: React.FC = () => {
     };
 
     loadDriftImages();
-  }, [selectedDeviceId, selectedDriftType, selectedDriftDate, page, rowsPerPage, tabValue, sortOrder, driftStartDate, driftEndDate]);
+  }, [selectedDeviceId, selectedDriftType, page, rowsPerPage, tabValue, sortOrder, driftStartDate, driftEndDate]);
   
   // Handle tab change
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
@@ -653,7 +608,6 @@ const DataHub: React.FC = () => {
     const deviceId = event.target.value;
     setSelectedDeviceId(deviceId);
     setSelectedType('');
-    setSelectedDate('');
     setPage(0);
   };
   
@@ -661,16 +615,10 @@ const DataHub: React.FC = () => {
   const handleTypeChange = (event: SelectChangeEvent<string>) => {
     const type = event.target.value;
     setSelectedType(type);
-    setSelectedDate('');
     setPage(0);
   };
   
-  // Handle date selection
-  const handleDateChange = (event: SelectChangeEvent<string>) => {
-    const date = event.target.value;
-    setSelectedDate(date);
-    setPage(0);
-  };
+  // Date selection removed
   
   // Handle prediction start/end date changes
   const handlePredictionStartDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -687,16 +635,10 @@ const DataHub: React.FC = () => {
   const handleDriftTypeChange = (event: SelectChangeEvent<string>) => {
     const type = event.target.value;
     setSelectedDriftType(type);
-    setSelectedDriftDate('');
     setPage(0);
   };
   
-  // Handle drift date selection
-  const handleDriftDateChange = (event: SelectChangeEvent<string>) => {
-    const date = event.target.value;
-    setSelectedDriftDate(date);
-    setPage(0);
-  };
+  // Drift date selection removed
   
   // Handle drift start/end date changes
   const handleDriftStartDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1067,22 +1009,6 @@ const DataHub: React.FC = () => {
         </Box>
         
         <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
-          <FormControl fullWidth size="small" disabled={!selectedType || dates.length === 0}>
-            <InputLabel id="date-select-label">Date</InputLabel>
-            <Select
-              labelId="date-select-label"
-              value={selectedDate}
-              label="Date"
-              onChange={handleDateChange}
-            >
-              {dates.map(date => (
-                <MenuItem key={date} value={date}>{formatDateString(date)}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </Box>
-        
-        <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
           <TextField
             label="Start Date"
             type="date"
@@ -1109,10 +1035,9 @@ const DataHub: React.FC = () => {
         <Box sx={{ flex: '1 1 200px', display: 'flex', alignItems: 'center', gap: 1 }}>
           <Button 
             variant="outlined" 
-            disabled={!selectedType && !selectedDate && !predictionStartDate && !predictionEndDate}
+            disabled={!selectedType && !predictionStartDate && !predictionEndDate}
             onClick={() => {
               setSelectedType('');
-              setSelectedDate('');
               setPredictionStartDate('');
               setPredictionEndDate('');
             }}
@@ -1150,22 +1075,6 @@ const DataHub: React.FC = () => {
         </Box>
         
         <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
-          <FormControl fullWidth size="small" disabled={!selectedDriftType || driftDates.length === 0}>
-            <InputLabel id="drift-date-select-label">Date</InputLabel>
-            <Select
-              labelId="drift-date-select-label"
-              value={selectedDriftDate}
-              label="Date"
-              onChange={handleDriftDateChange}
-            >
-              {driftDates.map(date => (
-                <MenuItem key={date} value={date}>{formatDateString(date)}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </Box>
-        
-        <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
           <TextField
             label="Start Date"
             type="date"
@@ -1192,10 +1101,9 @@ const DataHub: React.FC = () => {
         <Box sx={{ flex: '1 1 200px', display: 'flex', alignItems: 'center', gap: 1 }}>
           <Button 
             variant="outlined" 
-            disabled={!selectedDriftType && !selectedDriftDate && !driftStartDate && !driftEndDate}
+            disabled={!selectedDriftType && !driftStartDate && !driftEndDate}
             onClick={() => {
               setSelectedDriftType('');
-              setSelectedDriftDate('');
               setDriftStartDate('');
               setDriftEndDate('');
             }}
