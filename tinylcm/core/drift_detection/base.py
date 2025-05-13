@@ -76,7 +76,7 @@ class AutonomousDriftDetector(DriftDetector):
         reference_update_interval: int = 50,
         reference_update_factor: float = 0.05,
         pause_reference_update_during_drift: bool = True,
-        drift_cooldown_period: int = 500,  # Increased to prevent frequent drift events
+        drift_cooldown_period: int = 20,  # Reduced to make the system more responsive to new drift events
     ):
         """Initialize the autonomous drift detector.
         

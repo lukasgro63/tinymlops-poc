@@ -1020,3 +1020,281 @@ class EWMAFeatureMonitor(AutonomousDriftDetector):
         self.threshold_multiplier = state.get('threshold_multiplier', self.threshold_multiplier)
         warm_up_values = state.get('warm_up_values', [])
         self.warm_up_values = warm_up_values if self.in_warm_up_phase else None
+
+class KNNDistanceMonitor(AutonomousDriftDetector):
+    """Specialized drift detector that directly monitors KNN neighbor distances.
+    
+    This detector is particularly effective for detecting unknown classes or outliers,
+    as they typically have much larger distances to their nearest neighbors compared
+    to known classes. It works by tracking statistics of the distance values rather
+    than just prediction confidences, making it more sensitive to novel objects.
+    
+    It uses the Page-Hinkley test to detect significant increases in the average
+    distance to nearest neighbors, which is a strong signal for unknown objects.
+    """
+    
+    def __init__(
+        self,
+        delta: float = 0.1,
+        lambda_threshold: float = 5.0,
+        warm_up_samples: int = 10,
+        reference_update_interval: int = 30,
+        reference_update_factor: float = 0.05,
+        pause_reference_update_during_drift: bool = True,
+        drift_cooldown_period: int = 20,
+    ):
+        """Initialize the KNN distance monitor.
+        
+        Args:
+            delta: Magnitude parameter to allow for small fluctuations (δ)
+            lambda_threshold: Threshold for drift detection (λ)
+            warm_up_samples: Number of samples to collect during warm-up
+            reference_update_interval: Number of samples between reference updates
+            reference_update_factor: Factor for updating reference (β)
+            pause_reference_update_during_drift: Whether to pause updating during detected drift
+            drift_cooldown_period: Number of samples to wait before triggering another drift event
+        """
+        super().__init__(
+            warm_up_samples=warm_up_samples,
+            reference_update_interval=reference_update_interval,
+            reference_update_factor=reference_update_factor,
+            pause_reference_update_during_drift=pause_reference_update_during_drift,
+            drift_cooldown_period=drift_cooldown_period,
+        )
+        
+        self.delta = delta
+        self.lambda_threshold = lambda_threshold
+        
+        # PH statistics
+        self.reference_mean = None  # μ_ref
+        self.cumulative_sum = 0.0   # m_t
+        self.minimum_sum = 0.0      # M_t
+        
+        # Distance tracking
+        self.last_distances = []
+        self.distance_history = []
+        
+        # Warm-up data
+        self.warm_up_values = [] if self.in_warm_up_phase else None
+        
+        logger.debug(
+            f"Initialized KNNDistanceMonitor with lambda_threshold={lambda_threshold}, "
+            f"delta={delta}, warm_up_samples={warm_up_samples}"
+        )
+    
+    def update(self, record: Dict[str, Any]) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """Update the detector with new data.
+        
+        Args:
+            record: Dictionary containing prediction data. Should have either:
+                  - '_knn_distances' key with a list of distances to nearest neighbors
+                  - 'classifier' key with an object having '_last_distances' attribute
+                  - 'confidence' key which can be used as a fallback
+            
+        Returns:
+            Tuple of (drift_detected, drift_info)
+        """
+        # Process base sample counting and warm-up phase
+        self._process_sample(record)
+        
+        # Extract distances from record using multiple possible sources
+        distances = self._extract_distances(record)
+        if distances is None or len(distances) == 0:
+            logger.warning("Could not extract distances from record")
+            return False, None
+        
+        # Calculate average distance
+        avg_distance = sum(distances) / len(distances)
+        self.last_distances = distances
+        self.distance_history.append(avg_distance)
+        
+        # Occasionally log the distances to help with debugging
+        if len(self.distance_history) % 10 == 0:
+            logger.debug(f"KNNDistanceMonitor: Avg distance = {avg_distance:.4f}")
+        
+        drift_info = None
+        
+        # Handle warm-up phase
+        if self.in_warm_up_phase:
+            self.warm_up_values.append(avg_distance)
+            return False, None
+        elif self.reference_mean is None and not self.in_warm_up_phase:
+            # Initialize reference after warm-up
+            self.reference_mean = np.mean(self.warm_up_values) if len(self.warm_up_values) > 0 else avg_distance
+            logger.info(f"KNNDistanceMonitor: Initialized reference mean to {self.reference_mean:.4f}")
+            self.warm_up_values = None  # Free memory
+            self.cumulative_sum = 0.0
+            self.minimum_sum = 0.0
+            return False, None
+        
+        # Page-Hinkley test update - we're looking for increases in distance
+        # as unknown objects typically have larger distances
+        deviation = avg_distance - (self.reference_mean + self.delta)
+        self.cumulative_sum += deviation
+        self.minimum_sum = min(self.minimum_sum, self.cumulative_sum)
+        
+        # Check for drift
+        ph_value = self.cumulative_sum - self.minimum_sum
+        was_drift_detected = self.drift_detected
+        self.drift_detected = ph_value > self.lambda_threshold
+        
+        # If drift is newly detected, prepare drift info
+        if self.drift_detected and not was_drift_detected:
+            drift_info = {
+                'detector_type': 'KNNDistanceMonitor',
+                'metric': 'neighbor_distance',
+                'current_value': avg_distance,
+                'reference_mean': self.reference_mean,
+                'ph_value': ph_value,
+                'threshold': self.lambda_threshold,
+                'distances': distances,
+                'timestamp': time.time()
+            }
+            
+            logger.info(
+                f"KNNDistanceMonitor: Drift detected\! Avg distance={avg_distance:.4f}, "
+                f"Reference={self.reference_mean:.4f}, PH value={ph_value:.4f}"
+            )
+            
+            # Notify callbacks
+            self._notify_callbacks(drift_info)
+        
+        # Update reference statistics if needed
+        if self.should_update_reference():
+            # Using the rolling update formula
+            self.reference_mean = (self.reference_update_factor * self.reference_mean + 
+                                  (1 - self.reference_update_factor) * avg_distance)
+            self.samples_since_last_update = 0
+            logger.debug(f"KNNDistanceMonitor: Updated reference mean to {self.reference_mean:.4f}")
+        
+        return self.drift_detected, drift_info
+    
+    def _extract_distances(self, record: Dict[str, Any]) -> Optional[List[float]]:
+        """Extract distance information from the record.
+        
+        Tries multiple sources in order of preference:
+        1. '_knn_distances' key in the record
+        2. 'classifier' object with '_last_distances' attribute
+        3. '_last_distances' key in the record
+        
+        Args:
+            record: Dictionary with prediction data
+        
+        Returns:
+            List of distances or None if not found
+        """
+        # Case 1: Direct distances in record
+        if '_knn_distances' in record and isinstance(record['_knn_distances'], (list, tuple, np.ndarray)):
+            return list(record['_knn_distances'])
+        
+        # Case 2: Classifier object with distances attribute
+        if 'classifier' in record and hasattr(record['classifier'], '_last_distances'):
+            distances = record['classifier']._last_distances
+            if distances is not None:
+                return list(distances)
+        
+        # Case 3: Last distances in record
+        if '_last_distances' in record and isinstance(record['_last_distances'], (list, tuple, np.ndarray)):
+            return list(record['_last_distances'])
+        
+        # Case 4: Extract from raw result if available
+        if 'raw_result' in record and isinstance(record['raw_result'], dict):
+            raw = record['raw_result']
+            if 'distances' in raw and isinstance(raw['distances'], (list, tuple, np.ndarray)):
+                return list(raw['distances'])
+        
+        # Final fallback: confidence-based estimation (less accurate)
+        if 'confidence' in record and isinstance(record['confidence'], (int, float)):
+            conf = record['confidence']
+            # Rough heuristic: confidence 1.0 → small distance, 0.5 → large distance
+            if conf == 1.0:
+                return [10.0]  # Arbitrary small value
+            elif conf <= 0.7:
+                return [100.0]  # Arbitrary large value
+            else:
+                return [20.0]  # Medium value
+        
+        return None
+    
+    def check_for_drift(self) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """Check if drift has been detected.
+        
+        Returns:
+            Tuple of (drift_detected, drift_info)
+        """
+        if not self.drift_detected:
+            return False, None
+        
+        # Calculate average distance if available
+        avg_distance = None
+        if self.last_distances:
+            avg_distance = sum(self.last_distances) / len(self.last_distances)
+        
+        drift_info = {
+            'detector_type': 'KNNDistanceMonitor',
+            'metric': 'neighbor_distance',
+            'current_value': avg_distance,
+            'reference_mean': self.reference_mean,
+            'ph_value': self.cumulative_sum - self.minimum_sum,
+            'threshold': self.lambda_threshold
+        }
+        
+        return True, drift_info
+    
+    def reset(self) -> None:
+        """Reset the detector state.
+        
+        This resets the drift flag and Page-Hinkley statistics but keeps
+        the reference statistics for continuous monitoring.
+        """
+        self.drift_detected = False
+        self.cumulative_sum = 0.0
+        self.minimum_sum = 0.0
+        
+        # Reset drift cooldown tracking
+        self.in_cooldown_period = False 
+        self.samples_since_last_drift = 0
+        
+        logger.debug("KNNDistanceMonitor: Reset detector state")
+    
+    def get_state(self) -> Dict[str, Any]:
+        """Get the current state of the detector.
+        
+        Returns:
+            State dictionary
+        """
+        state = self._get_base_state()
+        state.update({
+            'reference_mean': self.reference_mean,
+            'cumulative_sum': self.cumulative_sum,
+            'minimum_sum': self.minimum_sum,
+            'lambda_threshold': self.lambda_threshold,
+            'delta': self.delta,
+            'warm_up_values': self.warm_up_values if self.warm_up_values is not None else [],
+            'last_distances': self.last_distances,
+            'recent_distance_history': self.distance_history[-100:] if self.distance_history else []
+        })
+        return state
+    
+    def set_state(self, state: Dict[str, Any]) -> None:
+        """Restore the detector state.
+        
+        Args:
+            state: Previously saved state dictionary
+        """
+        self._set_base_state(state)
+        self.reference_mean = state.get('reference_mean', self.reference_mean)
+        self.cumulative_sum = state.get('cumulative_sum', self.cumulative_sum)
+        self.minimum_sum = state.get('minimum_sum', self.minimum_sum)
+        self.lambda_threshold = state.get('lambda_threshold', self.lambda_threshold)
+        self.delta = state.get('delta', self.delta)
+        
+        warm_up_values = state.get('warm_up_values', [])
+        self.warm_up_values = warm_up_values if self.in_warm_up_phase else None
+        
+        self.last_distances = state.get('last_distances', [])
+        
+        # Restore distance history if available
+        if 'recent_distance_history' in state:
+            self.distance_history = state['recent_distance_history']
+EOF < /dev/null

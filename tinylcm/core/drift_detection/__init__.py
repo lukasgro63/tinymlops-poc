@@ -9,7 +9,7 @@ from tinylcm.core.drift_detection.cusum import AccuracyCUSUM, CUSUMState
 # Autonomous drift detectors (no ground truth required)
 from tinylcm.core.drift_detection.confidence import EWMAConfidenceMonitor, PageHinkleyConfidenceMonitor
 from tinylcm.core.drift_detection.distribution import PredictionDistributionMonitor
-from tinylcm.core.drift_detection.features import FeatureMonitor, PageHinkleyFeatureMonitor, EWMAFeatureMonitor
+from tinylcm.core.drift_detection.features import FeatureMonitor, PageHinkleyFeatureMonitor, EWMAFeatureMonitor, KNNDistanceMonitor
 
 __all__ = [
     # Base interfaces
@@ -26,5 +26,6 @@ __all__ = [
     'PredictionDistributionMonitor',
     'FeatureMonitor',
     'PageHinkleyFeatureMonitor',
-    'EWMAFeatureMonitor'
+    'EWMAFeatureMonitor',
+    'KNNDistanceMonitor'
 ]

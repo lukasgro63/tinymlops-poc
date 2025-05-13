@@ -46,8 +46,8 @@ from utils.sync_client import \
 from tinylcm.core.classifiers.knn import LightweightKNN
 from tinylcm.core.data_logger.logger import DataLogger
 from tinylcm.core.data_structures import FeatureSample
-from tinylcm.core.drift_detection.features import PageHinkleyFeatureMonitor, FeatureMonitor
-from tinylcm.core.drift_detection.confidence import EWMAConfidenceMonitor
+from tinylcm.core.drift_detection.features import PageHinkleyFeatureMonitor, FeatureMonitor, KNNDistanceMonitor
+from tinylcm.core.drift_detection.confidence import EWMAConfidenceMonitor, PageHinkleyConfidenceMonitor
 # Import tinylcm components
 from tinylcm.core.feature_extractors.tflite import TFLiteFeatureExtractor
 from tinylcm.core.operational_monitor.monitor import OperationalMonitor
@@ -687,6 +687,25 @@ def main():
                 # Add to detector list
                 drift_detectors.append(confidence_monitor)
                 logger.info(f"Initialized EWMAConfidenceMonitor to detect confidence changes")
+                
+            elif detector_type == "KNNDistanceMonitor":
+                # Create KNN distance monitor to detect when neighbor distances increase
+                knn_distance_monitor = KNNDistanceMonitor(
+                    delta=detector_config.get("delta", 0.1),
+                    lambda_threshold=detector_config.get("lambda_threshold", 5.0),
+                    warm_up_samples=detector_config.get("warm_up_samples", 10),
+                    reference_update_interval=detector_config.get("reference_update_interval", 30),
+                    reference_update_factor=detector_config.get("reference_update_factor", 0.05),
+                    pause_reference_update_during_drift=detector_config.get("pause_reference_update_during_drift", True),
+                    drift_cooldown_period=detector_config.get("drift_cooldown_period", 20)
+                )
+                
+                # Register drift callback
+                knn_distance_monitor.register_callback(on_drift_detected)
+                
+                # Add to detector list
+                drift_detectors.append(knn_distance_monitor)
+                logger.info(f"Initialized KNNDistanceMonitor to detect neighbor distance changes")
 
             else:
                 logger.warning(f"Unknown drift detector type: {detector_type}")
