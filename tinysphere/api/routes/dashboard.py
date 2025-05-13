@@ -689,7 +689,7 @@ def get_package_timeline(period: str = "week", db: Session = Depends(get_db)):
                         timeline_data[date_str]['models'] += count
                     elif package_type == 'metrics':
                         timeline_data[date_str]['metrics'] += count
-                    elif package_type == 'data_log':
+                    elif package_type == 'data_log' or package_type == 'operational_logs':
                         timeline_data[date_str]['data_logs'] += count
                     elif 'drift' in package_type.lower():
                         timeline_data[date_str]['drift_events'] += count
