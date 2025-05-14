@@ -85,6 +85,8 @@ CLAUDE.md
 **/CLAUDE.local.md
 ./claude
 # Ignore images folder
-**/images/
+**/training_images/
 # But keep specific images that should be tracked
 !examples/assets/images/README.md
+
+
