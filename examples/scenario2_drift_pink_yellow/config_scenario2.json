@@ -1,0 +1,83 @@
+{
+  "device": {
+    "name": "Raspberry Pi Zero 2W",
+    "description": "TinyLCM Scenario 2 - Drift Detection for 6-Class Model",
+    "log_level": "DEBUG"
+  },
+  "camera": {
+    "resolution": [640, 480],
+    "framerate": 5,
+    "rotation": 0,
+    "inference_resolution": [224, 224]
+  },
+  "model": {
+    "model_path": "../assets/model/model_lego_1.tflite",
+    "labels_path": "../assets/model/labels_lego_1.txt",
+    "threshold": 0.95
+  },
+  "tinylcm": {
+    "feature_extractor": {
+      "type": "TFLiteFeatureExtractor",
+      "model_path": "../assets/model/model_lego_1.tflite",
+      "feature_layer_index": -1,
+      "normalize_features": true,
+      "lazy_loading": false
+    },
+    "adaptive_classifier": {
+      "type": "LightweightKNN",
+      "k": 7,
+      "max_samples": 480,
+      "distance_metric": "euclidean",
+      "use_numpy": true,
+      "initial_state_path": "../assets/initial_states/knn_initial_state_sc2.json"
+    },
+    "drift_detectors": [
+      {
+        "type": "KNNDistanceMonitor",
+        "delta": 35.0,
+        "lambda_threshold": 120.0,
+        "warm_up_samples": 5,
+        "reference_update_interval": 7,
+        "reference_update_factor": 0.1,
+        "pause_reference_update_during_drift": true,
+        "drift_cooldown_period": 15
+      }
+    ],
+    "operational_monitor": {
+      "track_system_metrics": true,
+      "track_inference_time": true, 
+      "track_memory_usage": true,
+      "report_interval_seconds": 30
+    },
+    "sync_client": {
+      "server_url": "http://192.168.0.67:8000",
+      "api_key": "tinylcm-demo-key",
+      "sync_interval_seconds": 30,
+      "max_retries": 3,
+      "auto_register": true,
+      "sync_dir": "./sync_data",
+      "enable_prediction_images": true,
+      "cleanup_transferred_images": true
+    },
+    "features": {
+      "save_drift_images": true,
+      "save_prediction_images": true
+    },
+    "state_manager": {
+      "state_dir": "./state"
+    },
+    "data_logger": {
+      "enabled": true,
+      "log_dir": "./logs",
+      "log_images": true,
+      "log_drift_events": true,
+      "max_log_size_mb": 100
+    }
+  },
+  "application": {
+    "inference_interval_ms": 500,
+    "display_frames": false,
+    "save_debug_frames": false,
+    "debug_output_dir": "./debug"
+  }
+}
