@@ -190,6 +190,13 @@ class InferencePipeline:
             features = self.feature_extractor.extract_features(input_data)
         else:
             features = input_data
+            
+        # Flatten feature tensor if it has more than 2 dimensions
+        # This handles multi-dimensional feature tensors from CNNs
+        if isinstance(features, np.ndarray) and len(features.shape) > 2:
+            logger.info(f"Flattening feature tensor from shape {features.shape}")
+            features = features.flatten()
+            logger.info(f"Flattened shape: {features.shape}")
         
         # Make prediction
         predictions = self.classifier.predict(np.array([features]))
@@ -372,6 +379,12 @@ class InferencePipeline:
             features = self.feature_extractor.extract_features(input_data)
         else:
             features = input_data
+            
+        # Flatten feature tensor if it has more than 2 dimensions
+        # This handles multi-dimensional feature tensors from CNNs
+        if isinstance(features, np.ndarray) and len(features.shape) > 2:
+            logger.debug(f"Flattening feature tensor from shape {features.shape}")
+            features = features.flatten()
         
         # Make prediction
         predictions = self.classifier.predict(np.array([features]))
@@ -395,9 +408,25 @@ class InferencePipeline:
         if extract_features:
             features = []
             for item in batch_data:
-                features.append(self.feature_extractor.extract_features(item))
+                feature = self.feature_extractor.extract_features(item)
+                
+                # Flatten feature tensor if it has more than 2 dimensions
+                if isinstance(feature, np.ndarray) and len(feature.shape) > 2:
+                    logger.debug(f"Flattening feature tensor from shape {feature.shape}")
+                    feature = feature.flatten()
+                    
+                features.append(feature)
         else:
-            features = batch_data
+            features = []
+            for item in batch_data:
+                feature = item
+                
+                # Flatten feature tensor if it has more than 2 dimensions
+                if isinstance(feature, np.ndarray) and len(feature.shape) > 2:
+                    logger.debug(f"Flattening feature tensor from shape {feature.shape}")
+                    feature = feature.flatten()
+                    
+                features.append(feature)
         
         # Make predictions
         return self.classifier.predict(np.array(features))
