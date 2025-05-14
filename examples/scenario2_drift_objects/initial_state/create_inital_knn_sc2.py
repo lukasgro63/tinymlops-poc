@@ -128,11 +128,51 @@ def extract_features_manually(image, interpreter, input_details, output_details,
             with open(feature_processor_path, 'rb') as f:
                 processor = pickle.load(f)
             
-            # Extrahiere Komponenten
-            scaler = processor.get('scaler')
-            pca = processor.get('pca')
-            input_dim = processor.get('input_dim')
-            output_dim = processor.get('output_dim')
+            # Prüfe, ob ein kompatibles Format vorliegt
+            if processor.get('compatible_format', False):
+                print(f"Nutze kompatibles Format des Feature-Prozessors (numpy {processor.get('numpy_version', 'unknown')})")
+                
+                # Rekonstruiere StandardScaler
+                from sklearn.preprocessing import StandardScaler
+                scaler = StandardScaler()
+                scaler_data = processor['scaler_data']
+                scaler.mean_ = np.array(scaler_data['mean'])
+                scaler.var_ = np.array(scaler_data['var'])
+                scaler.scale_ = np.array(scaler_data['scale'])
+                scaler.n_features_in_ = scaler_data['n_features_in']
+                scaler.n_samples_seen_ = scaler_data['n_samples_seen']
+                
+                # Rekonstruiere PCA wenn vorhanden
+                pca = None
+                if 'pca_data' in processor:
+                    from sklearn.decomposition import PCA
+                    pca_data = processor['pca_data']
+                    pca = PCA()
+                    pca.n_components_ = pca_data['n_components']
+                    pca.components_ = np.array(pca_data['components'])
+                    pca.explained_variance_ = np.array(pca_data['explained_variance'])
+                    pca.explained_variance_ratio_ = np.array(pca_data['explained_variance_ratio'])
+                    
+                    if pca_data['mean'] is not None:
+                        pca.mean_ = np.array(pca_data['mean'])
+                    
+                    if pca_data['singular_values'] is not None:
+                        pca.singular_values_ = np.array(pca_data['singular_values'])
+                    
+                    if pca_data['noise_variance'] is not None:
+                        pca.noise_variance_ = pca_data['noise_variance']
+                
+                # Extrahiere Metadaten
+                input_dim = processor.get('input_dim')
+                output_dim = processor.get('output_dim')
+                
+            else:
+                # Original Format - direkte Extraktion
+                print("Nutze originales Format des Feature-Prozessors")
+                scaler = processor.get('scaler')
+                pca = processor.get('pca')
+                input_dim = processor.get('input_dim')
+                output_dim = processor.get('output_dim')
             
             if scaler is None:
                 print("WARNUNG: Kein StandardScaler im Prozessor gefunden!")
@@ -167,6 +207,8 @@ def extract_features_manually(image, interpreter, input_details, output_details,
                 
         except Exception as e:
             print(f"Fehler bei der Anwendung des Feature-Prozessors: {e}")
+            import traceback
+            traceback.print_exc()
             print("Verwende die ursprünglichen Features")
     
     return feature_tensor
