@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-TinyLCM Autonomous Monitoring Example (Scenario 1)
+TinyLCM Autonomous Monitoring Example (Scenario 2)
 --------------------------------------------------
 This example demonstrates autonomous drift monitoring using the InferencePipeline
 from the tinylcm library. It captures frames from a camera, processes them through 
-the TinyLCM pipeline, and monitors for drift using PageHinkleyFeatureMonitor.
+the TinyLCM pipeline, and monitors for drift for a 5-class model using KNNDistanceMonitor.
 
 This is designed for a headless Raspberry Pi Zero 2W.
 """
@@ -86,7 +86,7 @@ def setup_logging(log_level: str = "INFO") -> None:
     logs_dir.mkdir(exist_ok=True)
     
     # Set up logging
-    log_file = logs_dir / f"tinylcm_scenario1_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log_file = logs_dir / f"tinylcm_scenario2_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     
     logging.basicConfig(
         level=numeric_level,
@@ -97,7 +97,7 @@ def setup_logging(log_level: str = "INFO") -> None:
         ]
     )
     
-    logger = logging.getLogger("tinylcm_scenario1")
+    logger = logging.getLogger("tinylcm_scenario2")
     logger.info(f"Logging initialized at level {log_level}")
 
 
@@ -496,8 +496,8 @@ def main():
     """Main function for the example application."""
     global running, current_frame, config, sync_client
     
-    parser = argparse.ArgumentParser(description="TinyLCM Autonomous Monitoring Example (Scenario 1)")
-    parser.add_argument("--config", type=str, default="config_scenario1.json",
+    parser = argparse.ArgumentParser(description="TinyLCM Autonomous Monitoring Example (Scenario 2)")
+    parser.add_argument("--config", type=str, default="config_scenario2.json",
                         help="Path to the configuration file")
     args = parser.parse_args()
     
@@ -901,7 +901,7 @@ def main():
             running = False
         
         # Main inference loop
-        logger.info("Starting main inference loop")
+        logger.info("Starting main inference loop for Scenario 2")
         frame_count = 0
         start_time = time.time()
         inference_interval = config["application"]["inference_interval_ms"] / 1000.0
@@ -980,8 +980,8 @@ def main():
                 if probabilities is not None:
                     logger.info(f"MAIN DEBUG: Raw probabilities: {probabilities}")
 
-                # Process lego and stone predictions with high confidence, ignore negative class
-                if prediction in ["lego", "stone"] and confidence >= confidence_threshold:
+                # Process positive class predictions with high confidence, ignore negative class
+                if prediction not in ["negative"] and confidence >= confidence_threshold:
                     # Log more details for better analysis
                     if frame_count % 10 == 0:  # Log every 10th frame to avoid flooding
                         logger.info(f"Frame {frame_count}: Prediction={prediction}, Confidence={confidence:.4f}")
@@ -1007,7 +1007,7 @@ def main():
 
                         # Only log occasionally to avoid flooding logs
                         if frame_count % 10 == 0:
-                            logger.info(f"Saved {prediction} image to {image_path}")
+                            logger.info(f"Saved positive class {prediction} image to {image_path}")
 
                         # Add image to sync client if enabled
                         if config["tinylcm"]["features"].get("save_prediction_images", False) and sync_client and sync_client.enable_prediction_images:
