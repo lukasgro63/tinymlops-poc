@@ -33,33 +33,32 @@ from tinylcm.utils.file_utils import ensure_directory_exists
 
 # --- KONFIGURATION ---
 # Pfade zu initialen Bilddaten
-INITIAL_IMAGE_DATA_DIR = Path("examples/assets/initial_states/images")  # Hauptordner für initiale Bilder
-# Update auf 6 Klassen (5 positive + 1 negative)
+INITIAL_IMAGE_DATA_DIR = Path("/Users/lukasgrodmeier/Documents/GitHub/tinymlops-poc/examples/assets/initial_states/images")  # Absoluter Pfad
+# Update auf die tatsächlichen Bildordner
 CLASSES = {
-    "class1": INITIAL_IMAGE_DATA_DIR / "class1", 
-    "class2": INITIAL_IMAGE_DATA_DIR / "class2", 
-    "class3": INITIAL_IMAGE_DATA_DIR / "class3",
-    "class4": INITIAL_IMAGE_DATA_DIR / "class4",
-    "class5": INITIAL_IMAGE_DATA_DIR / "class5",
+    "black": INITIAL_IMAGE_DATA_DIR / "black", 
+    "green": INITIAL_IMAGE_DATA_DIR / "green",
+    "blue": INITIAL_IMAGE_DATA_DIR / "blue",
+    "red": INITIAL_IMAGE_DATA_DIR / "red",
     "negative": INITIAL_IMAGE_DATA_DIR / "negative"
 }
 
 # Pfad zum TFLite-Modell (das auch im Beispiel verwendet wird)
-MODEL_PATH = "examples/assets/model/model_lego_1.tflite"  # Aktualisiert für das neue Modell
-LABELS_PATH = "examples/assets/model/labels_lego_1.txt"  # Aktualisiert für die neue Labeldatei
+MODEL_PATH = "/Users/lukasgrodmeier/Documents/GitHub/tinymlops-poc/examples/assets/model/model_lego_1.tflite"  # Absoluter Pfad
+LABELS_PATH = "/Users/lukasgrodmeier/Documents/GitHub/tinymlops-poc/examples/assets/model/labels_lego_1.txt"  # Absoluter Pfad
 
 # Konfiguration für den Feature Extractor
 FEATURE_LAYER_INDEX = -1  # Verwende den Standard-Output-Layer, da das Modell nur einen Layer hat
 TARGET_IMG_SIZE = (224, 224)  # Inferenzauflösung
 
 # Konfiguration für den LightweightKNN
-KNN_K = 7  # Erhöht von 3 auf 7 für mehr Klassen
-KNN_MAX_SAMPLES = 480  # Erhöht auf 80 Samples * 6 Klassen
+KNN_K = 6  # Angepasst für 5 Klassen (4 positive + 1 negative)
+KNN_MAX_SAMPLES = 400  # Angepasst für 5 Klassen mit je 80 Samples
 KNN_DISTANCE_METRIC = "euclidean"  # Metrik für den Abstandsvergleich
 KNN_USE_NUMPY = True  # Für die Offline-Erstellung können wir NumPy nutzen
 
 # Speicherort für den initialen k-NN Zustand
-OUTPUT_STATE_DIR = Path("examples/assets/initial_states/")
+OUTPUT_STATE_DIR = Path("/Users/lukasgrodmeier/Documents/GitHub/tinymlops-poc/examples/assets/initial_states/")
 OUTPUT_STATE_FILENAME = "knn_initial_state_sc2.json"  # Aktualisiert für Scenario 2
 # --- ENDE KONFIGURATION ---
 
