@@ -34,13 +34,13 @@
     "drift_detectors": [
       {
         "type": "KNNDistanceMonitor",
-        "delta": 35.0,
-        "lambda_threshold": 120.0,
-        "warm_up_samples": 5,
-        "reference_update_interval": 7,
-        "reference_update_factor": 0.1,
+        "delta": 15.0,
+        "lambda_threshold": 50.0,
+        "warm_up_samples": 3,
+        "reference_update_interval": 5,
+        "reference_update_factor": 0.2,
         "pause_reference_update_during_drift": true,
-        "drift_cooldown_period": 15
+        "drift_cooldown_period": 10
       }
     ],
     "operational_monitor": {

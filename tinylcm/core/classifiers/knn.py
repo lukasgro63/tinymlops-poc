@@ -368,7 +368,7 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
         # Distance-based confidence scaling factor
         # - Higher values make confidence drop more quickly with distance
         # - Lower values make confidence more resilient to distance changes
-        confidence_scaling = 10.0  # Increased to make confidence more sensitive to distance
+        confidence_scaling = 100.0  # Dramatically increased to make confidence more sensitive to distance with small feature dimensions
 
         # Track stats for logging
         prediction_stats = {
@@ -563,11 +563,21 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
         Returns:
             Euclidean distance
         """
+        # For small feature dimensions, add a small base distance
+        # to ensure distances are never exactly zero, which can lead to artificially high confidence
+        base_distance = 0.01
+        
         if self.use_numpy:
-            return np.sqrt(np.sum((a - b) ** 2))
+            raw_distance = np.sqrt(np.sum((a - b) ** 2))
+            # Normalize distance by vector dimension for more consistent scaling
+            # This helps when dealing with very small feature dimensions
+            dimension_factor = max(1.0, np.sqrt(a.shape[0]) / 10.0)
+            return base_distance + (raw_distance * dimension_factor)
         else:
             # Pure Python implementation (optimized for edge devices without NumPy)
-            return math.sqrt(sum((a_i - b_i) ** 2 for a_i, b_i in zip(a, b)))
+            raw_distance = math.sqrt(sum((a_i - b_i) ** 2 for a_i, b_i in zip(a, b)))
+            dimension_factor = max(1.0, math.sqrt(len(a)) / 10.0)
+            return base_distance + (raw_distance * dimension_factor)
     
     def _manhattan_distance(self, a: np.ndarray, b: np.ndarray) -> float:
         """Calculate the Manhattan distance between two vectors.
@@ -582,11 +592,19 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
         Returns:
             Manhattan distance
         """
+        # Similar to euclidean distance, add a base distance and dimension scaling factor
+        base_distance = 0.01
+        
         if self.use_numpy:
-            return np.sum(np.abs(a - b))
+            raw_distance = np.sum(np.abs(a - b))
+            # Normalize by dimension for consistent scaling
+            dimension_factor = max(1.0, a.shape[0] / 10.0)
+            return base_distance + (raw_distance * dimension_factor)
         else:
             # Pure Python implementation (optimized for edge devices without NumPy)
-            return sum(abs(a_i - b_i) for a_i, b_i in zip(a, b))
+            raw_distance = sum(abs(a_i - b_i) for a_i, b_i in zip(a, b))
+            dimension_factor = max(1.0, len(a) / 10.0)
+            return base_distance + (raw_distance * dimension_factor)
     
     def _cosine_distance(self, a: np.ndarray, b: np.ndarray) -> float:
         """Calculate the cosine distance between two vectors.
@@ -635,7 +653,14 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
                 cosine_similarity = 0.0
         
         # Convert to cosine distance
-        return 1.0 - cosine_similarity
+        base_distance = 0.01
+        raw_distance = 1.0 - cosine_similarity
+        
+        # For small feature dimensions, scale the distance
+        # Small number of dimensions can lead to artificially high cosine similarity
+        dimension_factor = max(1.0, min(5.0, 10.0 / max(1, len(a) if not self.use_numpy else a.shape[0])))
+        
+        return base_distance + (raw_distance * dimension_factor)
     
     def get_performance_metrics(self) -> Dict[str, float]:
         """Get performance metrics for this classifier.
