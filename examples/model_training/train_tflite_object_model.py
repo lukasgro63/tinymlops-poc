@@ -21,7 +21,7 @@ import sys
 import numpy as np
 
 # Check for required dependencies and install if missing
-required_packages = ["Pillow", "scipy", "scikit-learn"]
+required_packages = ["Pillow", "scipy", "scikit-learn", "pandas"]
 missing_packages = []
 
 # Check for PIL/Pillow
@@ -44,6 +44,14 @@ try:
     print("✓ scikit-learn is already installed.")
 except ImportError:
     missing_packages.append("scikit-learn")
+    
+# Check for pandas
+try:
+    import pandas as pd
+    print("✓ pandas is already installed.")
+except ImportError:
+    print("pandas is not installed. Adding to installation list...")
+    missing_packages.append("pandas")
 
 # Install any missing packages
 if missing_packages:
@@ -83,7 +91,9 @@ CLASS_MODE = 'categorical'  # One-hot encoded labels
 # Directories
 IMAGE_DIR = os.path.join(root_dir, "examples/assets/training_images")  # Aktualisiert zum neuen Pfad
 OUTPUT_DIR = os.path.join(root_dir, "examples/scenario2_drift_objects/model")  # Direkt ins Szenario-Verzeichnis
+CSV_OUTPUT_DIR = os.path.join(OUTPUT_DIR, "training_metrics")  # Unterverzeichnis für CSV-Daten
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(CSV_OUTPUT_DIR, exist_ok=True)
 
 # Output file paths
 MODEL_KERAS_PATH = os.path.join(OUTPUT_DIR, "model_object.h5")  # Vereinfachte Namen
@@ -260,7 +270,52 @@ def train_model(model, train_generator, val_generator):
         validation_steps=validation_steps
     )
     
+    # Speichere Trainingshistorie als CSV
+    if hasattr(history, 'history'):
+        save_history_to_csv(history.history, "initial_training")
+    
     return history
+
+def save_history_to_csv(history_dict, prefix="training"):
+    """
+    Speichert die Trainingshistorie als CSV-Datei.
+    
+    Args:
+        history_dict: Dictionary mit den Trainingsmetriken
+        prefix: Präfix für den Dateinamen
+    """
+    try:
+        # Importiere pandas lokal, falls der globale Import fehlgeschlagen ist
+        try:
+            import pandas as pd
+        except ImportError:
+            print("Pandas konnte nicht importiert werden. CSV-Export wird übersprungen.")
+            return
+            
+        # Erstelle einen DataFrame aus dem History-Dictionary
+        df = pd.DataFrame(history_dict)
+        
+        # Füge eine Epochenspalte hinzu
+        df.insert(0, 'epoch', range(1, len(df) + 1))
+        
+        # Speichere als CSV
+        csv_file = os.path.join(CSV_OUTPUT_DIR, f"{prefix}_history.csv")
+        df.to_csv(csv_file, index=False)
+        print(f"Trainingshistorie gespeichert in: {csv_file}")
+        
+        # Speichere auch Zusammenfassung der finalen Metriken
+        final_metrics = {metric: values[-1] for metric, values in history_dict.items()}
+        final_df = pd.DataFrame([final_metrics])
+        final_df['training_type'] = prefix
+        
+        final_csv = os.path.join(CSV_OUTPUT_DIR, f"{prefix}_final_metrics.csv")
+        final_df.to_csv(final_csv, index=False)
+        print(f"Finale Metriken gespeichert in: {final_csv}")
+        
+    except Exception as e:
+        print(f"Fehler beim Speichern der Trainingshistorie: {e}")
+        import traceback
+        traceback.print_exc()
 
 def fine_tune_model(model, train_generator, val_generator):
     """Fine-tune the model with a conservative approach (only training the top layers)."""
@@ -325,6 +380,10 @@ def fine_tune_model(model, train_generator, val_generator):
         steps_per_epoch=steps_per_epoch,
         validation_steps=validation_steps
     )
+    
+    # Speichere Trainingshistorie als CSV
+    if hasattr(history, 'history'):
+        save_history_to_csv(history.history, "fine_tuning")
     
     return history
 
@@ -417,6 +476,47 @@ def convert_to_tflite(feature_extraction_model, raw_feature_model, quantize=True
     print("3. Faster inference on CPU")
     
     return tflite_model
+
+def save_pca_stats_to_csv(pca, explained_variance_ratio, cumulative_explained_variance, prefix="pca"):
+    """
+    Speichert PCA-Statistiken als CSV-Dateien.
+    
+    Args:
+        pca: Trainiertes PCA-Objekt
+        explained_variance_ratio: Array mit der erklärten Varianz pro Komponente
+        cumulative_explained_variance: Array mit der kumulierten erklärten Varianz
+        prefix: Präfix für den Dateinamen
+    """
+    try:
+        # Importiere pandas - sollte zu diesem Zeitpunkt bereits installiert sein
+        import pandas as pd
+        
+        # Erstelle DataFrame für die erklärte Varianz pro Komponente
+        variance_data = {
+            "component_index": np.arange(1, len(explained_variance_ratio) + 1),
+            "explained_variance_ratio": explained_variance_ratio,
+            "cumulative_explained_variance": cumulative_explained_variance
+        }
+        
+        variance_df = pd.DataFrame(variance_data)
+        variance_csv = os.path.join(CSV_OUTPUT_DIR, f"{prefix}_variance.csv")
+        variance_df.to_csv(variance_csv, index=False)
+        print(f"PCA Varianz-Statistiken gespeichert in: {variance_csv}")
+        
+        # Speichere die PCA-Komponenten
+        if hasattr(pca, 'components_'):
+            # Diese können sehr groß sein, daher nur speichern, wenn gewünscht
+            save_components = True
+            if save_components:
+                components_df = pd.DataFrame(pca.components_)
+                components_csv = os.path.join(CSV_OUTPUT_DIR, f"{prefix}_components.csv")
+                components_df.to_csv(components_csv, index=False, header=False)
+                print(f"PCA Komponenten gespeichert in: {components_csv}")
+        
+    except Exception as e:
+        print(f"Fehler beim Speichern der PCA-Statistiken: {e}")
+        import traceback
+        traceback.print_exc()
 
 def train_and_save_feature_processor(raw_feature_model, train_generator, output_dir, pca_components=256):
     """
@@ -536,7 +636,34 @@ def train_and_save_feature_processor(raw_feature_model, train_generator, output_
         reduced_features = pca.transform(test_features)
         
         # Erklärte Varianz berechnen
-        explained_variance = sum(pca.explained_variance_ratio_) * 100
+        explained_variance_ratio = pca.explained_variance_ratio_
+        cumulative_explained_variance = np.cumsum(explained_variance_ratio)
+        explained_variance = sum(explained_variance_ratio) * 100
+        
+        # Speichere PCA-Statistiken als CSV
+        save_pca_stats_to_csv(
+            pca=pca, 
+            explained_variance_ratio=explained_variance_ratio,
+            cumulative_explained_variance=cumulative_explained_variance,
+            prefix="feature_processor_pca"
+        )
+        
+        # Speichere Feature-Stichproben als CSV
+        sample_size = min(100, len(scaled_features))
+        if sample_size > 0:
+            # Original Features (skaliert)
+            orig_sample_df = pd.DataFrame(scaled_features[:sample_size])
+            orig_sample_csv = os.path.join(CSV_OUTPUT_DIR, "features_original_sample.csv")
+            orig_sample_df.to_csv(orig_sample_csv, index=False, header=False)
+            
+            # PCA-reduzierte Features
+            pca_sample = pca.transform(scaled_features[:sample_size])
+            pca_sample_df = pd.DataFrame(pca_sample)
+            pca_sample_csv = os.path.join(CSV_OUTPUT_DIR, "features_pca_reduced_sample.csv")
+            pca_sample_df.to_csv(pca_sample_csv, index=False, header=False)
+            
+            print(f"Feature-Samples exportiert (original und PCA-reduziert)")
+            
         print(f"✅ PCA successfully trained")
         print(f"   - Explains {explained_variance:.2f}% of total variance")
         print(f"   - Reduced dimensions: {features_array.shape[1]} → {actual_pca_components}")
@@ -617,6 +744,36 @@ def process_features(features):
     
     return scaler, pca, processor_path
 
+def save_model_metadata_to_csv(input_shape, output_shape, input_type, output_type):
+    """
+    Speichert Modell-Metadaten als CSV-Datei.
+    """
+    try:
+        # Importiere pandas - sollte zu diesem Zeitpunkt bereits installiert sein
+        import pandas as pd
+        import datetime
+        
+        # Erstelle DataFrame für die Modell-Metadaten
+        metadata = [{
+            'model_name': os.path.basename(MODEL_TFLITE_PATH),
+            'model_type': 'MobileNetV2',
+            'input_shape': str(input_shape),
+            'output_shape': str(output_shape),
+            'input_type': str(input_type),
+            'output_type': str(output_type),
+            'timestamp': datetime.datetime.now().isoformat()
+        }]
+        
+        metadata_df = pd.DataFrame(metadata)
+        metadata_csv = os.path.join(CSV_OUTPUT_DIR, "model_metadata.csv")
+        metadata_df.to_csv(metadata_csv, index=False)
+        print(f"Modell-Metadaten gespeichert in: {metadata_csv}")
+        
+    except Exception as e:
+        print(f"Fehler beim Speichern der Modell-Metadaten: {e}")
+        import traceback
+        traceback.print_exc()
+
 def test_tflite_compatibility():
     """Test that the TFLite model is compatible with TinyLCM preprocessors and provides rich features."""
     print("\n==== Testing TFLite Model Compatibility with TinyLCM ====")
@@ -667,6 +824,41 @@ def test_tflite_compatibility():
         print(f"- Shape: {output.shape}")
         print(f"- Total dimensions: {feature_size}")
         print(f"- Value range: min={output.min():.5f}, max={output.max():.5f}")
+        
+        # Speichere Modell-Metadaten als CSV
+        save_model_metadata_to_csv(
+            input_shape=input_details['shape'],
+            output_shape=output_details['shape'],
+            input_type=input_details['dtype'],
+            output_type=output_details['dtype']
+        )
+        
+        # Speichere eine Stichprobe der Feature-Vektoren für spätere Visualisierung
+        try:
+            # Erzeugen von 10 Test-Tensoren mit leicht variiertem Rauschen
+            test_images = []
+            for i in range(10):
+                # Erzeuge Bild mit leicht variiertem Rauschen
+                random_img = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
+                test_images.append(random_img)
+                
+            # Extrahiere Features aus den Test-Bildern
+            feature_vectors = []
+            for img in test_images:
+                processed_image = prepare_input_tensor_quantized(img, input_details)
+                interpreter.set_tensor(input_details['index'], processed_image)
+                interpreter.invoke()
+                feat_vec = interpreter.get_tensor(output_details['index']).flatten()
+                feature_vectors.append(feat_vec)
+                
+            # Speichere als CSV
+            if feature_vectors:
+                feature_df = pd.DataFrame(feature_vectors)
+                feature_csv = os.path.join(CSV_OUTPUT_DIR, "test_feature_vectors.csv")
+                feature_df.to_csv(feature_csv, index=False, header=False)
+                print(f"Test-Feature-Vektoren gespeichert in: {feature_csv}")
+        except Exception as e:
+            print(f"Fehler beim Exportieren der Test-Feature-Vektoren: {e}")
         
         # Evaluate feature quality for drift detection
         if feature_size >= 1000:
@@ -751,6 +943,20 @@ def test_tflite_compatibility():
                     "source_model": MODEL_TFLITE_PATH
                 }
             }, f, indent=4)
+        
+        # Exportiere KNN Test-Zustand als CSV
+        try:
+            # Erstelle einen DataFrame mit Features und Labels
+            knn_test_df = pd.DataFrame(features)
+            knn_test_df['label'] = labels
+            knn_test_df['timestamp'] = timestamps
+            
+            # Speichere als CSV
+            knn_test_csv = os.path.join(CSV_OUTPUT_DIR, "knn_test_features.csv")
+            knn_test_df.to_csv(knn_test_csv, index=False)
+            print(f"KNN Test-Features gespeichert in: {knn_test_csv}")
+        except Exception as e:
+            print(f"Fehler beim Exportieren der KNN Test-Features: {e}")
             
         print(f"✅ Successfully created KNN state with {num_features}-dimensional features")
         print(f"Test state saved to: {initial_state_path}")

@@ -13,6 +13,14 @@ sys.path.insert(0, str(root_dir))
 import cv2  # Für das Laden und Vorverarbeiten der Bilder
 import numpy as np
 
+# Import für CSV Export
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    print("pandas nicht verfügbar. CSV-Export wird deaktiviert. Installiere pandas mit 'pip install pandas'.")
+
 # Importiere die Hilfsfunktionen aus examples/utils/preprocessors.py
 from examples.utils.preprocessors import (prepare_input_tensor_quantized,
                                           resize_image)
@@ -52,6 +60,7 @@ FEATURE_PROCESSOR_PATH = str(root_dir / "examples/scenario2_drift_objects/model/
 
 # Konfiguration für den Feature Extractor
 TARGET_IMG_SIZE = (224, 224)  # Inferenzauflösung
+# FEATURE_LAYER_INDEX wird nicht mehr verwendet, da wir direkt mit output_details['index'] arbeiten
 
 # Konfiguration für den LightweightKNN
 KNN_K = 5  # Angepasst für 4 Klassen (3 positive + 1 negative)
@@ -62,6 +71,10 @@ KNN_USE_NUMPY = True  # Für die Offline-Erstellung können wir NumPy nutzen
 # Speicherort für den initialen k-NN Zustand
 OUTPUT_STATE_DIR = current_dir  # Das aktuelle Verzeichnis (initial_state)
 OUTPUT_STATE_FILENAME = "knn_initial_state_objects.json"  # Aktualisiert für Objects-Scenario
+
+# CSV Export für Visualisierungen
+CSV_EXPORT_ENABLED = True  # Auf False setzen, wenn kein CSV-Export gewünscht ist
+CSV_EXPORT_DIR = current_dir / "visualization_data"  # Unterordner für CSV-Daten
 # --- ENDE KONFIGURATION ---
 
 def preprocess_image_for_feature_extraction(image_path: Path, target_size: tuple) -> np.ndarray:
@@ -171,9 +184,90 @@ def extract_features_manually(image, interpreter, input_details, output_details,
     
     return feature_tensor
 
+def save_features_to_csv(features, labels, timestamps, prefix="extracted_features"):
+    """
+    Speichert die extrahierten Features, Labels und Timestamps als CSV-Dateien
+    für spätere Analyse und Visualisierung.
+    
+    Args:
+        features: NumPy-Array mit den Feature-Vektoren
+        labels: Liste mit den zugehörigen Labels/Klassen
+        timestamps: Liste mit den zugehörigen Zeitstempeln
+        prefix: Präfix für die Dateinamen
+    """
+    if not PANDAS_AVAILABLE or not CSV_EXPORT_ENABLED:
+        print("CSV-Export ist deaktiviert oder pandas nicht verfügbar.")
+        return
+    
+    # Stelle sicher, dass das CSV-Exportverzeichnis existiert
+    ensure_directory_exists(CSV_EXPORT_DIR)
+    
+    try:
+        # 1. Feature-Daten speichern (kann sehr groß sein)
+        feature_file = CSV_EXPORT_DIR / f"{prefix}_data.csv"
+        print(f"Speichere Feature-Daten in {feature_file}...")
+        
+        # Features als DataFrame mit nummerierten Spalten
+        feature_cols = [f"feature_{i}" for i in range(features.shape[1])]
+        df_features = pd.DataFrame(features, columns=feature_cols)
+        
+        # Füge Label- und Timestamp-Spalten hinzu
+        df_features['label'] = labels
+        df_features['timestamp'] = timestamps
+        
+        # Speichere vollständigen DataFrame
+        df_features.to_csv(feature_file, index=False)
+        
+        # 2. Erstelle Statistiken pro Klasse
+        stats_file = CSV_EXPORT_DIR / f"{prefix}_stats_by_class.csv"
+        print(f"Berechne Feature-Statistiken pro Klasse und speichere in {stats_file}...")
+        
+        # Sammle Statistiken
+        stats_rows = []
+        unique_labels = sorted(set(labels))
+        feature_dim = features.shape[1]
+        
+        for label in unique_labels:
+            # Filtere Features für diese Klasse
+            class_mask = [l == label for l in labels]
+            class_features = features[class_mask]
+            
+            # Berechne Statistiken
+            mean_vec = np.mean(class_features, axis=0)
+            std_vec = np.std(class_features, axis=0)
+            min_vec = np.min(class_features, axis=0)
+            max_vec = np.max(class_features, axis=0)
+            
+            # Globale Statistiken für die Klasse
+            stats_rows.append({
+                'label': label,
+                'count': len(class_features),
+                'mean_all_dims': np.mean(mean_vec),
+                'std_all_dims': np.mean(std_vec),
+                'min_all_dims': np.min(min_vec),
+                'max_all_dims': np.max(max_vec),
+            })
+        
+        # Speichere Statistiken
+        df_stats = pd.DataFrame(stats_rows)
+        df_stats.to_csv(stats_file, index=False)
+        
+        # 3. t-SNE oder UMAP könnte man hier integrieren, wenn gewünscht
+        # Diese Visualisierungen sind jedoch rechenintensiv und könnten
+        # in einem separaten Analyse-Skript durchgeführt werden
+        
+        print("CSV-Export der Feature-Daten abgeschlossen.")
+        
+    except Exception as e:
+        print(f"Fehler beim CSV-Export: {e}")
+        import traceback
+        traceback.print_exc()
+
 def main():
     print("Erstelle initialen k-NN Zustand für Scenario 2...")
     ensure_directory_exists(OUTPUT_STATE_DIR)
+    if CSV_EXPORT_ENABLED:
+        ensure_directory_exists(CSV_EXPORT_DIR)
 
     # 1. Initialisiere TFLite Interpreter
     print(f"Initialisiere TFLite Interpreter mit Modell: {MODEL_PATH}")
@@ -285,6 +379,15 @@ def main():
     # Konvertiere Feature-Liste in ein NumPy-Array
     initial_features_np = np.vstack(all_features)
     print(f"Form der verarbeiteten Features: {initial_features_np.shape}")
+    
+    # Exportiere alle gesammelten Feature-Daten als CSV für Visualisierung
+    if CSV_EXPORT_ENABLED and PANDAS_AVAILABLE:
+        save_features_to_csv(
+            features=initial_features_np,
+            labels=all_labels,
+            timestamps=all_timestamps,
+            prefix="all_features_original"
+        )
 
     # 3. Initialisiere und trainiere den LightweightKNN
     knn = LightweightKNN(
@@ -331,6 +434,15 @@ def main():
     # Konvertiere zurück zu NumPy-Array
     balanced_features_np = np.array(balanced_features)
 
+    # Exportiere balancierte Feature-Daten für Visualisierung
+    if CSV_EXPORT_ENABLED and PANDAS_AVAILABLE:
+        save_features_to_csv(
+            features=balanced_features_np,
+            labels=balanced_labels,
+            timestamps=balanced_timestamps,
+            prefix="balanced_features"
+        )
+
     # Trainiere den KNN mit den balancierten Features
     print(f"Training mit {len(balanced_features_np)} balancierten Samples")
     knn.fit(balanced_features_np, balanced_labels, balanced_timestamps)
@@ -346,16 +458,67 @@ def main():
     # 4. Speichere den Zustand des k-NN
     knn_state_dict = knn.get_state()
     
+    # Bestimme die tatsächliche Feature-Dimension nach möglicher PCA-Anwendung
+    # Wenn es eine balancierte Feature-Liste gibt, verwende deren Dimension
+    actual_feature_dimension = balanced_features_np.shape[1] if balanced_features_np.size > 0 else feature_dimension
+    
+    print(f"Tatsächliche Feature-Dimension für KNN: {actual_feature_dimension} (ursprünglich: {feature_dimension})")
+    
     # Format für den StateManager
     state_to_save = {
         "classifier": knn_state_dict,
         "metadata": {
             "description": f"Initial KNN state for Objects Scenario with 4 classes: {list(CLASSES.keys())}",
             "creation_date_iso": datetime.now().isoformat(),
-            "feature_dimension": feature_dimension,
+            "feature_dimension": actual_feature_dimension,  # Verwende die tatsächliche Dimension nach PCA
+            "original_feature_dimension": feature_dimension,  # Speichere auch die ursprüngliche Dimension
             "source_model": MODEL_PATH
         }
     }
+    
+    # Exportiere KNN-Zustand und Entscheidungsgrenzen für Visualisierung
+    if CSV_EXPORT_ENABLED and PANDAS_AVAILABLE:
+        # KNN-Trainingsdaten als CSV speichern
+        knn_data_file = CSV_EXPORT_DIR / "knn_training_data.csv"
+        try:
+            # Extrahiere Trainingsdaten aus KNN-Zustand
+            X_train = np.array(knn_state_dict.get('X_train', []))
+            y_train = knn_state_dict.get('y_train', [])
+            timestamps = knn_state_dict.get('timestamps', [])
+            
+            if len(X_train) > 0 and len(y_train) > 0:
+                # Feature-Spalten generieren
+                feat_cols = [f"feature_{i}" for i in range(X_train.shape[1])]
+                
+                # DataFrame erstellen
+                knn_df = pd.DataFrame(X_train, columns=feat_cols)
+                knn_df['label'] = y_train
+                if len(timestamps) == len(y_train):
+                    knn_df['timestamp'] = timestamps
+                
+                # CSV speichern
+                knn_df.to_csv(knn_data_file, index=False)
+                print(f"KNN Trainingsdaten exportiert nach: {knn_data_file}")
+                
+                # KNN-Konfiguration speichern
+                knn_config_file = CSV_EXPORT_DIR / "knn_config.csv"
+                
+                # Spalten für wichtige KNN-Parameter
+                knn_params = [{
+                    'k': KNN_K,
+                    'max_samples': KNN_MAX_SAMPLES,
+                    'distance_metric': KNN_DISTANCE_METRIC,
+                    'feature_dimension': feature_dimension,
+                    'num_classes': len(set(y_train)),
+                    'class_distribution': ', '.join([f"{cls}: {y_train.count(cls)}" for cls in set(y_train)]),
+                }]
+                
+                pd.DataFrame(knn_params).to_csv(knn_config_file, index=False)
+                print(f"KNN Konfiguration exportiert nach: {knn_config_file}")
+            else:
+                print("Keine Trainingsdaten im KNN-Zustand gefunden.")
+        except Exception as e:
+            print(f"Fehler beim Exportieren des KNN-Zustands: {e}")
     
     output_file_path = OUTPUT_STATE_DIR / OUTPUT_STATE_FILENAME
     try:
