@@ -11,14 +11,14 @@
     "inference_resolution": [224, 224]
   },
   "model": {
-    "model_path": "../assets/model/model.tflite",
-    "labels_path": "../assets/model/labels.txt",
+    "model_path": "./model/model.tflite",
+    "labels_path": "./model/labels.txt",
     "threshold": 0.95
   },
   "tinylcm": {
     "feature_extractor": {
       "type": "TFLiteFeatureExtractor",
-      "model_path": "../assets/model/model.tflite",
+      "model_path": "./model/model.tflite",
       "feature_layer_index": -1,
       "normalize_features": true,
       "lazy_loading": false
@@ -29,7 +29,7 @@
       "max_samples": 100,
       "distance_metric": "euclidean",
       "use_numpy": true,
-      "initial_state_path": "../assets/initial_states/knn_initial_state_LSN.json"
+      "initial_state_path": "./initial_state/knn_initial_state_LSN.json"
     },
     "drift_detectors": [
       {

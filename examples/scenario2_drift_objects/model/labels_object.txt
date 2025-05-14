@@ -1,0 +1,4 @@
+0 lego
+1 negative
+2 stone
+3 tire
