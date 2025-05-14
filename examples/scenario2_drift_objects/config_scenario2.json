@@ -1,7 +1,7 @@
 {
   "device": {
     "name": "Raspberry Pi Zero 2W",
-    "description": "TinyLCM Scenario 2 - Drift Detection for 5-Class Model",
+    "description": "TinyLCM Objects Scenario - Drift Detection for 4-Class Object Model",
     "log_level": "DEBUG"
   },
   "camera": {
@@ -11,25 +11,25 @@
     "inference_resolution": [224, 224]
   },
   "model": {
-    "model_path": "../assets/model/model_lego_1.tflite",
-    "labels_path": "../assets/model/labels_lego_1.txt",
+    "model_path": "../assets/model/model_object_1.tflite",
+    "labels_path": "../assets/model/labels_object_1.txt",
     "threshold": 0.90
   },
   "tinylcm": {
     "feature_extractor": {
       "type": "TFLiteFeatureExtractor",
-      "model_path": "../assets/model/model_lego_1.tflite",
+      "model_path": "../assets/model/model_object_1.tflite",
       "feature_layer_index": -1,
       "normalize_features": true,
       "lazy_loading": false
     },
     "adaptive_classifier": {
       "type": "LightweightKNN",
-      "k": 6,
-      "max_samples": 400,
+      "k": 5,
+      "max_samples": 160,
       "distance_metric": "euclidean",
       "use_numpy": true,
-      "initial_state_path": "../assets/initial_states/knn_initial_state_sc2.json"
+      "initial_state_path": "../assets/initial_states/knn_initial_state_objects.json"
     },
     "drift_detectors": [
       {

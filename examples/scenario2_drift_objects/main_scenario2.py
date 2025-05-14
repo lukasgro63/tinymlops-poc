@@ -990,7 +990,7 @@ def main():
                             feature_sample = features[:5]
                             logger.info(f"Feature sample: {feature_sample}")
 
-                    # Save LEGO brick predictions for validation
+                    # Save Object predictions for validation
                     image_path = None
                     try:
                         # Create directory for prediction images if it doesn't exist
@@ -1044,6 +1044,32 @@ def main():
                 # and the detector is not in cooldown, it will automatically call our registered
                 # callbacks through its _notify_callbacks mechanism.
                 drift_results = pipeline.check_autonomous_drifts()
+                
+                # Always log drift check result to operational logs, regardless of detection outcome
+                if operational_monitor:
+                    drift_check_id = f"drift_check_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+                    drift_detected = any(r.get("drift_detected", False) for r in drift_results) if drift_results else False
+                    
+                    # Create metadata with drift check results
+                    check_metadata = {
+                        "drift_detected": drift_detected,
+                        "check_timestamp": time.time(),
+                        "frame_count": frame_count,
+                        "results_count": len(drift_results) if drift_results else 0,
+                        "drift_details": drift_results if drift_results else []
+                    }
+                    
+                    # Record drift check operation in operational logs
+                    operational_monitor.track_operation(
+                        operation_id=drift_check_id,
+                        operation_type="drift_check",
+                        result=str(drift_detected),
+                        success=True,
+                        metadata=check_metadata,
+                        timestamp=time.time()
+                    )
+                    logger.info(f"Drift check recorded in operational logs with ID: {drift_check_id}, drift_detected={drift_detected}")
+                
                 if drift_results:
                     # Just log information about the drift results
                     drift_count = 0

@@ -34,32 +34,31 @@ from tinylcm.utils.file_utils import ensure_directory_exists
 # --- KONFIGURATION ---
 # Pfade zu initialen Bilddaten
 INITIAL_IMAGE_DATA_DIR = Path("/Users/lukasgrodmeier/Documents/GitHub/tinymlops-poc/examples/assets/initial_states/images")  # Absoluter Pfad
-# Update auf die tatsächlichen Bildordner
+# Update auf die neuen Klassen für Objekte
 CLASSES = {
-    "black": INITIAL_IMAGE_DATA_DIR / "black", 
-    "green": INITIAL_IMAGE_DATA_DIR / "green",
-    "blue": INITIAL_IMAGE_DATA_DIR / "blue",
-    "red": INITIAL_IMAGE_DATA_DIR / "red",
-    "negative": INITIAL_IMAGE_DATA_DIR / "negative"
+    "negative": INITIAL_IMAGE_DATA_DIR / "negative",
+    "stone": INITIAL_IMAGE_DATA_DIR / "stone",
+    "lego": INITIAL_IMAGE_DATA_DIR / "lego",
+    "tire": INITIAL_IMAGE_DATA_DIR / "tire"
 }
 
 # Pfad zum TFLite-Modell (das auch im Beispiel verwendet wird)
-MODEL_PATH = "/Users/lukasgrodmeier/Documents/GitHub/tinymlops-poc/examples/assets/model/model_lego_1.tflite"  # Absoluter Pfad
-LABELS_PATH = "/Users/lukasgrodmeier/Documents/GitHub/tinymlops-poc/examples/assets/model/labels_lego_1.txt"  # Absoluter Pfad
+MODEL_PATH = "/Users/lukasgrodmeier/Documents/GitHub/tinymlops-poc/examples/assets/model/model_object_1.tflite"  # Aktualisiert für Objects
+LABELS_PATH = "/Users/lukasgrodmeier/Documents/GitHub/tinymlops-poc/examples/assets/model/labels_object_1.txt"  # Aktualisiert für Objects
 
 # Konfiguration für den Feature Extractor
 FEATURE_LAYER_INDEX = -1  # Verwende den Standard-Output-Layer, da das Modell nur einen Layer hat
 TARGET_IMG_SIZE = (224, 224)  # Inferenzauflösung
 
 # Konfiguration für den LightweightKNN
-KNN_K = 6  # Angepasst für 5 Klassen (4 positive + 1 negative)
-KNN_MAX_SAMPLES = 400  # Angepasst für 5 Klassen mit je 80 Samples
+KNN_K = 5  # Angepasst für 4 Klassen (3 positive + 1 negative)
+KNN_MAX_SAMPLES = 160  # Angepasst für 4 Klassen mit je 40 Samples
 KNN_DISTANCE_METRIC = "euclidean"  # Metrik für den Abstandsvergleich
 KNN_USE_NUMPY = True  # Für die Offline-Erstellung können wir NumPy nutzen
 
 # Speicherort für den initialen k-NN Zustand
 OUTPUT_STATE_DIR = Path("/Users/lukasgrodmeier/Documents/GitHub/tinymlops-poc/examples/assets/initial_states/")
-OUTPUT_STATE_FILENAME = "knn_initial_state_sc2.json"  # Aktualisiert für Scenario 2
+OUTPUT_STATE_FILENAME = "knn_initial_state_objects.json"  # Aktualisiert für Objects-Scenario
 # --- ENDE KONFIGURATION ---
 
 def preprocess_image_for_feature_extraction(image_path: Path, target_size: tuple) -> np.ndarray:
@@ -281,7 +280,7 @@ def main():
     state_to_save = {
         "classifier": knn_state_dict,
         "metadata": {
-            "description": f"Initial KNN state for Scenario 2 with 6 classes: {list(CLASSES.keys())}",
+            "description": f"Initial KNN state for Objects Scenario with 4 classes: {list(CLASSES.keys())}",
             "creation_date_iso": datetime.now().isoformat(),
             "feature_dimension": feature_dimension,
             "source_model": MODEL_PATH
