@@ -180,6 +180,33 @@ def on_drift_detected(drift_info: Dict[str, Any], *args) -> None:
     for key, value in metrics.items():
         logger.info(f"  {key}: {value}")
     
+    # Track drift event in operational logs
+    if 'operational_monitor' in globals() and 'operational_monitor' in locals():
+        # Create unique operation ID
+        drift_op_id = f"drift_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+        
+        # Prepare metadata with all drift information
+        drift_metadata = {
+            "detector": detector_name,
+            "drift_type": drift_type,
+            "reason": reason,
+            "metrics": metrics,
+            "current_value": drift_info.get("current_value"),
+            "threshold": drift_info.get("threshold"),
+            "metric": drift_info.get("metric")
+        }
+        
+        # Track operation in operational monitor
+        operational_monitor.track_operation(
+            operation_id=drift_op_id,
+            operation_type="drift_detection",
+            result=drift_type,
+            success=True,
+            metadata=drift_metadata,
+            timestamp=time.time()
+        )
+        logger.info(f"Drift event recorded in operational logs with ID: {drift_op_id}")
+    
     # Global reference to the sync client and current frame
     global sync_client, current_frame
     
@@ -1046,6 +1073,34 @@ def main():
 
                             logger.debug(f"Drift detected by {detector_name} (drift_type={drift_type}) - "
                                         f"Metric: {metric}, Current: {current}, Threshold: {threshold}")
+                            
+                            # Track drift event in operational logs (from drift check)
+                            if operational_monitor:
+                                # Create unique operation ID
+                                drift_op_id = f"drift_check_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+                                
+                                # Prepare metadata with drift information
+                                drift_metadata = {
+                                    "detector": detector_name,
+                                    "drift_type": drift_type,
+                                    "metric": metric,
+                                    "current_value": current,
+                                    "threshold": threshold,
+                                    "reason": f"{metric} drift detected (current: {current}, threshold: {threshold})",
+                                    "metrics": {k: v for k, v in result.items() if k not in ["detector", "detector_type", "detector_id", "timestamp", "sample_id", "drift_detected", "in_cooldown_period"]}
+                                }
+                                
+                                # Track operation in operational monitor
+                                operational_monitor.track_operation(
+                                    operation_id=drift_op_id,
+                                    operation_type="drift_detection",
+                                    result=drift_type,
+                                    success=True,
+                                    metadata=drift_metadata,
+                                    timestamp=time.time()
+                                )
+                                logger.debug(f"Drift event from drift check recorded in operational logs with ID: {drift_op_id}")
+                                
                         elif result.get("in_cooldown_period", False):
                             cooldown_count += 1
 
