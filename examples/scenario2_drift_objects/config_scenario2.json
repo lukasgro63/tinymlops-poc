@@ -5,21 +5,27 @@
     "log_level": "DEBUG"
   },
   "camera": {
-    "resolution": [640, 480],
+    "resolution": [
+      640,
+      480
+    ],
     "framerate": 5,
     "rotation": 0,
-    "inference_resolution": [224, 224]
+    "inference_resolution": [
+      224,
+      224
+    ]
   },
   "model": {
-    "model_path": "../assets/model/model_object_1.tflite",
-    "labels_path": "../assets/model/labels_object_1.txt",
-    "threshold": 0.90
+    "model_path": "../assets/model/model_object_transfer.tflite",
+    "labels_path": "../assets/model/labels_object_transfer.txt",
+    "threshold": 0.9
   },
   "tinylcm": {
     "feature_extractor": {
       "type": "TFLiteFeatureExtractor",
-      "model_path": "../assets/model/model_object_1.tflite",
-      "feature_layer_index": -1,
+      "model_path": "../assets/model/model_object_transfer.tflite", 
+      "feature_layer_index": 0,
       "normalize_features": true,
       "lazy_loading": false
     },
@@ -45,7 +51,7 @@
     ],
     "operational_monitor": {
       "track_system_metrics": true,
-      "track_inference_time": true, 
+      "track_inference_time": true,
       "track_memory_usage": true,
       "report_interval_seconds": 30
     },

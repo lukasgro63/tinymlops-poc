@@ -14,6 +14,25 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+def flatten_feature_tensor(features: np.ndarray) -> np.ndarray:
+    """Flattens a multi-dimensional feature tensor to a 1D vector.
+    
+    This is particularly useful for converting convolutional feature maps
+    (e.g., from the penultimate layer of a CNN) into a format suitable for KNN.
+    
+    Args:
+        features: Multi-dimensional feature tensor (e.g., [7, 7, 1280])
+        
+    Returns:
+        1D flattened feature vector
+    """
+    # If already 1D, return as is
+    if len(features.shape) <= 1:
+        return features
+        
+    # Flatten the tensor to 1D
+    return features.flatten()
+
 
 def resize_image(
     image: np.ndarray,

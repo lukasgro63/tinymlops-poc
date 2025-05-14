@@ -43,8 +43,8 @@ CLASSES = {
 }
 
 # Pfad zum TFLite-Modell (das auch im Beispiel verwendet wird)
-MODEL_PATH = "/Users/lukasgrodmeier/Documents/GitHub/tinymlops-poc/examples/assets/model/model_object_1.tflite"  # Aktualisiert für Objects
-LABELS_PATH = "/Users/lukasgrodmeier/Documents/GitHub/tinymlops-poc/examples/assets/model/labels_object_1.txt"  # Aktualisiert für Objects
+MODEL_PATH = "/Users/lukasgrodmeier/Documents/GitHub/tinymlops-poc/examples/assets/model/model_object_transfer.tflite"  # Aktualisiert für Objects
+LABELS_PATH = "/Users/lukasgrodmeier/Documents/GitHub/tinymlops-poc/examples/assets/model/labels_object_transfer.txt"  # Aktualisiert für Objects
 
 # Konfiguration für den Feature Extractor
 FEATURE_LAYER_INDEX = -1  # Verwende den Standard-Output-Layer, da das Modell nur einen Layer hat
@@ -52,7 +52,7 @@ TARGET_IMG_SIZE = (224, 224)  # Inferenzauflösung
 
 # Konfiguration für den LightweightKNN
 KNN_K = 5  # Angepasst für 4 Klassen (3 positive + 1 negative)
-KNN_MAX_SAMPLES = 160  # Angepasst für 4 Klassen mit je 40 Samples
+KNN_MAX_SAMPLES = 60  # Angepasst für 4 Klassen mit je 40 Samples
 KNN_DISTANCE_METRIC = "euclidean"  # Metrik für den Abstandsvergleich
 KNN_USE_NUMPY = True  # Für die Offline-Erstellung können wir NumPy nutzen
 
@@ -87,27 +87,56 @@ def extract_features_manually(image, interpreter, input_details, output_details,
     # Führe die Inferenz durch
     interpreter.invoke()
 
-    # Hole alle Output-Details, um den richtigen Layer zu finden
+    # Hole alle Output-Details und drucke sie aus für Debugzwecke
     all_output_details = interpreter.get_output_details()
-
-    # Wähle den richtigen Layer basierend auf feature_layer_index
-    if abs(feature_layer_index) < len(all_output_details):
-        feature_tensor_details = all_output_details[feature_layer_index]
-        feature_tensor = interpreter.get_tensor(feature_tensor_details['index'])
-        print(f"Verwende Feature-Layer mit Index {feature_layer_index}, Shape: {feature_tensor.shape}")
-    else:
-        # Fallback auf den Standard-Output, wenn der Index ungültig ist
-        print(f"WARNUNG: Feature-Layer-Index {feature_layer_index} ist ungültig. Verwende Standard-Output.")
+    print(f"Modell hat {len(all_output_details)} Output-Tensoren:")
+    
+    for i, output in enumerate(all_output_details):
+        tensor = interpreter.get_tensor(output['index'])
+        print(f"  Output {i}: Index={output['index']}, Name={output.get('name', 'unnamed')}, Shape={tensor.shape}")
+        
+        # Check if this tensor has a large number of dimensions (likely feature-rich)
+        if len(tensor.shape) > 1 and tensor.shape[-1] > 100:
+            print(f"  --> Dieser Output sieht reich an Features aus!")
+            
+    # Versuche die Feature-Layer mit der größten Dimension zu finden
+    largest_feature_dim = 0
+    feature_tensor = None
+    feature_index = 0
+    
+    for i, output in enumerate(all_output_details):
+        tensor = interpreter.get_tensor(output['index'])
+        # Flatten to get total dimension
+        flat_dim = np.prod(tensor.shape[1:]) if len(tensor.shape) > 1 else tensor.shape[0]
+        
+        if flat_dim > largest_feature_dim:
+            largest_feature_dim = flat_dim
+            feature_tensor = tensor
+            feature_index = i
+    
+    if feature_tensor is None:
+        # Fallback auf den Standard-Output wenn nichts besseres gefunden wurde
+        print(f"WARNUNG: Konnte keinen geeigneten Feature-Layer finden. Verwende Standard-Output.")
         feature_tensor = interpreter.get_tensor(output_details['index'])
+    else:
+        print(f"Verwende Feature-Layer mit Index {feature_index}, Shape: {feature_tensor.shape}, Dimension: {largest_feature_dim}")
 
     # Entferne Batch-Dimension falls vorhanden
     if len(feature_tensor.shape) > 1 and feature_tensor.shape[0] == 1:
         feature_tensor = feature_tensor[0]
+        
+    # Wenn der Tensor mehr als 2D ist (z.B. [1, 7, 7, 1280]), dann flatten
+    if len(feature_tensor.shape) > 2:
+        original_shape = feature_tensor.shape
+        feature_tensor = feature_tensor.flatten()
+        print(f"Feature-Tensor von Shape {original_shape} zu 1D-Vektor mit {feature_tensor.shape[0]} Dimensionen umgewandelt")
 
-    # Normalisiere Features um konsistent mit config_scenario1.json zu sein
-    # L2-Normalisierung der Features
-    feature_tensor = feature_tensor / np.linalg.norm(feature_tensor)
-    print(f"Feature-Tensor (mit Normalisierung): min={feature_tensor.min()}, max={feature_tensor.max()}")
+    # Normalisiere Features
+    norm = np.linalg.norm(feature_tensor)
+    if norm > 1e-10:  # Avoid division by zero
+        feature_tensor = feature_tensor / norm
+    
+    print(f"Feature-Tensor (mit Normalisierung): min={feature_tensor.min()}, max={feature_tensor.max()}, shape={feature_tensor.shape}")
 
     return feature_tensor
 
