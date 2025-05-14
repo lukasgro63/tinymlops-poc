@@ -28,14 +28,11 @@ except ImportError:
     except ImportError:
         TFLITE_RUNTIME_AVAILABLE = False
 
-# Import später, damit wir die Klassen für den manuellen Fall haben
-# Wir werden die Klassen direkt nutzen statt über den TFLiteFeatureExtractor
 from tinylcm.core.classifiers.knn import LightweightKNN
 from tinylcm.utils.file_utils import ensure_directory_exists
 
 # --- KONFIGURATION ---
-# Pfade zu deinen initialen Bilddaten
-# Angepasster Pfad für die tatsächliche Verzeichnisstruktur
+# Pfade zu  initialen Bilddaten
 INITIAL_IMAGE_DATA_DIR = Path("examples/assets/initial_states/images")  # Hauptordner für initiale Bilder
 CLASSES = {"lego": INITIAL_IMAGE_DATA_DIR / "lego", "stone": INITIAL_IMAGE_DATA_DIR / "stone", "negative": INITIAL_IMAGE_DATA_DIR / "negative"}
 
