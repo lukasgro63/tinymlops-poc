@@ -312,7 +312,7 @@ def fine_tune_model(model, train_generator, val_generator):
     for layer in model.layers:
         if isinstance(layer, tf.keras.Model):  # This is likely our base model
             # Unfreeze the last few layers of the found base model (more aggressive with our larger dataset)
-            for sublayer in layer.layers[-10:]:  # Erhöht von 5 auf 10 Layers für den größeren Datensatz
+            for sublayer in layer.layers[-5:]:
                 sublayer.trainable = True
                 print(f"Set base model layer '{sublayer.name}' to trainable")
             break
@@ -405,7 +405,7 @@ def convert_to_tflite(feature_extraction_model, raw_feature_model, quantize=True
         
         # Representative dataset for calibration (use a subset of validation data)
         def representative_data_gen():
-            num_calibration_examples = 100
+            num_calibration_examples = 200
             print(f"Generating calibration data from {num_calibration_examples} examples...")
             count = 0
             
