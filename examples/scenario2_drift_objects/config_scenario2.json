@@ -58,12 +58,12 @@
       "track_system_metrics": true,
       "track_inference_time": true,
       "track_memory_usage": true,
-      "report_interval_seconds": 30
+      "report_interval_seconds": 60
     },
     "sync_client": {
-      "server_url": "http://192.168.188.54:8000",
+      "server_url": "http://192.168.0.67:8000",
       "api_key": "tinylcm-demo-key",
-      "sync_interval_seconds": 30,
+      "sync_interval_seconds": 60,
       "max_retries": 3,
       "auto_register": true,
       "sync_dir": "./sync_data",
@@ -83,10 +83,6 @@
       "log_images": true,
       "log_drift_events": true,
       "max_log_size_mb": 100
-    },
-    "feature_processor": {
-      "enabled": true,
-      "model_path": "./model/feature_processor.pkl"
     }
   },
   "application": {

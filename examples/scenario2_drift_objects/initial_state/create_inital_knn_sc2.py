@@ -39,7 +39,7 @@ CLASSES = {
     "negative": INITIAL_IMAGE_DATA_DIR / "negative",
     "stone": INITIAL_IMAGE_DATA_DIR / "stone",
     "lego": INITIAL_IMAGE_DATA_DIR / "lego",
-    "tire": INITIAL_IMAGE_DATA_DIR / "tire"
+    "leaf": INITIAL_IMAGE_DATA_DIR / "leaf"  # Aktualisiert von "tire" zu "leaf"
 }
 
 # Pfad zum TFLite-Modell (das auch im Beispiel verwendet wird)
@@ -55,7 +55,7 @@ TARGET_IMG_SIZE = (224, 224)  # Inferenzauflösung
 
 # Konfiguration für den LightweightKNN
 KNN_K = 5  # Angepasst für 4 Klassen (3 positive + 1 negative)
-KNN_MAX_SAMPLES = 60  # Angepasst für 4 Klassen mit je 40 Samples
+KNN_MAX_SAMPLES = 200  # Erhöht für den größeren Datensatz (jede Klasse hat ~200 Bilder)
 KNN_DISTANCE_METRIC = "euclidean"  # Metrik für den Abstandsvergleich
 KNN_USE_NUMPY = True  # Für die Offline-Erstellung können wir NumPy nutzen
 
@@ -389,12 +389,22 @@ def main():
     knn_state_dict = knn.get_state()
     
     # Format für den StateManager
+    # Wir müssen sicherstellen, dass wir die tatsächliche Feature-Dimension nach PCA-Transformation verwenden
+    # Die samples im KNN (X_train) haben die richtige Dimension
+    actual_feature_dimension = len(knn_state_dict['X_train'][0]) if knn_state_dict['X_train'] else feature_dimension
+    
+    # Prüfen, ob die Dimension der transformierten Features korrekt ist
+    print(f"Originale Feature-Dimension vom TFLite-Modell: {feature_dimension}")
+    print(f"Tatsächliche Feature-Dimension nach Feature-Prozessor: {actual_feature_dimension}")
+    
     state_to_save = {
         "classifier": knn_state_dict,
         "metadata": {
             "description": f"Initial KNN state for Objects Scenario with 4 classes: {list(CLASSES.keys())}",
             "creation_date_iso": datetime.now().isoformat(),
-            "feature_dimension": feature_dimension,
+            "feature_dimension": actual_feature_dimension,  # Verwende die tatsächliche Dimension nach Transformation
+            "original_dimension": feature_dimension,  # Speichere auch die ursprüngliche Dimension
+            "feature_processor": "StandardScaler + PCA(256)" if os.path.exists(FEATURE_PROCESSOR_PATH) else "None",
             "source_model": MODEL_PATH
         }
     }

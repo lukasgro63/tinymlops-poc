@@ -21,7 +21,7 @@ import sys
 import numpy as np
 
 # Check for required dependencies and install if missing
-required_packages = ["Pillow", "scipy", "scikit-learn"]
+required_packages = ["Pillow", "scipy", "scikit-learn", "pyheif"]
 missing_packages = []
 
 # Check for PIL/Pillow
@@ -44,6 +44,13 @@ try:
     print("✓ scikit-learn is already installed.")
 except ImportError:
     missing_packages.append("scikit-learn")
+    
+# Check for pyheif (to handle HEIC images)
+try:
+    import pyheif
+    print("✓ pyheif is already installed.")
+except ImportError:
+    missing_packages.append("pyheif")
 
 # Install any missing packages
 if missing_packages:
@@ -74,7 +81,7 @@ from examples.utils.preprocessors import (prepare_input_tensor_quantized,
 # Configuration
 IMAGE_SIZE = (224, 224)  # MobileNetV2 default input size
 BATCH_SIZE = 32
-EPOCHS = 50
+EPOCHS = 100  # Erhöht für bessere Konvergenz mit dem größeren Datensatz
 LEARNING_RATE = 0.001
 RANDOM_SEED = 42
 VALIDATION_SPLIT = 0.2
@@ -93,6 +100,34 @@ LABELS_FILE_PATH = os.path.join(OUTPUT_DIR, "labels_object.txt")
 # Wir brauchen keine Custom-Pfade mehr, da wir direkt ins Szenario-Verzeichnis speichern
 TINYML_MODEL_PATH = MODEL_TFLITE_PATH  # Verwende den gleichen Pfad
 TINYML_LABELS_PATH = LABELS_FILE_PATH  # Verwende den gleichen Pfad
+
+class JPGOnlyImageDataGenerator(ImageDataGenerator):
+    """
+    ImageDataGenerator that only processes JPG/JPEG images.
+    Ignores HEIC/HEIF images due to compatibility issues with pyheif.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Beschränke unterstützte Formate auf JPG/JPEG/PNG (kein HEIC)
+        self.supported_extensions = {'.jpg', '.jpeg', '.png', '.bmp'}
+    
+    def flow_from_directory(self, directory, *args, **kwargs):
+        # Gib einen Hinweis aus, dass nur JPG/JPEG verwendet werden 
+        print("\nVerwendung von JPG/JPEG/PNG Bildern (HEIC-Unterstützung deaktiviert)")
+        
+        # Stelle sicher, dass wir nur JPG/JPEG-Dateien zählen
+        jpg_count = 0
+        for root, _, files in os.walk(directory):
+            for file in files:
+                ext = os.path.splitext(file)[1].lower()
+                if ext in ['.jpg', '.jpeg', '.png', '.bmp']:
+                    jpg_count += 1
+        
+        print(f"Gefunden: {jpg_count} JPG/JPEG/PNG/BMP Bilder im Verzeichnis")
+        
+        # Dann rufen wir die Standard-Implementierung auf
+        return super().flow_from_directory(directory, *args, **kwargs)
+
 
 def create_data_generators():
     """Create training and validation data generators."""
@@ -120,7 +155,8 @@ def create_data_generators():
     print(f"Saved class labels to {LABELS_FILE_PATH}")
     
     # Create data generators with augmentation for training
-    train_datagen = ImageDataGenerator(
+    # Verwenden der JPGOnlyImageDataGenerator anstelle von HEICImageDataGenerator
+    train_datagen = JPGOnlyImageDataGenerator(
         rescale=1./255,
         validation_split=VALIDATION_SPLIT,
         rotation_range=20,
@@ -229,17 +265,17 @@ def train_model(model, train_generator, val_generator):
         metrics=['accuracy']
     )
     
-    # Set up callbacks
+    # Set up callbacks - Patience erhöht für den größeren Datensatz
     callbacks = [
         EarlyStopping(
             monitor='val_loss',
-            patience=10,
+            patience=15,  # Erhöht für bessere Konvergenz
             restore_best_weights=True
         ),
         ReduceLROnPlateau(
             monitor='val_loss',
             factor=0.2,
-            patience=5,
+            patience=7,  # Erhöht für bessere Konvergenz
             min_lr=1e-6
         )
     ]
@@ -249,6 +285,10 @@ def train_model(model, train_generator, val_generator):
     validation_steps = val_generator.samples // BATCH_SIZE
     
     print("Starting model training...")
+    print(f"Training samples: {train_generator.samples}")
+    print(f"Validation samples: {val_generator.samples}")
+    print(f"Steps per epoch: {steps_per_epoch}")
+    print(f"Validation steps: {validation_steps}")
     
     # Train the model
     history = model.fit(
@@ -257,7 +297,7 @@ def train_model(model, train_generator, val_generator):
         validation_data=val_generator,
         callbacks=callbacks,
         steps_per_epoch=steps_per_epoch,
-        validation_steps=validation_steps
+        validation_steps=max(1, validation_steps)  # Stelle sicher, dass mindestens 1 Step ausgeführt wird
     )
     
     return history
@@ -267,18 +307,17 @@ def fine_tune_model(model, train_generator, val_generator):
     # For a conservative approach, we only train the classification head
     # We keep the base model frozen to prevent overfitting
     
-    # Uncomment the following section if you want more aggressive fine-tuning:
-    """
+    # Bei dem neuen größeren Datensatz können wir einen aggressiveren Fine-Tuning-Ansatz anwenden
     # Find the base model (MobileNetV2) layer
     for layer in model.layers:
         if isinstance(layer, tf.keras.Model):  # This is likely our base model
-            # Unfreeze the last few layers of the found base model (very conservative)
-            for sublayer in layer.layers[-5:]:  # Reduced from 20 to 5 layers
+            # Unfreeze the last few layers of the found base model (more aggressive with our larger dataset)
+            for sublayer in layer.layers[-10:]:  # Erhöht von 5 auf 10 Layers für den größeren Datensatz
                 sublayer.trainable = True
+                print(f"Set base model layer '{sublayer.name}' to trainable")
             break
-    """
     
-    # Set only the top layers to be trainable
+    # Set also the top layers to be trainable
     trainable_found = False
     for layer in model.layers[-2:]:  # Only unfreeze the last classification layers
         layer.trainable = True
@@ -295,17 +334,17 @@ def fine_tune_model(model, train_generator, val_generator):
         metrics=['accuracy']
     )
     
-    # Set up callbacks
+    # Set up callbacks - Patience erhöht für den größeren Datensatz
     callbacks = [
         EarlyStopping(
             monitor='val_loss',
-            patience=10,
+            patience=15,  # Erhöht für bessere Konvergenz
             restore_best_weights=True
         ),
         ReduceLROnPlateau(
             monitor='val_loss',
             factor=0.2,
-            patience=5,
+            patience=7,  # Erhöht für bessere Konvergenz
             min_lr=1e-7
         )
     ]
@@ -315,6 +354,10 @@ def fine_tune_model(model, train_generator, val_generator):
     validation_steps = val_generator.samples // BATCH_SIZE
     
     print("Starting model fine-tuning...")
+    print(f"Training samples: {train_generator.samples}")
+    print(f"Validation samples: {val_generator.samples}")
+    print(f"Steps per epoch: {steps_per_epoch}")
+    print(f"Validation steps: {validation_steps}")
     
     # Fine-tune the model
     history = model.fit(
@@ -323,7 +366,7 @@ def fine_tune_model(model, train_generator, val_generator):
         validation_data=val_generator,
         callbacks=callbacks,
         steps_per_epoch=steps_per_epoch,
-        validation_steps=validation_steps
+        validation_steps=max(1, validation_steps)  # Stelle sicher, dass mindestens 1 Step ausgeführt wird
     )
     
     return history

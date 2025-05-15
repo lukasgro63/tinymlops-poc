@@ -1,0 +1,26 @@
+{
+  "name": "TensorFlow Python 3.11",
+  "build": {
+      "dockerfile": "Dockerfile",
+      "context": ".."
+  },
+  "customizations": {
+      "vscode": {
+          "extensions": [
+              "ms-python.python",
+              "ms-python.vscode-pylance",
+              "ms-toolsai.jupyter"
+          ],
+          "settings": {
+              "python.defaultInterpreterPath": "/usr/local/bin/python",
+              "python.linting.enabled": true,
+              "python.linting.pylintEnabled": true,
+              "python.formatting.provider": "black",
+              "editor.formatOnSave": true
+          }
+      }
+  },
+  "forwardPorts": [],
+  "postCreateCommand": "pip install --no-cache-dir black pylint",
+  "remoteUser": "root"
+}
