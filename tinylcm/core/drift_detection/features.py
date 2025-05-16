@@ -1164,7 +1164,14 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
             # which will accumulate and cause ph_value to exceed the threshold
             self.drift_detected = ph_value > self.lambda_threshold
             
-            # Log the PH value occasionally for debugging
+            # Log when PH test triggers new drift detection for better debugging
+            if self.drift_detected and not was_drift_detected:
+                logger.warning(f"KNNDistanceMonitor: DRIFT DETECTED by Page-Hinkley test! " +
+                             f"PH value: {ph_value:.2f} > threshold: {self.lambda_threshold:.2f}, " +
+                             f"avg_distance: {avg_distance:.2f}, reference: {self.reference_mean:.2f}, " +
+                             f"ratio: {(avg_distance/max(0.01, self.reference_mean)):.2f}x")
+            
+            # Log the PH value occasionally for regular debugging
             if self.samples_processed % 10 == 0:
                 logger.debug(f"KNNDistanceMonitor PH value: {ph_value:.2f}, threshold: {self.lambda_threshold:.2f}, " +
                             f"avg_distance: {avg_distance:.2f}, reference: {self.reference_mean:.2f}")
