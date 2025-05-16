@@ -579,12 +579,16 @@ def main():
         "exit_threshold_factor": 0.7,
         "high_confidence_threshold": 0.9,
         "stable_known_classes": {list(CLASSES.keys())},
-        "reference_stats_path": "{OUTPUT_REFERENCE_STATS_FILENAME}",
+        "reference_stats_path": "./initial_state/{OUTPUT_REFERENCE_STATS_FILENAME}",
         "warm_up_samples": 5,
         "reference_update_interval": 100,
         "reference_update_factor": 0.05,
         "pause_reference_update_during_drift": true,
-        "drift_cooldown_period": 30
+        "drift_cooldown_period": 30,
+        "use_adaptive_thresholds": false,
+        "allow_runtime_threshold_adaptation": false,
+        "adaptive_delta_std_multiplier": 1.5,
+        "adaptive_lambda_std_multiplier": 5.0
       }}
     ]
             ''')
