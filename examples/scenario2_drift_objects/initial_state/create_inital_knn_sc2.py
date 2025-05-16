@@ -242,7 +242,10 @@ def calculate_knn_distance_statistics(knn_instance, all_features, all_labels):
     
     for i, (feature, label) in enumerate(zip(all_features, all_labels)):
         # Verwende die interne _find_neighbors Methode, um Nachbarn und Distanzen zu finden
-        indices, distances = knn_instance._find_neighbors(feature, k=knn_instance.k)
+        nearest_neighbors = knn_instance._find_neighbors(feature)
+        
+        # Extrahiere die Distanzen aus den Tupeln (idx, distance)
+        distances = [dist for _, dist in nearest_neighbors]
         
         # Berechne durchschnittliche Distanz
         if len(distances) > 0:
