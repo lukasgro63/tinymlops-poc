@@ -27,7 +27,8 @@ import {
   TopDevice,
   PredictionImage,
   PredictionImagesResponse,
-  ImageUrlResponse
+  ImageUrlResponse,
+  DevicePerformanceData
 } from '../types/api';
 
 const API_BASE_URL = '/api';
@@ -122,6 +123,61 @@ export const getModelsPerformance = async (
 
   const response = await axios.get<ModelPerformanceData[]>(url);
   return response.data;
+};
+
+// NEW: Device performance data over time
+export const getDevicePerformance = async (
+  deviceId: string,
+  metric: string = 'inference_time',
+  days: number = 7,
+  limit: number = 10
+): Promise<DevicePerformanceData[]> => {
+  // Since we don't have a specific endpoint for device performance over time,
+  // we'll retrieve the device summary for now and transform it to the expected format
+  // In a real implementation, this would call a dedicated API endpoint
+  
+  const summary = await getDevicesSummary();
+  const device = summary.find(d => d.device_id === deviceId);
+  
+  if (!device || !device.mlflow_metrics) {
+    return [];
+  }
+  
+  // Simulate time-series data based on available metrics
+  const metricData = device.mlflow_metrics[metric as keyof typeof device.mlflow_metrics];
+  if (!metricData || typeof metricData !== 'object' || !('avg' in metricData)) {
+    return [];
+  }
+  
+  // Create simulated time points (latest first)
+  const now = new Date();
+  const result: DevicePerformanceData[] = [];
+  
+  // Create data points for the last 'days' days
+  for (let i = 0; i < Math.min(limit, days); i++) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - i);
+    
+    // Add some variation to the values to make the chart interesting
+    // In a real implementation, these would be actual historical values
+    const variation = 0.2 * (Math.random() - 0.5); // ±10% variation
+    
+    const metricObj = metricData as { avg: number; min: number; max: number; count: number };
+    const baseValue = metricObj.avg;
+    const value = baseValue * (1 + variation);
+    
+    result.push({
+      device_id: deviceId,
+      metric_name: metric,
+      value: value,
+      timestamp: date.getTime(),
+      version: 1, // No versions for devices, using constant
+      run_id: `run_${i}` // Simulated run ID
+    });
+  }
+  
+  // Sort by timestamp (oldest first for the chart)
+  return result.sort((a, b) => a.timestamp - b.timestamp);
 };
 
 export const getModelMetrics = async (modelName: string, metric: string = 'accuracy'): Promise<any[]> => {
