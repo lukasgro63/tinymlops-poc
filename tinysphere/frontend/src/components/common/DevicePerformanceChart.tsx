@@ -69,6 +69,9 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
     'uptime_seconds'
   ];
 
+  // Define state for available metrics based on device data
+  const [deviceAvailableMetrics, setDeviceAvailableMetrics] = useState<string[]>([]);
+
   // Fetch device list on mount
   useEffect(() => {
     fetchDevicesList();
@@ -88,9 +91,16 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
     }
   }, [externalSelectedMetric]);
 
-  // When device or metric selection changes, fetch new data
+  // When device selection changes, update available metrics
   useEffect(() => {
     if (selectedDevice) {
+      updateAvailableMetrics();
+    }
+  }, [selectedDevice]);
+
+  // When device or metric selection changes, fetch new data
+  useEffect(() => {
+    if (selectedDevice && selectedMetric) {
       fetchDevicePerformance();
     }
   }, [selectedDevice, selectedMetric, timeRange, maxDataPoints]);
@@ -116,6 +126,67 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
       setError('Failed to load devices list');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Update available metrics for the selected device
+  const updateAvailableMetrics = async () => {
+    if (!selectedDevice) return;
+
+    try {
+      // Get device summary from API to check available metrics
+      const deviceSummaries = await getDevicesSummary();
+      const device = deviceSummaries.find(d => d.device_id === selectedDevice);
+      
+      if (!device || !device.mlflow_metrics) {
+        // Default to showing all metrics if no MLflow metrics are available
+        setDeviceAvailableMetrics([]);
+        return;
+      }
+      
+      // Find metrics that have valid data
+      const validMetrics: string[] = [];
+      
+      // Check each metric in the available metrics list
+      for (const metric of availableMetrics) {
+        const metricData = device.mlflow_metrics[metric as keyof typeof device.mlflow_metrics];
+        
+        // Check if metric has valid data (not undefined, NaN, etc.)
+        if (metricData && 
+            typeof metricData === 'object' && 
+            'avg' in metricData && 
+            !isNaN(metricData.avg as number)) {
+          validMetrics.push(metric);
+        }
+      }
+      
+      // Check if device's available_metrics field has anything
+      if (device.mlflow_metrics.available_metrics && 
+          Array.isArray(device.mlflow_metrics.available_metrics) && 
+          device.mlflow_metrics.available_metrics.length > 0) {
+        // Add metrics from available_metrics list that aren't already in our validMetrics
+        device.mlflow_metrics.available_metrics.forEach(metric => {
+          if (!validMetrics.includes(metric as string)) {
+            validMetrics.push(metric as string);
+          }
+        });
+      }
+      
+      // Update available metrics
+      setDeviceAvailableMetrics(validMetrics);
+      
+      // If the currently selected metric is not in the valid list, select the first valid one
+      if (validMetrics.length > 0 && !validMetrics.includes(selectedMetric)) {
+        setSelectedMetric(validMetrics[0]);
+        
+        if (onMetricChange) {
+          onMetricChange(validMetrics[0]);
+        }
+      }
+    } catch (error) {
+      console.error('Error updating available metrics:', error);
+      // Default to showing all metrics if there's an error
+      setDeviceAvailableMetrics([]);
     }
   };
 
@@ -282,11 +353,19 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
               label="Metric"
               onChange={handleMetricChange}
             >
-              {availableMetrics.map((metric) => (
-                <MenuItem key={metric} value={metric}>
-                  {formatMetricName(metric)}
-                </MenuItem>
-              ))}
+              {/* Only show metrics that are available for this device */}
+              {deviceAvailableMetrics.length > 0 
+                ? deviceAvailableMetrics.map((metric) => (
+                    <MenuItem key={metric} value={metric}>
+                      {formatMetricName(metric)}
+                    </MenuItem>
+                  ))
+                : availableMetrics.map((metric) => (
+                    <MenuItem key={metric} value={metric}>
+                      {formatMetricName(metric)}
+                    </MenuItem>
+                  ))
+              }
             </Select>
           </FormControl>
 
