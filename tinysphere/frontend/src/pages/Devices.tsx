@@ -781,14 +781,6 @@ const DevicesPage: React.FC = () => {
                                     <InfoIcon fontSize="small" />
                                   </IconButton>
                                 </Tooltip>
-                                <Tooltip title="View Packages">
-                                  <IconButton 
-                                    size="small"
-                                    onClick={() => handleOpenDialog(device)}
-                                  >
-                                    <LocalShippingIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
                               </Box>
                             </TableCell>
                           </TableRow>
