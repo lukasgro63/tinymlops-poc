@@ -1067,6 +1067,9 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         initial_reference_std: float = None,
         reference_stats_path: str = None,
         use_adaptive_thresholds: bool = False,
+        allow_runtime_threshold_adaptation: bool = False,
+        adaptive_delta_std_multiplier: float = 1.5,
+        adaptive_lambda_std_multiplier: float = 5.0,
     ):
         """Initialize the KNN distance monitor.
         
@@ -1082,8 +1085,12 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
             pause_reference_update_during_drift: Whether to pause updating during detected drift
             drift_cooldown_period: Number of samples to wait before triggering another drift event
             initial_reference_mean: Pre-computed reference mean to use instead of warm-up calculation
-            initial_reference_std: Pre-computed reference standard deviation (currently unused)
+            initial_reference_std: Pre-computed reference standard deviation for adaptive thresholds
             reference_stats_path: Path to JSON file containing pre-computed reference statistics
+            use_adaptive_thresholds: Whether to use reference_std to set delta and lambda thresholds 
+            allow_runtime_threshold_adaptation: Whether to update thresholds during runtime (vs. only during initialization)
+            adaptive_delta_std_multiplier: Multiplier for reference_std to calculate delta threshold
+            adaptive_lambda_std_multiplier: Multiplier for reference_std to calculate lambda threshold
         """
         super().__init__(
             warm_up_samples=warm_up_samples,
@@ -1099,6 +1106,9 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         self.high_confidence_threshold = high_confidence_threshold
         self.stable_known_classes = stable_known_classes or []
         self.use_adaptive_thresholds = use_adaptive_thresholds
+        self.allow_runtime_threshold_adaptation = allow_runtime_threshold_adaptation
+        self.adaptive_delta_std_multiplier = adaptive_delta_std_multiplier
+        self.adaptive_lambda_std_multiplier = adaptive_lambda_std_multiplier
         
         # Store pre-computed reference statistics values
         self.initial_reference_mean = initial_reference_mean
@@ -1222,6 +1232,19 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
                 # If we don't have enough samples, use a default
                 self.reference_std = self.reference_mean * 0.1  # Fallback: assume 10% relative variation
                 logger.info(f"KNNDistanceMonitor: Initialized reference mean={self.reference_mean:.4f}, using default std={self.reference_std:.4f}")
+            
+            # If adaptive thresholds are enabled, update the thresholds based on learned statistics
+            if self.use_adaptive_thresholds and self.reference_std > 0:
+                original_delta = self.delta
+                original_lambda = self.lambda_threshold
+                
+                # Set thresholds based on reference_std
+                self.delta = self.reference_std * self.adaptive_delta_std_multiplier
+                self.lambda_threshold = self.reference_std * self.adaptive_lambda_std_multiplier
+                
+                logger.info(f"KNNDistanceMonitor: Using adaptive thresholds after warm-up: "
+                          f"delta={original_delta:.4f}->{self.delta:.4f}, "
+                          f"lambda={original_lambda:.4f}->{self.lambda_threshold:.4f}")
             
             self.warm_up_values = None  # Free memory
             self.cumulative_sum = 0.0
@@ -1364,12 +1387,22 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
                     self.reference_std = (self.reference_update_factor * self.reference_std + 
                                          (1 - self.reference_update_factor) * current_std)
                     
-                    # If adaptive thresholds are enabled, update thresholds based on new statistics
-                    if self.use_adaptive_thresholds:
+                    # If adaptive thresholds AND runtime adaptation are enabled, update thresholds 
+                    if self.use_adaptive_thresholds and self.allow_runtime_threshold_adaptation:
+                        # Store original values for logging
+                        original_delta = self.delta
+                        original_lambda = self.lambda_threshold
+                        
                         # Adjust delta and lambda threshold based on new reference_std
-                        self.delta = self.reference_std * 1.5  # 1.5 std for small variations
-                        self.lambda_threshold = self.reference_std * 5.0  # 5.0 std for drift threshold
-                        logger.debug(f"KNNDistanceMonitor: Updated adaptive thresholds: delta={self.delta:.4f}, lambda={self.lambda_threshold:.4f}")
+                        self.delta = self.reference_std * self.adaptive_delta_std_multiplier
+                        self.lambda_threshold = self.reference_std * self.adaptive_lambda_std_multiplier
+                        
+                        # Only log when there's a substantial change
+                        if (abs(original_delta - self.delta) > 0.1 * original_delta or 
+                            abs(original_lambda - self.lambda_threshold) > 0.1 * original_lambda):
+                            logger.info(f"KNNDistanceMonitor: Updated adaptive thresholds during runtime: "
+                                      f"delta={original_delta:.4f}->{self.delta:.4f}, "
+                                      f"lambda={original_lambda:.4f}->{self.lambda_threshold:.4f}")
             
             self.samples_since_last_update = 0
             logger.debug(f"KNNDistanceMonitor: Updated reference mean to {self.reference_mean:.4f}, std to {self.reference_std:.4f if self.reference_std is not None else 'None'}")
@@ -1532,8 +1565,8 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
                     adjusted_message = ""
                     if self.reference_std > 0:
                         # Use reference_std to validate if the current thresholds make sense
-                        suggested_delta = self.reference_std * 1.5  # 1.5 std for small variations
-                        suggested_lambda = self.reference_std * 5.0  # 5.0 std for drift threshold
+                        suggested_delta = self.reference_std * self.adaptive_delta_std_multiplier
+                        suggested_lambda = self.reference_std * self.adaptive_lambda_std_multiplier
                         
                         # Log comparison between configured and suggested values
                         logger.info(f"Current delta: {self.delta}, Suggested delta: {suggested_delta}")
@@ -1580,6 +1613,10 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
             'initial_reference_mean': self.initial_reference_mean,
             'initial_reference_std': self.initial_reference_std,
             'reference_stats_path': self.reference_stats_path,
+            'use_adaptive_thresholds': self.use_adaptive_thresholds,
+            'allow_runtime_threshold_adaptation': self.allow_runtime_threshold_adaptation,
+            'adaptive_delta_std_multiplier': self.adaptive_delta_std_multiplier,
+            'adaptive_lambda_std_multiplier': self.adaptive_lambda_std_multiplier,
             'warm_up_values': self.warm_up_values if self.warm_up_values is not None else [],
             'last_distances': self.last_distances,
             'recent_distance_history': list(self.distance_history)[-100:] if self.distance_history else []
@@ -1605,6 +1642,10 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         self.initial_reference_mean = state.get('initial_reference_mean', self.initial_reference_mean)
         self.initial_reference_std = state.get('initial_reference_std', self.initial_reference_std)
         self.reference_stats_path = state.get('reference_stats_path', self.reference_stats_path)
+        self.use_adaptive_thresholds = state.get('use_adaptive_thresholds', self.use_adaptive_thresholds)
+        self.allow_runtime_threshold_adaptation = state.get('allow_runtime_threshold_adaptation', self.allow_runtime_threshold_adaptation)
+        self.adaptive_delta_std_multiplier = state.get('adaptive_delta_std_multiplier', self.adaptive_delta_std_multiplier)
+        self.adaptive_lambda_std_multiplier = state.get('adaptive_lambda_std_multiplier', self.adaptive_lambda_std_multiplier)
         
         warm_up_values = state.get('warm_up_values', [])
         self.warm_up_values = warm_up_values if self.in_warm_up_phase else None
