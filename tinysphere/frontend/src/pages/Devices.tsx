@@ -1,6 +1,7 @@
 // src/pages/Devices.tsx
 import DeviceIcon from '@mui/icons-material/Devices';
 import DownloadIcon from '@mui/icons-material/Download';
+import FilterListIcon from '@mui/icons-material/FilterList';
 import InfoIcon from '@mui/icons-material/Info';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import MemoryIcon from '@mui/icons-material/Memory';
@@ -95,6 +96,9 @@ const DevicesPage: React.FC = () => {
   // Dialog State
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [openDialog, setOpenDialog] = useState<boolean>(false);
+  
+  // Filter visibility state
+  const [filtersVisible, setFiltersVisible] = useState<boolean>(true);
   
   // Automatische Aktualisierung
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
@@ -513,6 +517,15 @@ const DevicesPage: React.FC = () => {
                   {lastUpdated ? `Updated: ${lastUpdated.toLocaleTimeString()}` : ''}
                 </Typography>
               </Tooltip>
+              <Tooltip title={filtersVisible ? "Hide Filters" : "Show Filters"}>
+                <IconButton 
+                  size="small" 
+                  onClick={() => setFiltersVisible(!filtersVisible)}
+                  color={filtersVisible ? "primary" : "default"}
+                >
+                  <FilterListIcon />
+                </IconButton>
+              </Tooltip>
               <Tooltip title="Refresh data">
                 <IconButton size="small" onClick={() => fetchDevicesData()} disabled={loading}>
                   <RefreshIcon />
@@ -532,52 +545,77 @@ const DevicesPage: React.FC = () => {
         >
           <Box sx={{ p: 2 }}>
             {/* Filterleiste */}
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 2 }}>
-              <TextField
-                placeholder="Search devices..."
-                variant="outlined"
-                size="small"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                sx={{ flex: '1 1 250px' }}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon />
-                    </InputAdornment>
-                  ),
-                }}
-              />
+            {filtersVisible && (
+              <Box sx={{ mb: 3 }}>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 1 }}>
+                  <Box sx={{ flex: '1 1 250px', minWidth: '200px' }}>
+                    <TextField
+                      placeholder="Search devices..."
+                      variant="outlined"
+                      size="small"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      fullWidth
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <SearchIcon />
+                          </InputAdornment>
+                        ),
+                      }}
+                    />
+                  </Box>
 
-              <FormControl size="small" sx={{ minWidth: 120 }}>
-                <InputLabel id="status-select-label">Status</InputLabel>
-                <Select
-                  labelId="status-select-label"
-                  value={statusFilter}
-                  label="Status"
-                  onChange={(e: SelectChangeEvent) => setStatusFilter(e.target.value)}
-                >
-                  <MenuItem value="all">All Status</MenuItem>
-                  <MenuItem value="active">Active</MenuItem>
-                  <MenuItem value="inactive">Inactive</MenuItem>
-                </Select>
-              </FormControl>
+                  <Box sx={{ flex: '0 1 150px', minWidth: '120px' }}>
+                    <FormControl size="small" fullWidth>
+                      <InputLabel id="status-select-label">Status</InputLabel>
+                      <Select
+                        labelId="status-select-label"
+                        value={statusFilter}
+                        label="Status"
+                        onChange={(e: SelectChangeEvent) => setStatusFilter(e.target.value)}
+                      >
+                        <MenuItem value="all">All Status</MenuItem>
+                        <MenuItem value="active">Active</MenuItem>
+                        <MenuItem value="inactive">Inactive</MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Box>
 
-              <FormControl size="small" sx={{ minWidth: 150 }}>
-                <InputLabel id="platform-select-label">Platform</InputLabel>
-                <Select
-                  labelId="platform-select-label"
-                  value={platformFilter}
-                  label="Platform"
-                  onChange={(e: SelectChangeEvent) => setPlatformFilter(e.target.value)}
-                >
-                  <MenuItem value="all">All Platforms</MenuItem>
-                  {uniquePlatforms.map(platform => (
-                    <MenuItem key={platform} value={platform}>{platform}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Box>
+                  <Box sx={{ flex: '0 1 180px', minWidth: '150px' }}>
+                    <FormControl size="small" fullWidth>
+                      <InputLabel id="platform-select-label">Platform</InputLabel>
+                      <Select
+                        labelId="platform-select-label"
+                        value={platformFilter}
+                        label="Platform"
+                        onChange={(e: SelectChangeEvent) => setPlatformFilter(e.target.value)}
+                      >
+                        <MenuItem value="all">All Platforms</MenuItem>
+                        {uniquePlatforms.map(platform => (
+                          <MenuItem key={platform} value={platform}>{platform}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Box>
+                </Box>
+                
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => {
+                      setSearchTerm('');
+                      setStatusFilter('all');
+                      setPlatformFilter('all');
+                    }}
+                    disabled={searchTerm === '' && statusFilter === 'all' && platformFilter === 'all'}
+                  >
+                    Reset Filters
+                  </Button>
+                </Box>
+              </Box>
+            )}
 
             {/* Gerätetabelle */}
             <TableContainer>

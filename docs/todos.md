@@ -1,10 +1,16 @@
 # OPL List of Todos
 
-- TODO: Fix Connectivity Trend Chart auf der Homepage. Die active Devices werden nicht mehr richtig angezeigt. -> Methode wie man die richtig bekommt ist in Der device Liste 
 
-- TODO: Device Seite überarbieten. Avg Inference Time, Avg CPU Usage und Avg Memory Usage Status Cards sind nicht nützlich, wenn wir mehre geräte haben. Daher ein Chart erstellen, wo pro device diese metriken im zeitverklauf abgebildet werden. Siehe dazu anlog wie Model Performance chart aufgesetzt wurde
+- TODO: Device Seite überarbieten. Avg Inference Time, Avg CPU Usage und Avg Memory Usage Status Cards sind nicht nützlich, wenn wir mehre geräte haben. Daher ein Chart erstellen, wo pro device diese metriken im zeitverklauf abgebildet werden. Siehe dazu anlog wie Model Performance chart aufgesetzt wurde -.-.> NaN metriken rausfltern, sollen nicht im dropdown sien
 
-- TODO: Device Liste: Package Icon in Actions entfernen
+
+
+
+___
+
+
+- TODO: Platfrom extraktion on device: Wir wollen eher die OS Version haben. Bsp. Raspberry, dort sollte dann stehen PI Zero, PI 5, ... und OS:  bookworm, bullsey, usw, und nicht die vollstöndige, wie aktuell: Linux-6.12.25+rpt-rpi-v7-armv7l-with-glibc2.36
+
 
 - TODO: Aus dem Model Performance Chart die System Metriken entfernen, diese sind Device spezifisch und nicht Model spezifisch
 
@@ -51,4 +57,6 @@
 
 - TODO: Data versioning muss implementiert werden. Data Hub auch um Training Data ergänzen, soll als mein warehouse dienen. Plus dort kann ich Daten von prediction oder drift in den training data hub verschieben. -> Sieh auch TODO zu retraining pipeline, diese baut dann hierauf auf.
 
-- 
+- TODO: Chatbot einbauen, der mir bei Fragen hilft. -> Siehe auch TODO zu Spinx und Quickstart guide. Dort kann ich dann auch die API ansprechen, und mir die Endpoints zeigen lassen.
+
+- TODO : Anziegen der Charts (dateb) für larning --Y PCA verteilung, loss usw. --> Siehe auch TODO zu retraining pipeline, diese baut dann hierauf auf.
