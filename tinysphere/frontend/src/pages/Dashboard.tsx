@@ -243,17 +243,7 @@ const Dashboard: React.FC = () => {
         </SectionCard>
       </Box>
       
-      {/* Drift Detection Row */}
-      <Box sx={{ mb: 3 }}>
-        {/* Recent Drift Events */}
-        <RecentDriftEventsTable
-          title="Recent Drift Events"
-          limit={8}
-          onViewEvent={(eventId) => {
-            navigate(`/drift/${eventId}`);
-          }}
-        />
-      </Box>
+      {/* Removed Recent Drift Events Table */}
     </Box>
   );
 };

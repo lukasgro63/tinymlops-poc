@@ -28,20 +28,17 @@ except ImportError:
     except ImportError:
         TFLITE_RUNTIME_AVAILABLE = False
 
-# Import später, damit wir die Klassen für den manuellen Fall haben
-# Wir werden die Klassen direkt nutzen statt über den TFLiteFeatureExtractor
 from tinylcm.core.classifiers.knn import LightweightKNN
 from tinylcm.utils.file_utils import ensure_directory_exists
 
 # --- KONFIGURATION ---
-# Pfade zu deinen initialen Bilddaten
-# Angepasster Pfad für die tatsächliche Verzeichnisstruktur
-INITIAL_IMAGE_DATA_DIR = Path("examples/assets/initial_states/images")  # Hauptordner für initiale Bilder
+# Pfade zu  initialen Bilddaten
+INITIAL_IMAGE_DATA_DIR = root_dir / "examples/assets/training_images"  # Absoluter Pfad zum Training-Images Ordner
 CLASSES = {"lego": INITIAL_IMAGE_DATA_DIR / "lego", "stone": INITIAL_IMAGE_DATA_DIR / "stone", "negative": INITIAL_IMAGE_DATA_DIR / "negative"}
 
 # Pfad zum TFLite-Modell (das auch im Beispiel verwendet wird)
-MODEL_PATH = "examples/assets/model/model.tflite"  # Relativ zum Skript-Ausführungsort
-LABELS_PATH = "examples/assets/model/labels.txt"  # Relativ zum Skript-Ausführungsort
+MODEL_PATH = str(root_dir / "examples/scenario1_tinylcm_inferencepipeline/model/model.tflite")  # Absoluter Pfad
+LABELS_PATH = str(root_dir / "examples/scenario1_tinylcm_inferencepipeline/model/labels.txt")  # Absoluter Pfad
 
 # Konfiguration für den Feature Extractor
 FEATURE_LAYER_INDEX = -1  # Verwende den Standard-Output-Layer, da das Modell nur einen Layer hat
@@ -54,7 +51,7 @@ KNN_DISTANCE_METRIC = "euclidean"  # Metrik für den Abstandsvergleich
 KNN_USE_NUMPY = True  # Für die Offline-Erstellung können wir NumPy nutzen
 
 # Speicherort für den initialen k-NN Zustand
-OUTPUT_STATE_DIR = Path("examples/assets/initial_states/")
+OUTPUT_STATE_DIR = current_dir  # Das aktuelle Verzeichnis (initial_state)
 OUTPUT_STATE_FILENAME = "knn_initial_state_LSN.json"  # Lego, Stone, Negative
 # --- ENDE KONFIGURATION ---
 

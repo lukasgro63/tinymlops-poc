@@ -482,6 +482,101 @@ class ExtendedSyncClient:
         except Exception as e:
             logger.error(f"Failed to create and send metrics package: {e}")
             return False
+            
+    def create_and_send_operational_logs_package(self, operational_logs_dir: str, session_id: Optional[str] = None) -> bool:
+        """Create and send a package containing raw operational logs (JSONL files).
+        
+        This sends the raw operational log files to TinySphere to be stored in the 'data_logs' bucket.
+        These files contain detailed inference data for each prediction, including KNN debug information.
+
+        Args:
+            operational_logs_dir: Directory containing operational log files
+            session_id: Optional session ID to filter logs (if None, all logs are sent)
+
+        Returns:
+            True if the operation was successful, False otherwise
+        """
+        try:
+            # Ensure the logs directory exists
+            if not os.path.exists(operational_logs_dir):
+                logger.warning(f"Operational logs directory not found: {operational_logs_dir}")
+                return False
+                
+            # Find operational log files in the directory
+            log_files = []
+            for filename in os.listdir(operational_logs_dir):
+                if filename.startswith("operational_log_") and filename.endswith(".jsonl"):
+                    # Filter by session_id if provided
+                    if session_id is None or session_id in filename:
+                        log_files.append(os.path.join(operational_logs_dir, filename))
+            
+            if not log_files:
+                logger.warning(f"No operational log files found in {operational_logs_dir}")
+                return False
+                
+            logger.info(f"Found {len(log_files)} operational log files to send")
+            
+            # Generate a package ID
+            description = f"Raw operational logs from device {self.device_id}"
+            package_id = self.sync_interface.create_package(
+                device_id=self.device_id,
+                package_type="operational_logs",  # Special type for raw operational logs
+                description=description
+            )
+            
+            # Create metadata file with information about the logs
+            temp_dir = tempfile.mkdtemp()
+            metadata = {
+                "device_id": self.device_id,
+                "timestamp": time.time(),
+                "session_id": session_id,
+                "log_files": [os.path.basename(f) for f in log_files],
+                "file_count": len(log_files),
+                "target_bucket": "data-logs"  # Specify target bucket for the transformer
+            }
+            
+            metadata_file_path = os.path.join(temp_dir, "logs_metadata.json")
+            with open(metadata_file_path, 'w') as metadata_file:
+                json.dump(metadata, metadata_file)
+                
+            # Add metadata file to package
+            self.sync_interface.add_file_to_package(
+                package_id=package_id,
+                file_path=metadata_file_path,
+                file_type="metadata"
+            )
+            
+            # Add each log file to the package
+            for log_file in log_files:
+                self.sync_interface.add_file_to_package(
+                    package_id=package_id,
+                    file_path=log_file,
+                    file_type="operational_log"
+                )
+                
+            # Clean up temp directory
+            try:
+                os.remove(metadata_file_path)
+                os.rmdir(temp_dir)
+            except Exception as e:
+                logger.warning(f"Failed to remove temporary metadata files: {e}")
+                
+            # Finalize the package
+            self.sync_interface.finalize_package(package_id)
+            
+            # Send the package
+            result = self.send_package(package_id)
+            
+            if result:
+                logger.info(f"Successfully sent {len(log_files)} operational log files to server")
+            else:
+                logger.error(f"Failed to send operational logs package to server")
+                
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to create and send operational logs package: {e}")
+            return False
     
     def add_prediction_image(self, image_path: str, prediction: str, confidence: float) -> bool:
         """Add a prediction image to the queue for synchronization.

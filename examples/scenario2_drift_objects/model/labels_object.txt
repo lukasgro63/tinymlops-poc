@@ -1,0 +1,4 @@
+0 leaf
+1 lego
+2 negative
+3 stone

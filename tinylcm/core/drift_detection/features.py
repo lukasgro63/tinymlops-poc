@@ -1182,14 +1182,21 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
             if 'prediction' in record and record['prediction'] == 'negative':
                 is_negative_class = True
             
-            # Only consider unknown if:
-            # 1. Distance is high (>250.0 based on logs)
-            # 2. NOT a "negative" class prediction
-            if avg_distance > 250.0 and not is_negative_class:
+            # Much more aggressive unknown object detection for small feature dimensions:
+            # For 4-dimensional feature vectors, the distance calculations are less reliable
+            
+            # Calculate the ratio of current distance to reference distance
+            # This is more meaningful than absolute values when working with scaled distances
+            distance_ratio = avg_distance / max(0.01, self.reference_mean)
+            
+            # Use two detection methods:
+            # 1. Absolute distance threshold (lowered from 250.0 to 25.0 for small dimensions)
+            # 2. Relative distance ratio (more than 3x the reference)
+            if ((avg_distance > 25.0 or distance_ratio > 3.0) and not is_negative_class):
                 is_unknown_object = True
-                logger.warning(f"KNNDistanceMonitor: Possible unknown object detected with high distance: {avg_distance:.2f}")
-            elif avg_distance > 250.0 and is_negative_class:
-                logger.debug(f"High distance ({avg_distance:.2f}) for 'negative' class - not considering as unknown")
+                logger.warning(f"KNNDistanceMonitor: Possible unknown object detected - distance: {avg_distance:.2f}, ratio: {distance_ratio:.2f}")
+            elif (avg_distance > 25.0 or distance_ratio > 3.0) and is_negative_class:
+                logger.debug(f"High distance ({avg_distance:.2f}, ratio: {distance_ratio:.2f}) for 'negative' class - not considering as unknown")
         except Exception as e:
             logger.warning(f"Error in unknown object check: {str(e)}")
         

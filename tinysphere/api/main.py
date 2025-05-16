@@ -93,3 +93,8 @@ app.include_router(prediction_images_router, prefix="/api/prediction-images", ta
 from tinysphere.api.routes.drift_images import router as drift_images_router
 
 app.include_router(drift_images_router, prefix="/api/drift-images", tags=["drift-images"])
+
+# Add operational logs router
+from tinysphere.api.routes.operational_logs import router as operational_logs_router
+
+app.include_router(operational_logs_router, prefix="/api/operational-logs", tags=["operational-logs"])

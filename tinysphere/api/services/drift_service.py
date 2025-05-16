@@ -87,7 +87,7 @@ class DriftService:
                     # This bypasses SQLAlchemy's enum conversion completely
                     sql = """
                     SELECT * FROM drift_events 
-                    WHERE drift_type::text = :drift_type
+                    WHERE LOWER(drift_type::text) = LOWER(:drift_type)
                     """
                     
                     # Add optional device filter
@@ -624,7 +624,7 @@ class DriftService:
                     # This bypasses SQLAlchemy's enum conversion completely
                     sql = """
                     SELECT * FROM drift_events 
-                    WHERE drift_type::text = :drift_type
+                    WHERE LOWER(drift_type::text) = LOWER(:drift_type)
                     """
                     
                     # Add optional device filter
@@ -678,7 +678,7 @@ class DriftService:
             for drift_type_name in drift_types_to_check:
                 try:
                     # Build query for this specific drift type
-                    count_sql = f"SELECT COUNT(*) FROM drift_events WHERE drift_type::text = '{drift_type_name}'"
+                    count_sql = f"SELECT COUNT(*) FROM drift_events WHERE LOWER(drift_type::text) = LOWER('{drift_type_name}')"
                     
                     # Add device filter if needed
                     if device_id:

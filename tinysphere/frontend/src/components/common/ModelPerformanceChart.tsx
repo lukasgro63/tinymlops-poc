@@ -219,6 +219,17 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
       setSelectedMetric(externalSelectedMetric);
     }
   }, [externalSelectedMetric]);
+  
+  // Auto-select first available metric when availableMetrics changes and no metric is selected
+  useEffect(() => {
+    if (availableMetrics.length > 0 && (!selectedMetric || selectedMetric === 'accuracy')) {
+      console.log(`Auto-selecting first available metric: ${availableMetrics[0]}`);
+      setSelectedMetric(availableMetrics[0]);
+      if (onMetricChange) {
+        onMetricChange(availableMetrics[0]);
+      }
+    }
+  }, [availableMetrics, selectedMetric, onMetricChange]);
 
   const fetchPerformanceData = async () => {
     if (!isModelListMode) return;

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-TinyLCM Autonomous Monitoring Example (Scenario 1)
+TinyLCM Autonomous Monitoring Example (Scenario 2)
 --------------------------------------------------
 This example demonstrates autonomous drift monitoring using the InferencePipeline
 from the tinylcm library. It captures frames from a camera, processes them through 
-the TinyLCM pipeline, and monitors for drift using PageHinkleyFeatureMonitor.
+the TinyLCM pipeline, and monitors for drift for a 5-class model using KNNDistanceMonitor.
 
 This is designed for a headless Raspberry Pi Zero 2W.
 """
@@ -50,6 +50,8 @@ from tinylcm.core.drift_detection.features import PageHinkleyFeatureMonitor, Fea
 from tinylcm.core.drift_detection.confidence import EWMAConfidenceMonitor, PageHinkleyConfidenceMonitor
 # Import tinylcm components
 from tinylcm.core.feature_extractors.tflite import TFLiteFeatureExtractor
+from tinylcm.core.feature_transformers.pca import PCATransformer
+from tinylcm.core.feature_transformers.standard_scaler_pca import StandardScalerPCATransformer
 from tinylcm.core.operational_monitor.monitor import OperationalMonitor
 from tinylcm.core.pipeline import InferencePipeline
 from tinylcm.utils.logging import setup_logger
@@ -60,6 +62,7 @@ running = True
 current_frame = None
 config = None
 sync_client = None
+feature_transformer = None  # Added global variable for feature transformer
 
 
 def load_config(config_path: str) -> Dict:
@@ -86,7 +89,7 @@ def setup_logging(log_level: str = "INFO") -> None:
     logs_dir.mkdir(exist_ok=True)
     
     # Set up logging
-    log_file = logs_dir / f"tinylcm_scenario1_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log_file = logs_dir / f"tinylcm_scenario2_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     
     logging.basicConfig(
         level=numeric_level,
@@ -97,7 +100,7 @@ def setup_logging(log_level: str = "INFO") -> None:
         ]
     )
     
-    logger = logging.getLogger("tinylcm_scenario1")
+    logger = logging.getLogger("tinylcm_scenario2")
     logger.info(f"Logging initialized at level {log_level}")
 
 
@@ -492,12 +495,60 @@ def process_labels(labels_path: str) -> List[str]:
     return labels
 
 
+def apply_feature_transformation(features: np.ndarray) -> np.ndarray:
+    """Apply feature transformation (like PCA) to extracted features.
+    
+    Args:
+        features: Raw features extracted from the model
+        
+    Returns:
+        Transformed features with potentially reduced dimensionality
+    """
+    global feature_transformer
+    
+    if feature_transformer is None:
+        logger.warning("Feature transformer not initialized, returning original features")
+        return features
+    
+    try:
+        # Log the transformer type for debugging
+        transformer_type = type(feature_transformer).__name__
+            
+        # Apply transformation
+        transformed_features = feature_transformer.transform(features)
+        
+        # Log occasional debug information
+        if hasattr(apply_feature_transformation, 'call_count'):
+            apply_feature_transformation.call_count += 1
+        else:
+            apply_feature_transformation.call_count = 1
+            
+        # Log every 100th transformation for regular monitoring
+        if apply_feature_transformation.call_count % 100 == 0:
+            logger.info(f"Feature transformation ({transformer_type}): input shape: {features.shape}, output shape: {transformed_features.shape}")
+        
+        # Log the first few transformations in more detail to verify correct operation
+        if apply_feature_transformation.call_count <= 5:
+            logger.info(f"Initial transformation ({transformer_type}) - Details:")
+            logger.info(f"  Input shape: {features.shape}")
+            logger.info(f"  Output shape: {transformed_features.shape}")
+            logger.info(f"  Input range: [{np.min(features):.4f}, {np.max(features):.4f}]")
+            logger.info(f"  Output range: [{np.min(transformed_features):.4f}, {np.max(transformed_features):.4f}]")
+            
+        return transformed_features
+    
+    except Exception as e:
+        logger.error(f"Error applying feature transformation: {e}")
+        # Return original features on error
+        return features
+
+
 def main():
     """Main function for the example application."""
-    global running, current_frame, config, sync_client
+    global running, current_frame, config, sync_client, feature_transformer
     
-    parser = argparse.ArgumentParser(description="TinyLCM Autonomous Monitoring Example (Scenario 1)")
-    parser.add_argument("--config", type=str, default="config_scenario1.json",
+    parser = argparse.ArgumentParser(description="TinyLCM Autonomous Monitoring Example (Scenario 2)")
+    parser.add_argument("--config", type=str, default="config_scenario2.json",
                         help="Path to the configuration file")
     args = parser.parse_args()
     
@@ -565,6 +616,28 @@ def main():
             preprocessors=[preprocess_image]
         )
         
+        # Initialize feature transformer if enabled in config
+        if "feature_transformation" in tinylcm_config and tinylcm_config["feature_transformation"].get("enabled", False):
+            transform_config = tinylcm_config["feature_transformation"]
+            
+            if transform_config["type"] == "PCA":
+                logger.info(f"Initializing PCA transformer with model: {transform_config['model_path']}")
+                feature_transformer = PCATransformer(
+                    model_path=transform_config["model_path"],
+                    n_components=transform_config.get("n_components", 50)
+                )
+                logger.info(f"PCA transformer initialized, will reduce features to {transform_config.get('n_components', 50)} dimensions")
+            elif transform_config["type"] == "StandardScalerPCA":
+                logger.info(f"Initializing StandardScalerPCA transformer with processor: {transform_config['model_path']}")
+                feature_transformer = StandardScalerPCATransformer(
+                    processor_path=transform_config["model_path"]
+                )
+                logger.info(f"StandardScalerPCA transformer initialized, applying standardization and PCA transformation")
+            else:
+                logger.warning(f"Unknown feature transformation type: {transform_config['type']}")
+        else:
+            logger.info("Feature transformation not enabled in config")
+        
         # Initialize lightweight KNN
         knn_config = tinylcm_config["adaptive_classifier"]
         classifier = LightweightKNN(
@@ -630,8 +703,13 @@ def main():
             # Create a small test image for feature extraction
             test_image = np.zeros((224, 224, 3), dtype=np.uint8)
             features = feature_extractor.extract_features(test_image)
+            
+            # Apply feature transformation if available
+            if feature_transformer is not None:
+                features = feature_transformer.transform(features)
+                
             feature_dimension = features.shape[0] if features.ndim == 1 else features.shape[1]
-            logger.info(f"Feature extractor output dimension: {feature_dimension}")
+            logger.info(f"Feature dimension after transformation: {feature_dimension}")
 
             # Generate some initial samples for classifier
             initial_features = np.random.randn(len(labels), feature_dimension)
@@ -901,7 +979,7 @@ def main():
             running = False
         
         # Main inference loop
-        logger.info("Starting main inference loop")
+        logger.info("Starting main inference loop for Scenario 2")
         frame_count = 0
         start_time = time.time()
         inference_interval = config["application"]["inference_interval_ms"] / 1000.0
@@ -932,18 +1010,24 @@ def main():
             # Create sample ID
             sample_id = f"{device_id}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
 
-            # Process the frame directly with TinyLCM pipeline
-            # The pipeline will use the preprocessor function to convert BGR to RGB
-
             # Add direct debugging of confidence value computation
             timestamp = time.time()
 
             # Extract features manually to verify they're correct
             if frame_count % 20 == 0:  # Only do this occasionally to avoid log spam
                 try:
+                    # Extract raw features
                     test_features = feature_extractor.extract_features(resized_frame)
                     logger.info(f"MANUAL DEBUG: Raw features shape = {test_features.shape}")
                     logger.info(f"MANUAL DEBUG: Raw features sample = {test_features[:3]}")
+                    
+                    # Apply PCA transformation if available
+                    if feature_transformer is not None:
+                        transformed_features = feature_transformer.transform(test_features)
+                        logger.info(f"MANUAL DEBUG: Transformed features shape = {transformed_features.shape}")
+                        logger.info(f"MANUAL DEBUG: Transformed features sample = {transformed_features[:3]}")
+                        # Use the transformed features for prediction
+                        test_features = transformed_features
 
                     # Test direct prediction and confidence calculation
                     logger.info("MANUAL DEBUG: About to call classifier.predict_proba directly")
@@ -952,14 +1036,46 @@ def main():
                 except Exception as e:
                     logger.error(f"MANUAL DEBUG: Error in direct feature extraction or prediction: {str(e)}")
 
-            # Proceed with normal pipeline processing
-            result = pipeline.process(
-                input_data=resized_frame,
-                label=None,  # No ground truth label available
-                sample_id=sample_id,
-                timestamp=timestamp,
-                extract_features=True  # Tell the pipeline to extract features from the input
-            )
+            # Modified process function to intercept and transform features
+            def feature_interceptor(input_data, extract_features=True):
+                """Intercept feature extraction to apply PCA transformation."""
+                if extract_features:
+                    # Extract features using the feature extractor
+                    features = feature_extractor.extract_features(input_data)
+                    
+                    # Apply feature transformation if available
+                    if feature_transformer is not None:
+                        features = feature_transformer.transform(features)
+                    
+                    return features
+                else:
+                    # Input is already features
+                    return input_data
+
+            # Proceed with normal pipeline processing but use our custom feature extraction
+            # Rather than modifying the pipeline directly, we'll extract features manually
+            # and pass them to the pipeline with extract_features=False
+            
+            # Extract and transform features
+            try:
+                # Extract features
+                features = feature_extractor.extract_features(resized_frame)
+                
+                # Apply feature transformation if available
+                if feature_transformer is not None:
+                    features = feature_transformer.transform(features)
+                
+                # Use the processed features directly in the pipeline
+                result = pipeline.process(
+                    input_data=features,  # Pass the transformed features instead of raw image
+                    label=None,  # No ground truth label available
+                    sample_id=sample_id,
+                    timestamp=timestamp,
+                    extract_features=False  # Tell pipeline not to extract features again
+                )
+            except Exception as e:
+                logger.error(f"Error processing frame: {e}")
+                result = None
 
             # Filter out "negative" class predictions for display if desired
             if result and result.get("prediction") == "negative":
@@ -980,8 +1096,8 @@ def main():
                 if probabilities is not None:
                     logger.info(f"MAIN DEBUG: Raw probabilities: {probabilities}")
 
-                # Process lego and stone predictions with high confidence, ignore negative class
-                if prediction in ["lego", "stone"] and confidence >= confidence_threshold:
+                # Process positive class predictions with high confidence, ignore negative class
+                if prediction not in ["negative"] and confidence >= confidence_threshold:
                     # Log more details for better analysis
                     if frame_count % 10 == 0:  # Log every 10th frame to avoid flooding
                         logger.info(f"Frame {frame_count}: Prediction={prediction}, Confidence={confidence:.4f}")
@@ -990,7 +1106,7 @@ def main():
                             feature_sample = features[:5]
                             logger.info(f"Feature sample: {feature_sample}")
 
-                    # Save LEGO brick predictions for validation
+                    # Save Object predictions for validation
                     image_path = None
                     try:
                         # Create directory for prediction images if it doesn't exist
@@ -1007,7 +1123,7 @@ def main():
 
                         # Only log occasionally to avoid flooding logs
                         if frame_count % 10 == 0:
-                            logger.info(f"Saved {prediction} image to {image_path}")
+                            logger.info(f"Saved positive class {prediction} image to {image_path}")
 
                         # Add image to sync client if enabled
                         if config["tinylcm"]["features"].get("save_prediction_images", False) and sync_client and sync_client.enable_prediction_images:
@@ -1044,6 +1160,32 @@ def main():
                 # and the detector is not in cooldown, it will automatically call our registered
                 # callbacks through its _notify_callbacks mechanism.
                 drift_results = pipeline.check_autonomous_drifts()
+                
+                # Always log drift check result to operational logs, regardless of detection outcome
+                if operational_monitor:
+                    drift_check_id = f"drift_check_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+                    drift_detected = any(r.get("drift_detected", False) for r in drift_results) if drift_results else False
+                    
+                    # Create metadata with drift check results
+                    check_metadata = {
+                        "drift_detected": drift_detected,
+                        "check_timestamp": time.time(),
+                        "frame_count": frame_count,
+                        "results_count": len(drift_results) if drift_results else 0,
+                        "drift_details": drift_results if drift_results else []
+                    }
+                    
+                    # Record drift check operation in operational logs
+                    operational_monitor.track_operation(
+                        operation_id=drift_check_id,
+                        operation_type="drift_check",
+                        result=str(drift_detected),
+                        success=True,
+                        metadata=check_metadata,
+                        timestamp=time.time()
+                    )
+                    logger.info(f"Drift check recorded in operational logs with ID: {drift_check_id}, drift_detected={drift_detected}")
+                
                 if drift_results:
                     # Just log information about the drift results
                     drift_count = 0

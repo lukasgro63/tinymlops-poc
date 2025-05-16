@@ -59,8 +59,11 @@ echo -e "\n${YELLOW}[3/4] Installing Python requirements...${NC}"
 
 # Create requirements.txt file
 cat > "$BASE_DIR/requirements.txt" <<EOL
-
+pillow>=8.0.0
+requests>=2.25.0
 psutil>=5.8.0
+scikit-learn>=1.0.0
+scipy>=1.9.0
 EOL
 
 # Install Python requirements with --break-system-packages flag

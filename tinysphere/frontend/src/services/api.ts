@@ -17,6 +17,8 @@ import {
   Notification,
   NotificationCount,
   NotificationResponse,
+  OperationalLog,
+  OperationalLogResponse,
   Package,
   PackageActivity,
   PackageTimelineData,
@@ -220,7 +222,9 @@ export const getPredictionImages = async (
   date?: string,
   limit: number = 100,
   offset: number = 0,
-  sortOrder?: 'asc' | 'desc'
+  sortOrder?: 'asc' | 'desc',
+  startDate?: string,
+  endDate?: string
 ): Promise<PredictionImagesResponse> => {
   let url = `${API_BASE_URL}/prediction-images/list?limit=${limit}&offset=${offset}`;
 
@@ -228,6 +232,8 @@ export const getPredictionImages = async (
   if (predictionType) url += `&prediction_type=${predictionType}`;
   if (date) url += `&date=${date}`;
   if (sortOrder) url += `&sort_order=${sortOrder}`;
+  if (startDate) url += `&start_date=${startDate}`;
+  if (endDate) url += `&end_date=${endDate}`;
 
   const response = await axios.get<PredictionImagesResponse>(url);
   
@@ -398,7 +404,9 @@ export const getDriftImages = async (
   date?: string,
   limit: number = 100,
   offset: number = 0,
-  sortOrder?: 'asc' | 'desc'
+  sortOrder?: 'asc' | 'desc',
+  startDate?: string,
+  endDate?: string
 ): Promise<DriftImagesResponse> => {
   let url = `${API_BASE_URL}/drift-images/list?limit=${limit}&offset=${offset}`;
 
@@ -406,6 +414,8 @@ export const getDriftImages = async (
   if (driftType) url += `&drift_type=${driftType}`;
   if (date) url += `&date=${date}`;
   if (sortOrder) url += `&sort_order=${sortOrder}`;
+  if (startDate) url += `&start_date=${startDate}`;
+  if (endDate) url += `&end_date=${endDate}`;
 
   const response = await axios.get<DriftImagesResponse>(url);
   
@@ -433,5 +443,57 @@ export const getDriftImageUrl = async (imageKey: string): Promise<ImageUrlRespon
   const response = await axios.get<ImageUrlResponse>(
     `${API_BASE_URL}/drift-images/url/${encodeURIComponent(imageKey)}`
   );
+  return response.data;
+};
+
+// Operational Logs API methods
+export const getOperationalLogDevices = async (): Promise<string[]> => {
+  const response = await axios.get<string[]>(`${API_BASE_URL}/operational-logs/devices`);
+  return response.data;
+};
+
+export const getOperationalLogTypes = async (deviceId: string): Promise<string[]> => {
+  const response = await axios.get<string[]>(
+    `${API_BASE_URL}/operational-logs/devices/${deviceId}/types`
+  );
+  return response.data;
+};
+
+export const getOperationalLogs = async (
+  deviceId?: string,
+  logType?: string,
+  limit: number = 100,
+  offset: number = 0,
+  sortOrder?: 'asc' | 'desc',
+  startDate?: string,
+  endDate?: string
+): Promise<OperationalLogResponse> => {
+  let url = `${API_BASE_URL}/operational-logs/list?limit=${limit}&offset=${offset}`;
+
+  if (deviceId) url += `&device_id=${deviceId}`;
+  if (logType) url += `&log_type=${logType}`;
+  if (sortOrder) url += `&sort_order=${sortOrder}`;
+  if (startDate) url += `&start_date=${startDate}`;
+  if (endDate) url += `&end_date=${endDate}`;
+
+  const response = await axios.get<OperationalLogResponse>(url);
+  
+  // Client-seitige Sortierung, falls das Backend die Sortierung nicht unterstützt
+  if (sortOrder && response.data.logs.length > 0) {
+    const sortedLogs = [...response.data.logs].sort((a, b) => {
+      const dateA = new Date(a.last_modified).getTime();
+      const dateB = new Date(b.last_modified).getTime();
+      
+      return sortOrder === 'desc' 
+        ? dateB - dateA  // Newest first (desc)
+        : dateA - dateB; // Oldest first (asc)
+    });
+    
+    return {
+      ...response.data,
+      logs: sortedLogs
+    };
+  }
+  
   return response.data;
 };

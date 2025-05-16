@@ -16,8 +16,16 @@ class LogsTransformer(DataTransformer):
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
     
     def can_transform(self, package_type: str, files: List[Path]) -> bool:
-        # Unterstützte Pakettypen
-        if package_type.lower() not in ["logs", "data_log", "components"]:
+        # Unterstützte Pakettypen, explizit 'operational_logs' ausschließen
+        package_type_lower = package_type.lower()
+        if package_type_lower not in ["logs", "data_log", "components"] or package_type_lower == "operational_logs":
+            self.logger.info(f"Package type '{package_type}' is not supported or is 'operational_logs', rejecting")
+            return False
+        
+        # Prüfen, ob operational log Dateien vorhanden sind - diese sollen vom OperationalLogsTransformer verarbeitet werden
+        operational_log_files = [f for f in files if f.name.lower().startswith("operational_log_")]
+        if operational_log_files:
+            self.logger.info(f"Package contains operational log files which should be handled by OperationalLogsTransformer, rejecting: {[f.name for f in operational_log_files]}")
             return False
         
         # Erweiterte Suche nach Log-Dateien mit verschiedenen Namensmustern
@@ -27,6 +35,10 @@ class LogsTransformer(DataTransformer):
         for file in files:
             # Nach Dateien mit unterstützten Endungen suchen
             if any(file.suffix.lower() == ext for ext in log_extensions):
+                # Operational logs explizit ausschließen (doppelte Sicherheit)
+                if "operational_log" in file.name.lower():
+                    continue
+                    
                 # Für JSONL-Dateien spezielle Regeln anwenden
                 if file.suffix.lower() == '.jsonl':
                     # Standard-Logdateien akzeptieren
@@ -50,6 +62,8 @@ class LogsTransformer(DataTransformer):
         # Log-Dateien gefunden
         if has_log_files:
             self.logger.info(f"Found log files in package with type '{package_type}': {[f.name for f in log_files]}")
+        else:
+            self.logger.info(f"No supported log files found in package with type '{package_type}'")
         
         return has_log_files
     

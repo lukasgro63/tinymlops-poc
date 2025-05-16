@@ -48,9 +48,7 @@ ENV/
 *.swo
 
 # Data files
-*.csv
 *.h5
-*.pkl
 *.npy
 *.npz
 data/
@@ -61,7 +59,6 @@ data/
 
 # TinyLCM specific
 tinylcm_data/
-**/models/*
 # Allow model and label files in example/models
 !example/models/
 !example/models/*.tflite
@@ -87,6 +84,8 @@ CLAUDE.md
 **/CLAUDE.local.md
 ./claude
 # Ignore images folder
-**/images/
+**/training_images/
 # But keep specific images that should be tracked
 !examples/assets/images/README.md
+
+
