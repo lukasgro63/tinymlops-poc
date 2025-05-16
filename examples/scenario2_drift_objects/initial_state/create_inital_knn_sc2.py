@@ -62,6 +62,7 @@ KNN_USE_NUMPY = True  # Für die Offline-Erstellung können wir NumPy nutzen
 # Speicherort für den initialen k-NN Zustand
 OUTPUT_STATE_DIR = current_dir  # Das aktuelle Verzeichnis (initial_state)
 OUTPUT_STATE_FILENAME = "knn_initial_state_objects.json"  # Aktualisiert für Objects-Scenario
+OUTPUT_REFERENCE_STATS_FILENAME = "knn_reference_stats.json"  # Datei für die Referenzstatistiken
 # --- ENDE KONFIGURATION ---
 
 def preprocess_image_for_feature_extraction(image_path: Path, target_size: tuple) -> np.ndarray:
@@ -212,6 +213,96 @@ def extract_features_manually(image, interpreter, input_details, output_details,
             print("Verwende die ursprünglichen Features")
     
     return feature_tensor
+
+def calculate_knn_distance_statistics(knn_instance, all_features, all_labels):
+    """Berechne Statistiken über KNN-Distanzen für den KNNDistanceMonitor.
+    
+    Args:
+        knn_instance: Eine trainierte LightweightKNN Instanz
+        all_features: Liste von Feature-Vektoren
+        all_labels: Liste von Labels für die Feature-Vektoren
+        
+    Returns:
+        Dictionary mit Statistiken (mean, std, etc.)
+    """
+    print("Berechne KNN-Distanz-Statistiken für initiale Referenz...")
+    
+    # Stelle sicher, dass KNN bereits Samples enthält
+    if len(knn_instance.X_train) == 0:
+        print("FEHLER: KNN ist leer, kann keine Distanzen berechnen")
+        return {}
+    
+    # Für jedes Feature in all_features, berechne die Distanzen zu den k nächsten Nachbarn
+    all_avg_distances = []
+    
+    # Gruppiere Features nach Label für bessere Analyse
+    avg_distances_by_class = {}
+    
+    print(f"Berechne Distanzen für {len(all_features)} Samples...")
+    
+    for i, (feature, label) in enumerate(zip(all_features, all_labels)):
+        # Verwende die interne _find_neighbors Methode, um Nachbarn und Distanzen zu finden
+        indices, distances = knn_instance._find_neighbors(feature, k=knn_instance.k)
+        
+        # Berechne durchschnittliche Distanz
+        if len(distances) > 0:
+            avg_distance = sum(distances) / len(distances)
+            all_avg_distances.append(avg_distance)
+            
+            # Füge zur klassenspezifischen Statistik hinzu
+            if label not in avg_distances_by_class:
+                avg_distances_by_class[label] = []
+            avg_distances_by_class[label].append(avg_distance)
+            
+            # Log gelegentlich den Fortschritt
+            if i % 50 == 0:
+                print(f"  Fortschritt: {i}/{len(all_features)} Samples verarbeitet")
+                print(f"  Beispiel: Label={label}, Distanzen={distances}, Durchschnitt={avg_distance:.4f}")
+    
+    # Berechne globale Statistiken
+    if len(all_avg_distances) > 0:
+        mean_distance = np.mean(all_avg_distances)
+        std_distance = np.std(all_avg_distances)
+        min_distance = np.min(all_avg_distances)
+        max_distance = np.max(all_avg_distances)
+        
+        print(f"Globale KNN-Distanz-Statistiken:")
+        print(f"  Mean: {mean_distance:.4f}")
+        print(f"  Std: {std_distance:.4f}")
+        print(f"  Min: {min_distance:.4f}")
+        print(f"  Max: {max_distance:.4f}")
+        
+        # Berechne klassenspezifische Statistiken
+        class_stats = {}
+        for label, distances in avg_distances_by_class.items():
+            class_mean = np.mean(distances)
+            class_std = np.std(distances)
+            
+            class_stats[label] = {
+                'mean': float(class_mean),
+                'std': float(class_std),
+                'min': float(np.min(distances)),
+                'max': float(np.max(distances)),
+                'count': len(distances)
+            }
+            
+            print(f"Klasse {label}: Mean={class_mean:.4f}, Std={class_std:.4f}, Count={len(distances)}")
+        
+        # Erstelle Statistik-Dictionary
+        statistics = {
+            'reference_mean': float(mean_distance),
+            'reference_std': float(std_distance),
+            'min_distance': float(min_distance),
+            'max_distance': float(max_distance),
+            'sample_count': len(all_avg_distances),
+            'class_statistics': class_stats,
+            'generation_timestamp': datetime.now().isoformat()
+        }
+        
+        return statistics
+    else:
+        print("WARNUNG: Keine Distanzen berechnet!")
+        return {}
 
 def main():
     print("Erstelle initialen k-NN Zustand für Scenario 2...")
@@ -445,6 +536,60 @@ def main():
         print(f"Initialer k-NN Zustand erfolgreich gespeichert in: {output_file_path}")
     except Exception as e:
         print(f"FEHLER beim Speichern des k-NN Zustands: {e}")
+    
+    # 5. Berechne und speichere Referenzstatistiken für KNNDistanceMonitor
+    print("\nBerechne Referenzstatistiken für KNNDistanceMonitor...")
+    
+    # Verwende balanced_features_np und balanced_labels für eine ausgewogene Repräsentation
+    reference_stats = calculate_knn_distance_statistics(knn, balanced_features_np, balanced_labels)
+    
+    if reference_stats:
+        # Füge Metadaten hinzu
+        reference_stats.update({
+            "description": f"Reference statistics for KNNDistanceMonitor based on {len(balanced_features_np)} balanced samples",
+            "model_path": MODEL_PATH,
+            "knn_k": KNN_K,
+            "feature_dimension": actual_feature_dimension,
+            "classes": list(set(balanced_labels))
+        })
+        
+        # Speichere die Referenzstatistiken
+        reference_stats_path = OUTPUT_STATE_DIR / OUTPUT_REFERENCE_STATS_FILENAME
+        try:
+            with open(reference_stats_path, 'w') as f:
+                json.dump(reference_stats, f, indent=4)
+            print(f"Referenzstatistiken erfolgreich gespeichert in: {reference_stats_path}")
+            
+            # Gib Empfehlung für die Konfiguration
+            reference_mean = reference_stats['reference_mean']
+            # Empfehle einen guten Delta-Wert basierend auf den Klassendistanzen
+            suggested_delta = reference_stats['reference_std'] * 0.5
+            suggested_lambda = reference_stats['reference_std'] * 5.0
+            
+            print("\nEmpfohlene KNNDistanceMonitor-Konfiguration basierend auf den Statistiken:")
+            print(f'''
+    "drift_detectors": [
+      {{
+        "type": "KNNDistanceMonitor",
+        "delta": {suggested_delta:.2f},
+        "lambda_threshold": {suggested_lambda:.2f},
+        "exit_threshold_factor": 0.7,
+        "high_confidence_threshold": 0.9,
+        "stable_known_classes": {list(CLASSES.keys())},
+        "reference_stats_path": "{OUTPUT_REFERENCE_STATS_FILENAME}",
+        "warm_up_samples": 5,
+        "reference_update_interval": 100,
+        "reference_update_factor": 0.05,
+        "pause_reference_update_during_drift": true,
+        "drift_cooldown_period": 30
+      }}
+    ]
+            ''')
+            
+        except Exception as e:
+            print(f"FEHLER beim Speichern der Referenzstatistiken: {e}")
+    else:
+        print("Keine Referenzstatistiken berechnet oder gespeichert")
 
 if __name__ == "__main__":
     main()

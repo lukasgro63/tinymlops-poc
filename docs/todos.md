@@ -1,7 +1,5 @@
 # OPL List of Todos
 
-- TODO: Testen von der Driftzurücksetzung des KNNDistanceMonitor
-
 - TODO: Fix Connectivity Trend Chart auf der Homepage. Die active Devices werden nicht mehr richtig angezeigt. -> Methode wie man die richtig bekommt ist in Der device Liste 
 
 - TODO: Device Seite überarbieten. Avg Inference Time, Avg CPU Usage und Avg Memory Usage Status Cards sind nicht nützlich, wenn wir mehre geräte haben. Daher ein Chart erstellen, wo pro device diese metriken im zeitverklauf abgebildet werden. Siehe dazu anlog wie Model Performance chart aufgesetzt wurde

@@ -836,7 +836,8 @@ def main():
                     reference_update_interval=detector_config.get("reference_update_interval", 50),
                     reference_update_factor=detector_config.get("reference_update_factor", 0.05),
                     pause_reference_update_during_drift=detector_config.get("pause_reference_update_during_drift", True),
-                    drift_cooldown_period=detector_config.get("drift_cooldown_period", 30)
+                    drift_cooldown_period=detector_config.get("drift_cooldown_period", 30),
+                    reference_stats_path=detector_config.get("reference_stats_path", None)
                 )
                 
                 # Register drift callback
@@ -844,7 +845,13 @@ def main():
                 
                 # Add to detector list
                 drift_detectors.append(knn_distance_monitor)
-                logger.info(f"Initialized KNNDistanceMonitor to detect neighbor distance changes")
+                
+                # Log information about the initialized detector
+                reference_info = ""
+                if detector_config.get("reference_stats_path"):
+                    reference_info = f" using reference statistics from {detector_config.get('reference_stats_path')}"
+                    
+                logger.info(f"Initialized KNNDistanceMonitor to detect neighbor distance changes{reference_info}")
 
             else:
                 logger.warning(f"Unknown drift detector type: {detector_config_type}")

@@ -250,6 +250,15 @@ class FeatureMonitor(AutonomousDriftDetector):
                 self.reference_update_factor * np.array(window_mean) + 
                 (1 - self.reference_update_factor) * self.reference_mean
             )
+            
+            # Also update reference standard deviation if possible
+            window_std = window_statistics.get('std')
+            if window_std is not None and self.reference_std is not None:
+                # Update reference_std with a similar formula to smooth changes
+                self.reference_std = (
+                    self.reference_update_factor * np.array(window_std) + 
+                    (1 - self.reference_update_factor) * self.reference_std
+                )
         else:
             # Update each feature dimension
             if isinstance(window_mean, list) and isinstance(self.reference_mean, list):
@@ -258,6 +267,15 @@ class FeatureMonitor(AutonomousDriftDetector):
                         self.reference_update_factor * window_mean[i] +
                         (1 - self.reference_update_factor) * self.reference_mean[i]
                     )
+                    
+                # Update reference_std if available
+                window_std = window_statistics.get('std')
+                if isinstance(window_std, list) and isinstance(self.reference_std, list):
+                    for i in range(min(len(window_std), len(self.reference_std))):
+                        self.reference_std[i] = (
+                            self.reference_update_factor * window_std[i] +
+                            (1 - self.reference_update_factor) * self.reference_std[i]
+                        )
         
         # Update control limits based on new reference
         distances = []
@@ -1045,17 +1063,27 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         reference_update_factor: float = 0.05,
         pause_reference_update_during_drift: bool = True,
         drift_cooldown_period: int = 30,
+        initial_reference_mean: float = None,
+        initial_reference_std: float = None,
+        reference_stats_path: str = None,
+        use_adaptive_thresholds: bool = False,
     ):
         """Initialize the KNN distance monitor.
         
         Args:
             delta: Magnitude parameter to allow for small fluctuations (δ)
             lambda_threshold: Threshold for drift detection (λ)
+            exit_threshold_factor: Factor to multiply lambda_threshold when determining threshold for exiting drift state
+            high_confidence_threshold: Confidence threshold for identifying stable predictions
+            stable_known_classes: List of class names considered stable (to skip/reset drift detection when predicted with high confidence)
             warm_up_samples: Number of samples to collect during warm-up
             reference_update_interval: Number of samples between reference updates
             reference_update_factor: Factor for updating reference (β)
             pause_reference_update_during_drift: Whether to pause updating during detected drift
             drift_cooldown_period: Number of samples to wait before triggering another drift event
+            initial_reference_mean: Pre-computed reference mean to use instead of warm-up calculation
+            initial_reference_std: Pre-computed reference standard deviation (currently unused)
+            reference_stats_path: Path to JSON file containing pre-computed reference statistics
         """
         super().__init__(
             warm_up_samples=warm_up_samples,
@@ -1070,9 +1098,16 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         self.exit_threshold_factor = exit_threshold_factor
         self.high_confidence_threshold = high_confidence_threshold
         self.stable_known_classes = stable_known_classes or []
+        self.use_adaptive_thresholds = use_adaptive_thresholds
+        
+        # Store pre-computed reference statistics values
+        self.initial_reference_mean = initial_reference_mean
+        self.initial_reference_std = initial_reference_std
+        self.reference_stats_path = reference_stats_path
         
         # PH statistics
         self.reference_mean = None  # μ_ref
+        self.reference_std = None   # σ_ref (for adaptive thresholds)
         self.cumulative_sum = 0.0   # m_t
         self.minimum_sum = 0.0      # M_t
         
@@ -1082,12 +1117,29 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         from collections import deque
         self.distance_history = deque(maxlen=max(500, warm_up_samples * 5))
         
-        # Warm-up data
-        self.warm_up_values = [] if self.in_warm_up_phase else None
+        # Initialize reference_mean from pre-computed statistics if provided
+        if self.initial_reference_mean is not None:
+            # Skip warm-up and use the pre-computed reference mean
+            self.reference_mean = self.initial_reference_mean
+            self.in_warm_up_phase = False
+            self.warm_up_values = None
+            logger.info(f"Using pre-computed reference mean: {self.reference_mean}")
+        elif self.reference_stats_path:
+            # Try to load reference statistics from file
+            try:
+                self._load_reference_statistics()
+            except Exception as e:
+                logger.warning(f"Failed to load reference statistics from {self.reference_stats_path}: {e}")
+                # Fall back to warm-up
+                self.warm_up_values = [] if self.in_warm_up_phase else None
+        else:
+            # Use regular warm-up
+            self.warm_up_values = [] if self.in_warm_up_phase else None
         
         logger.debug(
             f"Initialized KNNDistanceMonitor with lambda_threshold={lambda_threshold}, "
-            f"delta={delta}, warm_up_samples={warm_up_samples}"
+            f"delta={delta}, warm_up_samples={warm_up_samples}, "
+            f"use_precomputed_stats={self.reference_mean is not None}"
         )
     
     def update(self, record: Dict[str, Any]) -> Tuple[bool, Optional[Dict[str, Any]]]:
@@ -1161,7 +1213,16 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         elif self.reference_mean is None and not self.in_warm_up_phase:
             # Initialize reference after warm-up
             self.reference_mean = np.mean(self.warm_up_values) if len(self.warm_up_values) > 0 else avg_distance
-            logger.info(f"KNNDistanceMonitor: Initialized reference mean to {self.reference_mean:.4f}")
+            
+            # Also calculate standard deviation if we have enough warm-up values
+            if len(self.warm_up_values) > 1:
+                self.reference_std = np.std(self.warm_up_values)
+                logger.info(f"KNNDistanceMonitor: Initialized reference mean={self.reference_mean:.4f}, std={self.reference_std:.4f}")
+            else:
+                # If we don't have enough samples, use a default
+                self.reference_std = self.reference_mean * 0.1  # Fallback: assume 10% relative variation
+                logger.info(f"KNNDistanceMonitor: Initialized reference mean={self.reference_mean:.4f}, using default std={self.reference_std:.4f}")
+            
             self.warm_up_values = None  # Free memory
             self.cumulative_sum = 0.0
             self.minimum_sum = 0.0
@@ -1171,6 +1232,7 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         # as unknown objects typically have larger distances
         try:
             # Calculate the deviation from the reference (plus delta)
+            # When using fixed delta from config:
             deviation = avg_distance - (self.reference_mean + self.delta)
             
             # Track cumulative sum of deviations 
@@ -1218,10 +1280,18 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
             
             # Log when PH test triggers new drift detection for better debugging
             if self.drift_detected and not was_drift_detected:
+                # Include reference std in logging if available
+                std_info = ""
+                if self.reference_std:
+                    # Calculate how many standard deviations we are from the mean
+                    if self.reference_mean > 0 and self.reference_std > 0:
+                        std_distance = (avg_distance - self.reference_mean) / self.reference_std
+                        std_info = f", deviation: {std_distance:.2f} standard deviations"
+                
                 logger.warning(f"KNNDistanceMonitor: DRIFT DETECTED by Page-Hinkley test! " +
                              f"PH value: {ph_value:.2f} > threshold: {self.lambda_threshold:.2f}, " +
                              f"avg_distance: {avg_distance:.2f}, reference: {self.reference_mean:.2f}, " +
-                             f"ratio: {(avg_distance/max(0.01, self.reference_mean)):.2f}x")
+                             f"ratio: {(avg_distance/max(0.01, self.reference_mean)):.2f}x" + std_info)
             
             # Log the PH value occasionally for regular debugging
             if self.samples_processed % 10 == 0:
@@ -1252,11 +1322,17 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
                 'metric': 'neighbor_distance',
                 'current_value': avg_distance,
                 'reference_mean': self.reference_mean,
+                'reference_std': self.reference_std,  # Include reference_std in drift info
                 'ph_value': ph_value if 'ph_value' in locals() else 0.0,
                 'threshold': self.lambda_threshold,
                 'distances': distances,
                 'timestamp': time.time()
             }
+            
+            # Add standardized distance info if available
+            if self.reference_std and self.reference_std > 0:
+                std_distance = (avg_distance - self.reference_mean) / self.reference_std
+                drift_info['std_distance'] = std_distance  # How many standard deviations away
             
             # Include prediction in log message if available
             prediction_info = ""
@@ -1274,11 +1350,29 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         
         # Update reference statistics if needed
         if self.should_update_reference():
-            # Using the rolling update formula
+            # Using the rolling update formula for mean
             self.reference_mean = (self.reference_update_factor * self.reference_mean + 
                                   (1 - self.reference_update_factor) * avg_distance)
+            
+            # Also update reference standard deviation if it exists
+            if self.reference_std is not None:
+                # Calculate the current standard deviation over recent distances
+                recent_distances = list(self.distance_history)[-30:]  # Use last 30 samples
+                if recent_distances and len(recent_distances) > 5:  # Ensure enough samples
+                    current_std = np.std(recent_distances)
+                    # Update reference_std using the same rolling formula
+                    self.reference_std = (self.reference_update_factor * self.reference_std + 
+                                         (1 - self.reference_update_factor) * current_std)
+                    
+                    # If adaptive thresholds are enabled, update thresholds based on new statistics
+                    if self.use_adaptive_thresholds:
+                        # Adjust delta and lambda threshold based on new reference_std
+                        self.delta = self.reference_std * 1.5  # 1.5 std for small variations
+                        self.lambda_threshold = self.reference_std * 5.0  # 5.0 std for drift threshold
+                        logger.debug(f"KNNDistanceMonitor: Updated adaptive thresholds: delta={self.delta:.4f}, lambda={self.lambda_threshold:.4f}")
+            
             self.samples_since_last_update = 0
-            logger.debug(f"KNNDistanceMonitor: Updated reference mean to {self.reference_mean:.4f}")
+            logger.debug(f"KNNDistanceMonitor: Updated reference mean to {self.reference_mean:.4f}, std to {self.reference_std:.4f if self.reference_std is not None else 'None'}")
         
         return self.drift_detected, drift_info
     
@@ -1363,8 +1457,10 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
             'metric': 'neighbor_distance',
             'current_value': avg_distance,
             'reference_mean': self.reference_mean,
+            'reference_std': self.reference_std,  # Include reference_std in check_for_drift too
             'ph_value': self.cumulative_sum - self.minimum_sum,
-            'threshold': self.lambda_threshold
+            'threshold': self.lambda_threshold,
+            'std_distance': (avg_distance - self.reference_mean) / self.reference_std if self.reference_std and self.reference_std > 0 else None
         }
         
         return True, drift_info
@@ -1395,6 +1491,75 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         
         logger.debug("KNNDistanceMonitor: Reset detector state completely")
     
+    def _load_reference_statistics(self) -> None:
+        """Load pre-computed reference statistics from a JSON file.
+        
+        This method loads reference statistics (mean, std, etc.) from a JSON file
+        specified by self.reference_stats_path.
+        """
+        if not self.reference_stats_path:
+            logger.warning("No reference statistics path provided")
+            return
+            
+        import json
+        import os
+        
+        if not os.path.exists(self.reference_stats_path):
+            logger.warning(f"Reference statistics file not found: {self.reference_stats_path}")
+            return
+            
+        try:
+            with open(self.reference_stats_path, 'r') as f:
+                stats = json.load(f)
+                
+            # Extract relevant statistics
+            if 'reference_mean' in stats:
+                self.reference_mean = float(stats['reference_mean'])
+                logger.info(f"Loaded reference mean: {self.reference_mean}")
+                
+                # Load standard deviation for adaptive thresholds
+                if 'reference_std' in stats:
+                    self.reference_std = float(stats['reference_std'])
+                    self.initial_reference_std = self.reference_std
+                    logger.info(f"Loaded reference std: {self.reference_std}")
+                    
+                    # Adjust thresholds based on loaded statistics if they were provided in config
+                    original_delta = self.delta
+                    original_lambda = self.lambda_threshold
+                    
+                    # Only adjust if explicitly using loaded statistics (keeping configured values as is)
+                    # This allows for explicit configuration but also provides sensible defaults
+                    adjusted_message = ""
+                    if self.reference_std > 0:
+                        # Use reference_std to validate if the current thresholds make sense
+                        suggested_delta = self.reference_std * 1.5  # 1.5 std for small variations
+                        suggested_lambda = self.reference_std * 5.0  # 5.0 std for drift threshold
+                        
+                        # Log comparison between configured and suggested values
+                        logger.info(f"Current delta: {self.delta}, Suggested delta: {suggested_delta}")
+                        logger.info(f"Current lambda: {self.lambda_threshold}, Suggested lambda: {suggested_lambda}")
+                        
+                        # If adaptive thresholds are enabled, update parameters
+                        if self.use_adaptive_thresholds:
+                            self.delta = suggested_delta
+                            self.lambda_threshold = suggested_lambda
+                            adjusted_message = f" (using adaptive thresholds: delta={suggested_delta:.2f}, lambda={suggested_lambda:.2f})"
+                            logger.info(f"Using adaptive thresholds based on reference statistics")
+                        else:
+                            adjusted_message = " (kept explicit configuration)"
+                    
+                # Skip warm-up phase if reference mean is available
+                self.in_warm_up_phase = False
+                self.warm_up_values = None
+                
+                logger.info(f"Successfully loaded reference statistics from file{adjusted_message}")
+            else:
+                logger.warning(f"No reference mean found in statistics file: {self.reference_stats_path}")
+        except Exception as e:
+            logger.error(f"Error loading reference statistics: {e}")
+            import traceback
+            traceback.print_exc()
+    
     def get_state(self) -> Dict[str, Any]:
         """Get the current state of the detector.
         
@@ -1404,6 +1569,7 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         state = self._get_base_state()
         state.update({
             'reference_mean': self.reference_mean,
+            'reference_std': self.reference_std,  # Added reference_std to state
             'cumulative_sum': self.cumulative_sum,
             'minimum_sum': self.minimum_sum,
             'lambda_threshold': self.lambda_threshold,
@@ -1411,6 +1577,9 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
             'high_confidence_threshold': self.high_confidence_threshold,
             'stable_known_classes': self.stable_known_classes,
             'delta': self.delta,
+            'initial_reference_mean': self.initial_reference_mean,
+            'initial_reference_std': self.initial_reference_std,
+            'reference_stats_path': self.reference_stats_path,
             'warm_up_values': self.warm_up_values if self.warm_up_values is not None else [],
             'last_distances': self.last_distances,
             'recent_distance_history': list(self.distance_history)[-100:] if self.distance_history else []
@@ -1425,6 +1594,7 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         """
         self._set_base_state(state)
         self.reference_mean = state.get('reference_mean', self.reference_mean)
+        self.reference_std = state.get('reference_std', self.reference_std)  # Restore reference_std
         self.cumulative_sum = state.get('cumulative_sum', self.cumulative_sum)
         self.minimum_sum = state.get('minimum_sum', self.minimum_sum)
         self.lambda_threshold = state.get('lambda_threshold', self.lambda_threshold)
@@ -1432,6 +1602,9 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         self.high_confidence_threshold = state.get('high_confidence_threshold', self.high_confidence_threshold)
         self.stable_known_classes = state.get('stable_known_classes', self.stable_known_classes)
         self.delta = state.get('delta', self.delta)
+        self.initial_reference_mean = state.get('initial_reference_mean', self.initial_reference_mean)
+        self.initial_reference_std = state.get('initial_reference_std', self.initial_reference_std)
+        self.reference_stats_path = state.get('reference_stats_path', self.reference_stats_path)
         
         warm_up_values = state.get('warm_up_values', [])
         self.warm_up_values = warm_up_values if self.in_warm_up_phase else None
