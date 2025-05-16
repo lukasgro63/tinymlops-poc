@@ -297,6 +297,15 @@ class InferencePipeline:
         if isinstance(self.classifier, LightweightKNN) and hasattr(self.classifier, '_last_distances'):
             # Include distances directly in record for easier access by drift detectors
             autonomous_record['_knn_distances'] = self.classifier._last_distances
+            
+        # Add KNN neighbor labels for NeighborDiversityDriftDetector if available
+        if isinstance(self.classifier, LightweightKNN) and hasattr(self.classifier, 'get_last_neighbor_labels'):
+            try:
+                neighbor_labels = self.classifier.get_last_neighbor_labels()
+                if neighbor_labels:
+                    autonomous_record['_knn_neighbor_labels'] = neighbor_labels
+            except Exception as e:
+                logger.warning(f"Error getting KNN neighbor labels: {str(e)}")
         
         # Update autonomous monitors if enabled and warmup period is complete
         autonomous_drift_detected = False

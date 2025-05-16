@@ -1,7 +1,7 @@
 from typing import Dict, Any, List, Optional, Tuple, Union, Callable
 import time
 import math
-from collections import deque
+from collections import deque, Counter
 import random
 
 import numpy as np
@@ -1378,3 +1378,265 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         # Restore distance history if available
         if 'recent_distance_history' in state:
             self.distance_history = state['recent_distance_history']
+
+
+class NeighborDiversityDriftDetector(AutonomousDriftDetector):
+    """Drift detector that monitors the diversity of class labels among nearest neighbors.
+    
+    When a known object is presented to the KNN classifier, most or all of the nearest
+    neighbors typically have the same class label (high homogeneity). However, when an
+    unknown object is encountered, the neighbors may come from different classes (low
+    homogeneity), indicating that the object doesn't clearly match any known class.
+    
+    This detector tracks the number of neighbors that don't belong to the dominant class
+    and signals drift when this count exceeds a specified threshold.
+    """
+    
+    def __init__(
+        self,
+        k_neighbors: int = 5,  # The number of neighbors used by KNN 
+        max_mismatched_neighbors_threshold: int = 1,  # Threshold for drift (2+ neighbors not from dominant class)
+        warm_up_samples: int = 10,  # Short warm-up period since we decide per sample
+        reference_update_interval: int = 30,
+        reference_update_factor: float = 0.05,
+        pause_reference_update_during_drift: bool = True,
+        drift_cooldown_period: int = 20,
+    ):
+        """Initialize the neighbor diversity drift detector.
+        
+        Args:
+            k_neighbors: Number of neighbors used by the KNN classifier
+            max_mismatched_neighbors_threshold: Maximum acceptable neighbors not from dominant class
+            warm_up_samples: Number of samples to collect during warm-up
+            reference_update_interval: Number of samples between reference updates
+            reference_update_factor: Factor for updating reference (β)
+            pause_reference_update_during_drift: Whether to pause updating during drift 
+            drift_cooldown_period: Number of samples to wait before triggering new drift
+        """
+        super().__init__(
+            warm_up_samples=warm_up_samples,
+            reference_update_interval=reference_update_interval,
+            reference_update_factor=reference_update_factor,
+            pause_reference_update_during_drift=pause_reference_update_during_drift,
+            drift_cooldown_period=drift_cooldown_period,
+        )
+        
+        self.k_neighbors = k_neighbors
+        self.max_mismatched_neighbors_threshold = max_mismatched_neighbors_threshold
+        
+        # Validate parameters
+        if max_mismatched_neighbors_threshold >= k_neighbors:
+            logger.warning(f"max_mismatched_neighbors_threshold ({max_mismatched_neighbors_threshold}) should be less than k_neighbors ({k_neighbors})")
+            self.max_mismatched_neighbors_threshold = k_neighbors - 1  # Set to reasonable default
+            
+        # Keep track of recent label diversity metrics
+        self.last_mismatched_count = 0
+        self.last_dominant_class = None
+        self.last_neighbor_labels = []
+        
+        logger.debug(
+            f"Initialized NeighborDiversityDriftDetector with k={k_neighbors}, "
+            f"threshold={max_mismatched_neighbors_threshold}, cooldown={drift_cooldown_period}"
+        )
+    
+    def update(self, record: Dict[str, Any]) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """Update the detector with new data.
+        
+        Args:
+            record: Dictionary containing prediction data with neighbor labels
+                   either via classifier.get_last_neighbor_labels() or _knn_neighbor_labels
+            
+        Returns:
+            Tuple of (drift_detected, drift_info)
+        """
+        # Process base sample counting and warm-up phase
+        self._process_sample(record)
+        
+        # This detector doesn't need extensive warm-up for reference statistics,
+        # but we still respect the base class warm-up and cooldown
+        if self.in_warm_up_phase:
+            return False, None
+            
+        # Extract the labels of k nearest neighbors
+        neighbor_labels = self._extract_neighbor_labels(record)
+        if not neighbor_labels or len(neighbor_labels) != self.k_neighbors:
+            logger.warning(f"Could not extract {self.k_neighbors} neighbor labels from record")
+            return False, None
+            
+        # Keep track of the neighbor labels for logging/debugging
+        self.last_neighbor_labels = neighbor_labels
+        
+        # Count the occurrences of each class among the neighbors
+        label_counts = Counter(neighbor_labels)
+        
+        # If no labels were found (should not happen if neighbor_labels is not empty)
+        if not label_counts:
+            return False, None
+            
+        # Find the dominant class and its count
+        dominant_class, dominant_count = label_counts.most_common(1)[0]
+        
+        # Number of neighbors that are NOT from the dominant class
+        mismatched_neighbors_count = self.k_neighbors - dominant_count
+        
+        # Save for later reference
+        self.last_mismatched_count = mismatched_neighbors_count
+        self.last_dominant_class = dominant_class
+        
+        # Determine drift based on mismatched neighbors
+        current_drift_detected = mismatched_neighbors_count > self.max_mismatched_neighbors_threshold
+        
+        drift_info = None
+        previous_drift_state = self.drift_detected
+        self.drift_detected = current_drift_detected
+        
+        # If drift is newly detected, prepare drift info
+        if self.drift_detected and not previous_drift_state:
+            # Construct detailed drift information
+            drift_info = {
+                'detector_type': 'NeighborDiversityDriftDetector',
+                'metric': 'mismatched_knn_neighbors',
+                'current_value': mismatched_neighbors_count,
+                'threshold': self.max_mismatched_neighbors_threshold,
+                'k_neighbors': self.k_neighbors,
+                'dominant_class_in_neighbors': dominant_class,
+                'dominant_class_count': dominant_count,
+                'neighbor_labels': neighbor_labels,
+                'timestamp': time.time()
+            }
+            
+            # Include prediction in log message if available
+            prediction_info = ""
+            if 'prediction' in record:
+                prediction_info = f", Prediction={record['prediction']}"
+                drift_info['prediction'] = record['prediction']
+                
+            logger.warning(
+                f"NeighborDiversityDriftDetector: DRIFT DETECTED! "
+                f"Mismatched neighbors: {mismatched_neighbors_count} > threshold: {self.max_mismatched_neighbors_threshold}"
+                f"{prediction_info}, Dominant class={dominant_class} ({dominant_count}/{self.k_neighbors})"
+            )
+            
+            # Log the neighbor labels for debugging
+            logger.info(f"Neighbor labels: {neighbor_labels}")
+            
+            # Notify callbacks
+            self._notify_callbacks(drift_info)
+            
+        # Periodically log diversity stats for debugging
+        if self.samples_processed % 10 == 0:
+            logger.debug(
+                f"Neighbor diversity: {mismatched_neighbors_count}/{self.k_neighbors} mismatched, "
+                f"dominant class={dominant_class} ({dominant_count}/{self.k_neighbors})"
+            )
+            
+        return self.drift_detected, drift_info
+    
+    def _extract_neighbor_labels(self, record: Dict[str, Any]) -> Optional[List[Any]]:
+        """Extract neighbor labels from the record.
+        
+        Tries multiple sources in order of preference:
+        1. 'classifier' object with 'get_last_neighbor_labels' method
+        2. '_knn_neighbor_labels' key in the record
+        
+        Args:
+            record: Dictionary with prediction data
+        
+        Returns:
+            List of neighbor labels or None if not found
+        """
+        try:
+            # Case 1: Classifier object with get_last_neighbor_labels method
+            if 'classifier' in record and record['classifier'] is not None:
+                if hasattr(record['classifier'], 'get_last_neighbor_labels'):
+                    labels = record['classifier'].get_last_neighbor_labels()
+                    if labels is not None and len(labels) > 0:
+                        return labels
+                # Direct access to _last_neighbor_labels as fallback
+                if hasattr(record['classifier'], '_last_neighbor_labels'):
+                    labels = record['classifier']._last_neighbor_labels
+                    if labels is not None and len(labels) > 0:
+                        return labels
+            
+            # Case 2: Neighbor labels directly in record
+            if '_knn_neighbor_labels' in record:
+                return record['_knn_neighbor_labels']
+            
+            # Log debug info about what's available in the record
+            logger.debug(f"Could not find neighbor labels in record with keys: {list(record.keys())}")
+            
+            # If we have prediction and confidence, and they were directly extracted from neighbors
+            # we can infer that all neighbors have the same label
+            if 'prediction' in record and 'confidence' in record:
+                # High confidence means neighbors are likely homogeneous
+                if record['confidence'] > 0.9:
+                    return [record['prediction']] * self.k_neighbors
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Error extracting neighbor labels: {str(e)}")
+            return None
+    
+    def check_for_drift(self) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """Check if drift has been detected.
+        
+        Returns:
+            Tuple of (drift_detected, drift_info)
+        """
+        if not self.drift_detected:
+            return False, None
+        
+        drift_info = {
+            'detector_type': 'NeighborDiversityDriftDetector',
+            'metric': 'mismatched_knn_neighbors',
+            'current_value': self.last_mismatched_count,
+            'threshold': self.max_mismatched_neighbors_threshold,
+            'k_neighbors': self.k_neighbors,
+            'dominant_class': self.last_dominant_class,
+            'neighbor_labels': self.last_neighbor_labels
+        }
+        
+        return True, drift_info
+    
+    def reset(self) -> None:
+        """Reset the detector state.
+        
+        This resets the drift flag but keeps any statistics.
+        """
+        self.drift_detected = False
+        
+        # Reset drift cooldown tracking
+        self.in_cooldown_period = False
+        self.samples_since_last_drift = 0
+        
+        logger.debug("NeighborDiversityDriftDetector reset")
+    
+    def get_state(self) -> Dict[str, Any]:
+        """Get the current state of the detector.
+        
+        Returns:
+            State dictionary
+        """
+        state = self._get_base_state()
+        state.update({
+            'k_neighbors': self.k_neighbors,
+            'max_mismatched_neighbors_threshold': self.max_mismatched_neighbors_threshold,
+            'last_mismatched_count': self.last_mismatched_count,
+            'last_dominant_class': self.last_dominant_class,
+            'last_neighbor_labels': self.last_neighbor_labels
+        })
+        return state
+    
+    def set_state(self, state: Dict[str, Any]) -> None:
+        """Restore the detector state.
+        
+        Args:
+            state: Previously saved state dictionary
+        """
+        self._set_base_state(state)
+        self.k_neighbors = state.get('k_neighbors', self.k_neighbors)
+        self.max_mismatched_neighbors_threshold = state.get('max_mismatched_neighbors_threshold', self.max_mismatched_neighbors_threshold)
+        self.last_mismatched_count = state.get('last_mismatched_count', 0)
+        self.last_dominant_class = state.get('last_dominant_class')
+        self.last_neighbor_labels = state.get('last_neighbor_labels', [])
