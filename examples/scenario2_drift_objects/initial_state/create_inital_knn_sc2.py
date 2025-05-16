@@ -373,9 +373,38 @@ def main():
     # Konvertiere zurück zu NumPy-Array
     balanced_features_np = np.array(balanced_features)
 
-    # Trainiere den KNN mit den balancierten Features
-    print(f"Training mit {len(balanced_features_np)} balancierten Samples")
-    knn.fit(balanced_features_np, balanced_labels, balanced_timestamps)
+    # Statt knn.fit() verwenden wir hier eine kontrollierte Befüllung
+    # um sicherzustellen, dass jede Klasse gleichmäßig vertreten ist
+    print(f"Befülle KNN kontrolliert mit einer festen Anzahl von Samples pro Klasse")
+    
+    # Limit pro Klasse = max_samples / Anzahl der Klassen
+    samples_per_class = KNN_MAX_SAMPLES // len(CLASSES)
+    print(f"Verwende {samples_per_class} Samples pro Klasse für insgesamt {samples_per_class * len(CLASSES)} Samples")
+    
+    # Reorganisiere balanced_features_np nach Klassen
+    features_by_class = {}
+    for i, label in enumerate(balanced_labels):
+        if label not in features_by_class:
+            features_by_class[label] = {
+                'features': [],
+                'timestamps': []
+            }
+        features_by_class[label]['features'].append(balanced_features_np[i])
+        features_by_class[label]['timestamps'].append(balanced_timestamps[i])
+    
+    # Füge Samples pro Klasse hinzu
+    for label, data in features_by_class.items():
+        # Begrenze auf samples_per_class
+        count = min(len(data['features']), samples_per_class)
+        print(f"Füge {count} Samples für Klasse '{label}' hinzu")
+        
+        # Wähle die ersten count Samples für jede Klasse
+        for i in range(count):
+            knn.add_sample(
+                feature=data['features'][i],
+                label=label,
+                timestamp=data['timestamps'][i]
+            )
     
     # Hole die Size und Klassen vom KNN
     # Verwende die korrekten Methoden für LightweightKNN

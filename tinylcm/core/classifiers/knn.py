@@ -78,6 +78,7 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
         
         # Stored information for drift detection
         self._last_distances = []  # Most recent neighbor distances (for drift detection)
+        self._last_neighbor_labels = []  # Most recent neighbor labels (for drift detection)
         
         # Performance metrics
         self._total_prediction_time = 0.0
@@ -523,8 +524,9 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
         # Log debug info to console but don't store the string in thread_local
         logger.info(debug_str)
         
-        # Store the distances for drift detection to access directly
+        # Store the distances and labels for drift detection to access directly
         self._last_distances = [dist for _, dist in nearest_neighbors]
+        self._last_neighbor_labels = [self.y_train[idx] for idx, _ in nearest_neighbors]
 
         return nearest_neighbors
     
@@ -767,6 +769,14 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
             List of unique classes
         """
         return sorted(list(self._classes))
+        
+    def get_last_neighbor_labels(self) -> List[Any]:
+        """Get the labels of the k nearest neighbors from the most recent prediction.
+        
+        Returns:
+            List of labels of the nearest neighbors
+        """
+        return self._last_neighbor_labels
     
     def clear(self) -> None:
         """Clear all training samples."""
