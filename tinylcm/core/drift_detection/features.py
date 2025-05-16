@@ -1038,11 +1038,13 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         delta: float = 0.1,
         lambda_threshold: float = 5.0,
         exit_threshold_factor: float = 0.7,
-        warm_up_samples: int = 10,
-        reference_update_interval: int = 30,
+        high_confidence_threshold: float = 0.9,
+        stable_known_classes: List[str] = None,
+        warm_up_samples: int = 100,
+        reference_update_interval: int = 50,
         reference_update_factor: float = 0.05,
         pause_reference_update_during_drift: bool = True,
-        drift_cooldown_period: int = 20,
+        drift_cooldown_period: int = 30,
     ):
         """Initialize the KNN distance monitor.
         
@@ -1066,6 +1068,8 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         self.delta = delta
         self.lambda_threshold = lambda_threshold
         self.exit_threshold_factor = exit_threshold_factor
+        self.high_confidence_threshold = high_confidence_threshold
+        self.stable_known_classes = stable_known_classes or []
         
         # PH statistics
         self.reference_mean = None  # μ_ref
@@ -1074,7 +1078,9 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         
         # Distance tracking
         self.last_distances = []
-        self.distance_history = []
+        # Use deque with max length to prevent unbounded growth
+        from collections import deque
+        self.distance_history = deque(maxlen=max(500, warm_up_samples * 5))
         
         # Warm-up data
         self.warm_up_values = [] if self.in_warm_up_phase else None
@@ -1105,6 +1111,24 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         if not isinstance(record, dict):
             logger.warning(f"Record is not a dictionary, received: {type(record).__name__}, skipping update")
             return False, None
+        
+        # Check for high-confidence predictions of known classes to skip or reset drift detection
+        # This prevents the detector from being unnecessarily affected by normal variations in known objects
+        prediction = record.get('prediction')
+        confidence = record.get('confidence')
+        
+        if prediction and confidence is not None and self.stable_known_classes:
+            if confidence >= self.high_confidence_threshold and prediction in self.stable_known_classes:
+                # If we're in a drift state and a high-confidence known object appears, reset the PH stats
+                if self.drift_detected:
+                    logger.info(f"KNNDistanceMonitor: Reset due to high-confidence ({confidence:.2f}) known class '{prediction}'")
+                    self.reset_ph_stats()  # Reset Page-Hinkley stats but keep reference statistics
+                    return False, None
+                else:
+                    # If we're not in drift state, just skip this sample to avoid affecting PH statistics
+                    # for normal variations in known classes
+                    logger.debug(f"KNNDistanceMonitor: Skipping update for high-confidence ({confidence:.2f}) known class '{prediction}'")
+                    return False, None
             
         try:    
             # Process base sample counting and warm-up phase
@@ -1164,6 +1188,10 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
             # Define exit threshold using factor (hysteresis approach)
             exit_drift_threshold = self.lambda_threshold * self.exit_threshold_factor
             
+            # Track if drift was newly detected in this update for callback notification
+            was_drift_detected = self.drift_detected
+            newly_detected_drift_by_ph = False
+            
             # Compare to appropriate threshold based on current state
             # For unknown objects, distances will be much larger, causing positive deviations
             # which will accumulate and cause ph_value to exceed the threshold
@@ -1171,7 +1199,14 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
                 # Not in drift state, use regular threshold to enter drift state
                 if ph_value > self.lambda_threshold:
                     self.drift_detected = True
+                    newly_detected_drift_by_ph = True
                     logger.info(f"KNNDistanceMonitor: Entering drift state. PH value {ph_value:.2f} > threshold {self.lambda_threshold:.2f}")
+                    # Log additional debug info about the current state
+                    logger.info(f"KNNDistanceMonitor: avg_distance={avg_distance:.2f}, reference_mean={self.reference_mean:.2f}, " +
+                              f"deviation={deviation:.2f}, cumulative_sum={self.cumulative_sum:.2f}")
+                    
+                    if 'prediction' in record and 'confidence' in record:
+                        logger.info(f"KNNDistanceMonitor: Current prediction='{record['prediction']}', confidence={record['confidence']:.2f}")
             else:
                 # Already in drift state, use lower threshold to exit drift state
                 if ph_value <= exit_drift_threshold:
@@ -1179,8 +1214,7 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
                     logger.info(f"KNNDistanceMonitor: Exited drift state. PH value {ph_value:.2f} <= exit_threshold {exit_drift_threshold:.2f}")
                     # Reset Page-Hinkley test statistics when exiting drift state
                     # so the detector starts fresh for the next potential drift
-                    self.cumulative_sum = 0.0
-                    self.minimum_sum = 0.0
+                    self.reset_ph_stats()
             
             # Log when PH test triggers new drift detection for better debugging
             if self.drift_detected and not was_drift_detected:
@@ -1210,7 +1244,7 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
             logger.debug(f"In cooldown period ({self.samples_since_last_drift}/{self.drift_cooldown_period}) - suppressing drift detection")
         
         # If drift is newly detected, prepare drift info
-        if self.drift_detected and not was_drift_detected:
+        if newly_detected_drift_by_ph:
             # We use Page-Hinkley test for drift detection, drift flag is already set above
             
             drift_info = {
@@ -1297,13 +1331,8 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
                 if 'neighbor_distances' in meta and isinstance(meta['neighbor_distances'], (list, tuple, np.ndarray)):
                     return list(meta['neighbor_distances'])
             
-            # Extract directly from the NEAREST NEIGHBORS DEBUG log info if possible
-            if 'prediction' in record and record['prediction'] == 'lego':
-                # If prediction is "lego", use a very small distance (known class)
-                return [17.3]  # Based on the logs where lego has distances around 17.3
-            elif 'prediction' in record and record['prediction'] == 'negative':
-                # If prediction is "negative", use a larger distance
-                return [179.3]  # Based on the logs - negative predictions show ~179.3
+            # These fallbacks have been removed since we shouldn't hardcode values
+            # and instead rely on the actual distances computed by the classifier
             
             # Log record keys to help debug
             logger.debug(f"KNNDistanceMonitor could not extract distances. Record keys: {list(record.keys())}")
@@ -1340,8 +1369,8 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         
         return True, drift_info
     
-    def reset(self) -> None:
-        """Reset the detector state.
+    def reset_ph_stats(self) -> None:
+        """Reset only the Page-Hinkley test statistics.
         
         This resets the drift flag and Page-Hinkley statistics but keeps
         the reference statistics for continuous monitoring.
@@ -1350,11 +1379,21 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         self.cumulative_sum = 0.0
         self.minimum_sum = 0.0
         
-        # Reset drift cooldown tracking
-        self.in_cooldown_period = False 
-        self.samples_since_last_drift = 0
+        logger.debug("KNNDistanceMonitor: Reset Page-Hinkley statistics")
+    
+    def reset(self) -> None:
+        """Reset the detector state completely.
         
-        logger.debug("KNNDistanceMonitor: Reset detector state")
+        This resets the drift flag, Page-Hinkley statistics, and the base
+        class cooldown state, but keeps the reference statistics.
+        """
+        # Reset base class state (cooldown tracking)
+        super().reset()
+        
+        # Reset Page-Hinkley stats
+        self.reset_ph_stats()
+        
+        logger.debug("KNNDistanceMonitor: Reset detector state completely")
     
     def get_state(self) -> Dict[str, Any]:
         """Get the current state of the detector.
@@ -1369,10 +1408,12 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
             'minimum_sum': self.minimum_sum,
             'lambda_threshold': self.lambda_threshold,
             'exit_threshold_factor': self.exit_threshold_factor,
+            'high_confidence_threshold': self.high_confidence_threshold,
+            'stable_known_classes': self.stable_known_classes,
             'delta': self.delta,
             'warm_up_values': self.warm_up_values if self.warm_up_values is not None else [],
             'last_distances': self.last_distances,
-            'recent_distance_history': self.distance_history[-100:] if self.distance_history else []
+            'recent_distance_history': list(self.distance_history)[-100:] if self.distance_history else []
         })
         return state
     
@@ -1388,6 +1429,8 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         self.minimum_sum = state.get('minimum_sum', self.minimum_sum)
         self.lambda_threshold = state.get('lambda_threshold', self.lambda_threshold)
         self.exit_threshold_factor = state.get('exit_threshold_factor', self.exit_threshold_factor)
+        self.high_confidence_threshold = state.get('high_confidence_threshold', self.high_confidence_threshold)
+        self.stable_known_classes = state.get('stable_known_classes', self.stable_known_classes)
         self.delta = state.get('delta', self.delta)
         
         warm_up_values = state.get('warm_up_values', [])
