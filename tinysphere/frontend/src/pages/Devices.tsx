@@ -488,7 +488,36 @@ const DevicesPage: React.FC = () => {
             icon={<DeviceIcon style={{ fontSize: 20, color: '#0B2A5A' }} />}
             height={300}
           >
-            <ConnectivityTrendChart data={connectivityTrends} />
+            <ConnectivityTrendChart 
+              data={
+                // Wenn wir für heute Daten haben (meistens der Fall), ersetzen wir die aktive Anzahl
+                // mit der aktuellen aktiven Geräteanzahl für eine konsistentere Darstellung
+                connectivityTrends
+                .map(day => {
+                  const today = new Date().toISOString().split('T')[0];
+                  
+                  // Wenn es sich um den heutigen Tag handelt, verwenden wir die aktuelle Anzahl aktiver Geräte
+                  // anstelle der vom Backend berechneten
+                  if (day.date === today) {
+                    return {
+                      ...day,
+                      active: activeCount,
+                      inactive: day.total - activeCount
+                    };
+                  }
+                  
+                  // Für andere Tage: normale Berechnung
+                  return {
+                    ...day,
+                    inactive: day.total - day.active,
+                  };
+                })
+                // In umgekehrter Reihenfolge (neueste zuerst) sortieren
+                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                // Dann wieder umdrehen, damit der Graph von links nach rechts zeitlich korrekt ist
+                .reverse()
+              }
+            />
           </SectionCard>
         </Box>
       </Box>
