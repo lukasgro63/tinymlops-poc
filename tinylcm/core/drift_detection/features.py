@@ -1037,6 +1037,7 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         self,
         delta: float = 0.1,
         lambda_threshold: float = 5.0,
+        exit_threshold_factor: float = 0.7,
         warm_up_samples: int = 10,
         reference_update_interval: int = 30,
         reference_update_factor: float = 0.05,
@@ -1064,6 +1065,7 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         
         self.delta = delta
         self.lambda_threshold = lambda_threshold
+        self.exit_threshold_factor = exit_threshold_factor
         
         # PH statistics
         self.reference_mean = None  # μ_ref
@@ -1159,10 +1161,26 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
             # Remember the previous drift detection state
             was_drift_detected = self.drift_detected
             
-            # Compare to threshold to detect drift
+            # Define exit threshold using factor (hysteresis approach)
+            exit_drift_threshold = self.lambda_threshold * self.exit_threshold_factor
+            
+            # Compare to appropriate threshold based on current state
             # For unknown objects, distances will be much larger, causing positive deviations
             # which will accumulate and cause ph_value to exceed the threshold
-            self.drift_detected = ph_value > self.lambda_threshold
+            if not self.drift_detected:
+                # Not in drift state, use regular threshold to enter drift state
+                if ph_value > self.lambda_threshold:
+                    self.drift_detected = True
+                    logger.info(f"KNNDistanceMonitor: Entering drift state. PH value {ph_value:.2f} > threshold {self.lambda_threshold:.2f}")
+            else:
+                # Already in drift state, use lower threshold to exit drift state
+                if ph_value <= exit_drift_threshold:
+                    self.drift_detected = False
+                    logger.info(f"KNNDistanceMonitor: Exited drift state. PH value {ph_value:.2f} <= exit_threshold {exit_drift_threshold:.2f}")
+                    # Reset Page-Hinkley test statistics when exiting drift state
+                    # so the detector starts fresh for the next potential drift
+                    self.cumulative_sum = 0.0
+                    self.minimum_sum = 0.0
             
             # Log when PH test triggers new drift detection for better debugging
             if self.drift_detected and not was_drift_detected:
@@ -1350,6 +1368,7 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
             'cumulative_sum': self.cumulative_sum,
             'minimum_sum': self.minimum_sum,
             'lambda_threshold': self.lambda_threshold,
+            'exit_threshold_factor': self.exit_threshold_factor,
             'delta': self.delta,
             'warm_up_values': self.warm_up_values if self.warm_up_values is not None else [],
             'last_distances': self.last_distances,
@@ -1368,6 +1387,7 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         self.cumulative_sum = state.get('cumulative_sum', self.cumulative_sum)
         self.minimum_sum = state.get('minimum_sum', self.minimum_sum)
         self.lambda_threshold = state.get('lambda_threshold', self.lambda_threshold)
+        self.exit_threshold_factor = state.get('exit_threshold_factor', self.exit_threshold_factor)
         self.delta = state.get('delta', self.delta)
         
         warm_up_values = state.get('warm_up_values', [])

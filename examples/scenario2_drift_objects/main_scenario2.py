@@ -829,6 +829,7 @@ def main():
                 knn_distance_monitor = KNNDistanceMonitor(
                     delta=detector_config.get("delta", 0.1),
                     lambda_threshold=detector_config.get("lambda_threshold", 5.0),
+                    exit_threshold_factor=detector_config.get("exit_threshold_factor", 0.7),
                     warm_up_samples=detector_config.get("warm_up_samples", 10),
                     reference_update_interval=detector_config.get("reference_update_interval", 30),
                     reference_update_factor=detector_config.get("reference_update_factor", 0.05),
