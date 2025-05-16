@@ -1,0 +1,48 @@
+{
+    "reference_mean": 45.161649691184856,
+    "reference_std": 10.17918530068497,
+    "min_distance": 15.394752197265626,
+    "max_distance": 73.78734497070315,
+    "sample_count": 644,
+    "class_statistics": {
+        "negative": {
+            "mean": 43.563230170966676,
+            "std": 13.470535096820923,
+            "min": 15.394752197265626,
+            "max": 71.899921875,
+            "count": 161
+        },
+        "stone": {
+            "mean": 47.56020281300041,
+            "std": 8.878716918240293,
+            "min": 18.696874694824224,
+            "max": 73.78734497070315,
+            "count": 161
+        },
+        "lego": {
+            "mean": 44.49984620846576,
+            "std": 7.9972804483315105,
+            "min": 26.579155578613285,
+            "max": 69.58036499023437,
+            "count": 161
+        },
+        "leaf": {
+            "mean": 45.02331957230657,
+            "std": 9.025226199504045,
+            "min": 23.051320495605474,
+            "max": 69.97260009765625,
+            "count": 161
+        }
+    },
+    "generation_timestamp": "2025-05-16T20:47:56.578995",
+    "description": "Reference statistics for KNNDistanceMonitor based on 644 balanced samples",
+    "model_path": "/workspaces/tinymlops-poc/examples/scenario2_drift_objects/model/model_object.tflite",
+    "knn_k": 5,
+    "feature_dimension": 256,
+    "classes": [
+        "stone",
+        "negative",
+        "lego",
+        "leaf"
+    ]
+}

@@ -45,16 +45,21 @@
     "drift_detectors": [
       {
         "type": "KNNDistanceMonitor",
-        "delta": 5,
+        "delta": 10, 
         "lambda_threshold": 25,
         "exit_threshold_factor": 0.7,
         "high_confidence_threshold": 0.9,
         "stable_known_classes": ["lego", "stone", "leaf"],
-        "warm_up_samples": 200,
+        "reference_stats_path": "./initial_state/knn_reference_stats.json",
+        "warm_up_samples": 5,
         "reference_update_interval": 100,
         "reference_update_factor": 0.05,
         "pause_reference_update_during_drift": true,
-        "drift_cooldown_period": 30
+        "drift_cooldown_period": 30,
+        "use_adaptive_thresholds": false,
+        "allow_runtime_threshold_adaptation": false,
+        "adaptive_delta_std_multiplier": 1.5,
+        "adaptive_lambda_std_multiplier": 5.0
       }
     ],
     "operational_monitor": {
