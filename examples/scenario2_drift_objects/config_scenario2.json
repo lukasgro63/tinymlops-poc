@@ -2,7 +2,7 @@
   "device": {
     "name": "Raspberry Pi Zero 2W",
     "description": "TinyLCM Objects Scenario - Drift Detection for 4-Class Object Model",
-    "log_level": "DEBUG"
+    "log_level": "INFO"
   },
   "camera": {
     "resolution": [
@@ -51,13 +51,13 @@
         "reference_update_interval": 100,
         "reference_update_factor": 0.05,
         "pause_reference_update_during_drift": true,
-        "drift_cooldown_period": 25
+        "drift_cooldown_period": 30
       },
       {
         "type": "NeighborDiversityDriftDetector",
         "k_neighbors": 5,
-        "max_mismatched_neighbors_threshold": 1,
-        "warm_up_samples": 20,
+        "max_mismatched_neighbors_threshold": 3,
+        "warm_up_samples": 100,
         "drift_cooldown_period": 30,
         "reference_update_interval": 30,
         "reference_update_factor": 0.05,
