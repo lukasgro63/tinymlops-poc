@@ -1111,7 +1111,7 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
             # Extract distances from record using multiple possible sources
             distances = self._extract_distances(record)
             if distances is None or len(distances) == 0:
-                logger.debug(f"Could not extract distances from record with keys: {list(record.keys())}")
+                logger.warning(f"Could not extract valid distances from record with keys: {list(record.keys())}. Skipping update for this sample.")
                 return False, None
         except Exception as e:
             logger.warning(f"Error processing record in KNNDistanceMonitor: {str(e)}")
@@ -1173,35 +1173,9 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
             was_drift_detected = self.drift_detected
             self.drift_detected = False
         
-        # Check if this is a likely unknown object by using custom detection logic
-        # This helps bypass the PH test for very clear unknown objects
-        is_unknown_object = False
-        try:
-            # Check if this is a "negative" class prediction - those aren't unknown objects
-            is_negative_class = False
-            if 'prediction' in record and record['prediction'] == 'negative':
-                is_negative_class = True
-            
-            # Much more aggressive unknown object detection for small feature dimensions:
-            # For 4-dimensional feature vectors, the distance calculations are less reliable
-            
-            # Calculate the ratio of current distance to reference distance
-            # This is more meaningful than absolute values when working with scaled distances
-            distance_ratio = avg_distance / max(0.01, self.reference_mean)
-            
-            # Use two detection methods:
-            # 1. Absolute distance threshold (lowered from 250.0 to 25.0 for small dimensions)
-            # 2. Relative distance ratio (more than 3x the reference)
-            if ((avg_distance > 25.0 or distance_ratio > 3.0) and not is_negative_class):
-                is_unknown_object = True
-                logger.warning(f"KNNDistanceMonitor: Possible unknown object detected - distance: {avg_distance:.2f}, ratio: {distance_ratio:.2f}")
-            elif (avg_distance > 25.0 or distance_ratio > 3.0) and is_negative_class:
-                logger.debug(f"High distance ({avg_distance:.2f}, ratio: {distance_ratio:.2f}) for 'negative' class - not considering as unknown")
-        except Exception as e:
-            logger.warning(f"Error in unknown object check: {str(e)}")
-        
-        # Set drift detected flag if either PH test or direct unknown object detection triggered
-        self.drift_detected = self.drift_detected or is_unknown_object
+        # The custom unknown object detection logic has been removed
+        # Now only the Page-Hinkley test is used for drift detection
+        is_unknown_object = False  # Always false now that we removed the custom detection
         
         # Check if we are in the cooldown period - respect this to avoid too many drift events
         if self.in_cooldown_period and self.samples_since_last_drift < self.drift_cooldown_period:
@@ -1211,9 +1185,8 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
             logger.debug(f"In cooldown period ({self.samples_since_last_drift}/{self.drift_cooldown_period}) - suppressing drift detection")
         
         # If drift is newly detected, prepare drift info
-        if (self.drift_detected and not was_drift_detected) or is_unknown_object:
-            # Set drift to true in case it was triggered by the unknown object detection
-            self.drift_detected = True
+        if self.drift_detected and not was_drift_detected:
+            # We use Page-Hinkley test for drift detection, drift flag is already set above
             
             drift_info = {
                 'detector_type': 'KNNDistanceMonitor',
@@ -1223,8 +1196,7 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
                 'ph_value': ph_value if 'ph_value' in locals() else 0.0,
                 'threshold': self.lambda_threshold,
                 'distances': distances,
-                'timestamp': time.time(),
-                'is_direct_unknown_detection': is_unknown_object
+                'timestamp': time.time()
             }
             
             # Include prediction in log message if available
@@ -1308,27 +1280,15 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
                 # If prediction is "negative", use a larger distance
                 return [179.3]  # Based on the logs - negative predictions show ~179.3
             
-            # Final fallback: confidence-based estimation (less accurate)
-            if 'confidence' in record and isinstance(record['confidence'], (int, float)):
-                conf = record['confidence']
-                # Rough heuristic based on the log values
-                if conf >= 0.95:
-                    return [17.3]  # Very small distance (high confidence) - lego objects
-                elif conf <= 0.7:
-                    return [179.3]  # Larger distance - "negative" class
-                else:
-                    return [50.0]  # Medium value
-            
             # Log record keys to help debug
             logger.debug(f"KNNDistanceMonitor could not extract distances. Record keys: {list(record.keys())}")
             
-            # Last resort - pick a value that won't trigger drift initially
-            # 20.0 is below our detection threshold but still a reasonable value
-            return [20.0]
+            # Return None to indicate that no valid distances were found
+            return None
             
         except Exception as e:
             logger.warning(f"Error extracting distances from record: {str(e)}")
-            return [50.0]  # Return a default value instead of None
+            return None  # Return None to indicate extraction error
     
     def check_for_drift(self) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """Check if drift has been detected.
