@@ -830,11 +830,13 @@ def main():
                     delta=detector_config.get("delta", 0.1),
                     lambda_threshold=detector_config.get("lambda_threshold", 5.0),
                     exit_threshold_factor=detector_config.get("exit_threshold_factor", 0.7),
-                    warm_up_samples=detector_config.get("warm_up_samples", 10),
-                    reference_update_interval=detector_config.get("reference_update_interval", 30),
+                    high_confidence_threshold=detector_config.get("high_confidence_threshold", 0.9),
+                    stable_known_classes=detector_config.get("stable_known_classes", ["lego", "stone", "leaf"]),
+                    warm_up_samples=detector_config.get("warm_up_samples", 100),
+                    reference_update_interval=detector_config.get("reference_update_interval", 50),
                     reference_update_factor=detector_config.get("reference_update_factor", 0.05),
                     pause_reference_update_during_drift=detector_config.get("pause_reference_update_during_drift", True),
-                    drift_cooldown_period=detector_config.get("drift_cooldown_period", 20)
+                    drift_cooldown_period=detector_config.get("drift_cooldown_period", 30)
                 )
                 
                 # Register drift callback
