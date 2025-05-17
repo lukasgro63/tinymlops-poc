@@ -45,8 +45,8 @@
     "drift_detectors": [
       {
         "type": "KNNDistanceMonitor",
-        "delta": 10, 
-        "lambda_threshold": 25,
+        "delta": 5, 
+        "lambda_threshold": 50,
         "exit_threshold_factor": 0.7,
         "high_confidence_threshold": 0.9,
         "stable_known_classes": ["lego", "stone", "leaf"],

@@ -1,12 +1,24 @@
 # OPL List of Todos
 
-- TODO: Fix Connectivity Trend Chart auf der Homepage. Die active Devices werden nicht mehr richtig angezeigt. -> Methode wie man die richtig bekommt ist in Der device Liste 
 
-- TODO: Device Seite überarbieten. Avg Inference Time, Avg CPU Usage und Avg Memory Usage Status Cards sind nicht nützlich, wenn wir mehre geräte haben. Daher ein Chart erstellen, wo pro device diese metriken im zeitverklauf abgebildet werden. Siehe dazu anlog wie Model Performance chart aufgesetzt wurde
+- TODO: Top Devices by Package Count soll ein stacked bar chart sein. Per device will ich die packages "aufgestapelt sehen" per device. Wobei die gleiche farbschmatik wie in dem Package Upload Timeline auf dem Home (dashbnoard) seite angwendet werden muss.
 
-- TODO: Device Liste: Package Icon in Actions entfernen
 
-- TODO: Aus dem Model Performance Chart die System Metriken entfernen, diese sind Device spezifisch und nicht Model spezifisch
+
+
+- TODO: Aus dem Model Performance Chart die System Metriken entfernen, diese sind Device spezifisch und nicht Model spezifisch. Also genau diese weg: System CPU Percentage avg, System Memory. Und an derm chart passt auch nicht, dass da in den filtern ein tagss filter ist, das feld muss raus, hat keine funktion
+
+
+- TODO: bei allen charts soll die filter option per defaulat aus sein
+
+
+_____________
+
+- TODO: Device soll einen geo stempel mitsenden, wo es sich beffindet (also in tinylcm -> am besten bei device id) Im backend und UI können wir dann eine Karte einbauen, wo die devices sich befinden. Je mehr deives zb an einem standort sind, desto größer wird der kreis an diesem. Zusätzlich hover funktionen, die mir dann die device id und den namen des devices ziegen. --> Prüfen, wie wir on devie per http den standort bekommen.wlan triangulation oder so. Das ist dann die erste version. Die zweite version ist dann, dass wir das in der UI auch anzeigen können. Also eine Karte, wo die devices sich befinden. Je mehr deives zb an einem standort sind, desto größer wird der kreis an diesem. Zusätzlich hover funktionen, die mir dann die device id und den namen des devices ziegen. Die option, onb es eiene geo stemp sendet soll zudem optinal sein, also in der config des app codes auswählbar sei (z.b. config: /Users/lukasgrodmeier/Documents/GitHub/tinymlops-poc/examples/scenario2_drift_objects/config_scenario2.json)
+
+- TODO: Platfrom extraktion on device: Wir wollen eher die OS Version haben. Bsp. Raspberry, dort sollte dann stehen PI Zero, PI 5, ... und OS:  bookworm, bullsey, usw, und nicht die vollstöndige, wie aktuell: Linux-6.12.25+rpt-rpi-v7-armv7l-with-glibc2.36
+
+
 
 - TODO: Data Hub Seite fixen, es werden wenn man auf die seite geht und all devices angewählt hat die daten nicht richtig geladen. Wenn man dann device auswählt, ist ein prediction typoe automatisch drin, dieser zeigt aber nicht die richtigen bilder an, erst, nachdem man den prediction type gewechselt hat, lädt dies richtig. -> Fixen, dass die Daten immer richtig geladen werden
 
@@ -51,4 +63,8 @@
 
 - TODO: Data versioning muss implementiert werden. Data Hub auch um Training Data ergänzen, soll als mein warehouse dienen. Plus dort kann ich Daten von prediction oder drift in den training data hub verschieben. -> Sieh auch TODO zu retraining pipeline, diese baut dann hierauf auf.
 
-- 
+- TODO: Chatbot einbauen, der mir bei Fragen hilft. -> Siehe auch TODO zu Spinx und Quickstart guide. Dort kann ich dann auch die API ansprechen, und mir die Endpoints zeigen lassen.
+
+- TODO : Anziegen der Charts (dateb) für larning --Y PCA verteilung, loss usw. --> Siehe auch TODO zu retraining pipeline, diese baut dann hierauf auf.
+
+- TODO: Mother Style für die components mit folter, bzw fpr alle anlegen, die wir haben. Also auch für die charts, und die tables. Diese sollen dann in der UI immer gleich aussehen.

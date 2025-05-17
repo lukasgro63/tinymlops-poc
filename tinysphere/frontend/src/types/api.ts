@@ -184,6 +184,15 @@ export interface ModelPerformanceData {
   run_id?: string;
 }
 
+export interface DevicePerformanceData {
+  device_id: string;
+  metric_name: string;
+  value: number | null;  // Allow null for missing metrics
+  timestamp: number;
+  version?: number;      // For consistency with model data format
+  run_id?: string;
+}
+
 export interface ModelVersionMetrics {
   version: number;
   stage: string;

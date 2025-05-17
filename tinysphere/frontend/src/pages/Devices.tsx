@@ -1,6 +1,7 @@
 // src/pages/Devices.tsx
 import DeviceIcon from '@mui/icons-material/Devices';
 import DownloadIcon from '@mui/icons-material/Download';
+import FilterListIcon from '@mui/icons-material/FilterList';
 import InfoIcon from '@mui/icons-material/Info';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import MemoryIcon from '@mui/icons-material/Memory';
@@ -38,6 +39,7 @@ import ErrorDisplay from '../components/common/ErrorDisplay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ConnectivityTrendChart from '../components/common/ConnectivityTrendChart';
 import DeviceDetailsDialog from '../components/common/DeviceDetailsDialog';
+import DevicePerformanceChart from '../components/common/DevicePerformanceChart';
 import DeviceStatusChart from '../components/common/DeviceStatusChart';
 import PlatformDistributionChart from '../components/common/PlatformDistributionChart';
 import SectionCard from '../components/common/SectionCard';
@@ -95,9 +97,17 @@ const DevicesPage: React.FC = () => {
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [openDialog, setOpenDialog] = useState<boolean>(false);
   
+  // Filter visibility state
+  const [filtersVisible, setFiltersVisible] = useState<boolean>(true);
+  
   // Automatische Aktualisierung
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  
+  // Performance Chart State
+  const [performanceChartFiltersVisible, setPerformanceChartFiltersVisible] = useState<boolean>(true);
+  const [performanceChartLastUpdated, setPerformanceChartLastUpdated] = useState<Date | null>(null);
+  const devicePerformanceChartRef = React.useRef<any>(null);
 
   // Daten laden beim ersten Render
   useEffect(() => {
@@ -317,54 +327,7 @@ const DevicesPage: React.FC = () => {
   const activeCount = useMemo(() => devices.filter(d => d.is_active).length, [devices]);
   const inactiveCount = useMemo(() => devices.length - activeCount, [devices, activeCount]);
 
-  // MLflow Metriken verarbeiten
-  const getAverageMLflowMetric = useCallback((metricType: 'inference_time' | 'cpu_usage' | 'memory_usage'): number => {
-    let sum = 0;
-    let count = 0;
-
-    deviceSummaries.forEach(device => {
-      if (device.mlflow_metrics && device.mlflow_metrics[metricType]) {
-        sum += device.mlflow_metrics[metricType]!.avg * device.mlflow_metrics[metricType]!.count;
-        count += device.mlflow_metrics[metricType]!.count;
-      }
-    });
-
-    return count > 0 ? sum / count : 0;
-  }, [deviceSummaries]);
-
-  const getMLflowMetricCount = useCallback((metricType: 'inference_time' | 'cpu_usage' | 'memory_usage'): number => {
-    let count = 0;
-
-    deviceSummaries.forEach(device => {
-      if (device.mlflow_metrics && device.mlflow_metrics[metricType]) {
-        count += device.mlflow_metrics[metricType]!.count;
-      }
-    });
-
-    return count;
-  }, [deviceSummaries]);
-
-  // Check if any device has MLflow available metrics
-  const anyAvailableMetrics = useMemo(() => {
-    return deviceSummaries.some(device =>
-      device.mlflow_metrics && device.mlflow_metrics.available_metrics &&
-      device.mlflow_metrics.available_metrics.length > 0);
-  }, [deviceSummaries]);
-
-  // Get list of all available metrics
-  const allAvailableMetrics = useMemo(() => {
-    const metrics = new Set<string>();
-
-    deviceSummaries.forEach(device => {
-      if (device.mlflow_metrics && device.mlflow_metrics.available_metrics) {
-        device.mlflow_metrics.available_metrics.forEach(metric => {
-          metrics.add(metric as string);
-        });
-      }
-    });
-
-    return Array.from(metrics);
-  }, [deviceSummaries]);
+  // Diese Funktionen wurden entfernt, da sie für die neuen DevicePerformanceChart nicht mehr benötigt werden
 
   // Handler für Dialog
   const handleOpenDialog = (device: Device) => {
@@ -488,89 +451,87 @@ const DevicesPage: React.FC = () => {
             icon={<DeviceIcon style={{ fontSize: 20, color: '#0B2A5A' }} />}
             height={300}
           >
-            <ConnectivityTrendChart data={connectivityTrends} />
+            <ConnectivityTrendChart 
+              data={
+                // Wenn wir für heute Daten haben (meistens der Fall), ersetzen wir die aktive Anzahl
+                // mit der aktuellen aktiven Geräteanzahl für eine konsistentere Darstellung
+                connectivityTrends
+                .map(day => {
+                  const today = new Date().toISOString().split('T')[0];
+                  
+                  // Wenn es sich um den heutigen Tag handelt, verwenden wir die aktuelle Anzahl aktiver Geräte
+                  // anstelle der vom Backend berechneten
+                  if (day.date === today) {
+                    return {
+                      ...day,
+                      active: activeCount,
+                      inactive: day.total - activeCount
+                    };
+                  }
+                  
+                  // Für andere Tage: normale Berechnung
+                  return {
+                    ...day,
+                    inactive: day.total - day.active,
+                  };
+                })
+                // In umgekehrter Reihenfolge (neueste zuerst) sortieren
+                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                // Dann wieder umdrehen, damit der Graph von links nach rechts zeitlich korrekt ist
+                .reverse()
+              }
+            />
           </SectionCard>
         </Box>
       </Box>
 
-      {/* Zweite Reihe: Gerätemetriken-Dashboard */}
+      {/* Zweite Reihe: Gerätemetriken-Dashboard und Top-Geräte */}
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, mb: 3 }}>
-        {/* Inferenzzeit */}
-        <Box sx={{ flex: '1 1 220px', minWidth: '220px' }}>
-          <StatusCard
-            title="Avg. Inference Time"
-            value={
-              // Use MLflow metrics as primary value if available
-              deviceSummaries.some(d => d.mlflow_metrics?.inference_time)
-                ? `${getAverageMLflowMetric('inference_time').toFixed(2)} ms`
-                : `${deviceMetrics?.inference_time.avg.toFixed(2) || 0} ms`
+        {/* Geräte-Performance-Chart */}
+        <Box sx={{ flex: '2 1 600px', minWidth: '600px' }}>
+          <SectionCard
+            title="Device Performance Metrics"
+            icon={<SpeedIcon style={{ fontSize: 20, color: '#0B2A5A' }} />}
+            height={400}
+            action={
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Tooltip title="Last updated">
+                  <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
+                    {performanceChartLastUpdated ? `Updated: ${performanceChartLastUpdated.toLocaleTimeString()}` : ''}
+                  </Typography>
+                </Tooltip>
+                <Tooltip title={performanceChartFiltersVisible ? "Hide Filters" : "Show Filters"}>
+                  <IconButton 
+                    size="small" 
+                    onClick={() => setPerformanceChartFiltersVisible(!performanceChartFiltersVisible)}
+                    color={performanceChartFiltersVisible ? "primary" : "default"}
+                  >
+                    <FilterListIcon />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Refresh Data">
+                  <IconButton 
+                    size="small" 
+                    onClick={() => {
+                      // Wenn die Komponente eine refresh-Methode hat
+                      if (devicePerformanceChartRef.current?.refresh) {
+                        devicePerformanceChartRef.current.refresh();
+                      }
+                      setPerformanceChartLastUpdated(new Date());
+                    }}
+                  >
+                    <RefreshIcon />
+                  </IconButton>
+                </Tooltip>
+              </Box>
             }
-            secondaryValue={
-              // Show appropriate secondary information
-              deviceSummaries.some(d => d.mlflow_metrics?.inference_time)
-                ? `From MLflow (${getMLflowMetricCount('inference_time')} runs)`
-                : `${deviceMetrics?.inference_time.min.toFixed(2) || 0} - ${deviceMetrics?.inference_time.max.toFixed(2) || 0} ms`
-            }
-            secondaryLabel={deviceSummaries.some(d => d.mlflow_metrics?.inference_time) ? "Source" : "Range"}
-            icon={<SpeedIcon style={{ fontSize: 24, color: '#0B2A5A' }} />}
-            color="#0B2A5A"
-            tooltip={deviceSummaries.some(d => d.mlflow_metrics?.inference_time)
-              ? `MLflow metrics available: ${allAvailableMetrics.filter(m => m.includes('time') || m.includes('latency')).join(', ')}`
-              : "No MLflow metrics available. Standard device metrics shown."
-            }
-          />
-        </Box>
-
-        {/* CPU-Auslastung */}
-        <Box sx={{ flex: '1 1 220px', minWidth: '220px' }}>
-          <StatusCard
-            title="Avg. CPU Usage"
-            value={
-              // Use MLflow metrics as primary value if available
-              deviceSummaries.some(d => d.mlflow_metrics?.cpu_usage)
-                ? `${getAverageMLflowMetric('cpu_usage').toFixed(2)}%`
-                : `${deviceMetrics?.cpu_usage.avg.toFixed(2) || 0}%`
-            }
-            secondaryValue={
-              // Show appropriate secondary information
-              deviceSummaries.some(d => d.mlflow_metrics?.cpu_usage)
-                ? `From MLflow (${getMLflowMetricCount('cpu_usage')} runs)`
-                : `${deviceMetrics?.cpu_usage.min.toFixed(2) || 0}% - ${deviceMetrics?.cpu_usage.max.toFixed(2) || 0}%`
-            }
-            secondaryLabel={deviceSummaries.some(d => d.mlflow_metrics?.cpu_usage) ? "Source" : "Range"}
-            icon={<MemoryIcon style={{ fontSize: 24, color: '#E5A823' }} />}
-            color="#E5A823"
-            tooltip={deviceSummaries.some(d => d.mlflow_metrics?.cpu_usage)
-              ? `MLflow metrics available: ${allAvailableMetrics.filter(m => m.includes('cpu')).join(', ')}`
-              : "No MLflow metrics available. Standard device metrics shown."
-            }
-          />
-        </Box>
-
-        {/* Speicherauslastung */}
-        <Box sx={{ flex: '1 1 220px', minWidth: '220px' }}>
-          <StatusCard
-            title="Avg. Memory Usage"
-            value={
-              // Use MLflow metrics as primary value if available
-              deviceSummaries.some(d => d.mlflow_metrics?.memory_usage)
-                ? `${getAverageMLflowMetric('memory_usage').toFixed(2)}%`
-                : `${deviceMetrics?.memory_usage.avg.toFixed(2) || 0}%`
-            }
-            secondaryValue={
-              // Show appropriate secondary information
-              deviceSummaries.some(d => d.mlflow_metrics?.memory_usage)
-                ? `From MLflow (${getMLflowMetricCount('memory_usage')} runs)`
-                : `${deviceMetrics?.memory_usage.min.toFixed(2) || 0}% - ${deviceMetrics?.memory_usage.max.toFixed(2) || 0}%`
-            }
-            secondaryLabel={deviceSummaries.some(d => d.mlflow_metrics?.memory_usage) ? "Source" : "Range"}
-            icon={<StorageIcon style={{ fontSize: 24, color: '#4CAF50' }} />}
-            color="#4CAF50"
-            tooltip={deviceSummaries.some(d => d.mlflow_metrics?.memory_usage)
-              ? `MLflow metrics available: ${allAvailableMetrics.filter(m => m.includes('memory')).join(', ')}`
-              : "No MLflow metrics available. Standard device metrics shown."
-            }
-          />
+          >
+            <DevicePerformanceChart 
+              ref={devicePerformanceChartRef}
+              filtersVisible={performanceChartFiltersVisible}
+              onLastUpdated={(date) => setPerformanceChartLastUpdated(date)}
+            />
+          </SectionCard>
         </Box>
 
         {/* Top-Geräte */}
@@ -578,7 +539,7 @@ const DevicesPage: React.FC = () => {
           <SectionCard
             title="Top Devices by Package Count"
             icon={<LocalShippingIcon style={{ fontSize: 20, color: '#0B2A5A' }} />}
-            height={215}
+            height={400}
           >
             <TopDevicesChart data={topDevices} />
           </SectionCard>
@@ -596,6 +557,15 @@ const DevicesPage: React.FC = () => {
                 <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
                   {lastUpdated ? `Updated: ${lastUpdated.toLocaleTimeString()}` : ''}
                 </Typography>
+              </Tooltip>
+              <Tooltip title={filtersVisible ? "Hide Filters" : "Show Filters"}>
+                <IconButton 
+                  size="small" 
+                  onClick={() => setFiltersVisible(!filtersVisible)}
+                  color={filtersVisible ? "primary" : "default"}
+                >
+                  <FilterListIcon />
+                </IconButton>
               </Tooltip>
               <Tooltip title="Refresh data">
                 <IconButton size="small" onClick={() => fetchDevicesData()} disabled={loading}>
@@ -616,52 +586,77 @@ const DevicesPage: React.FC = () => {
         >
           <Box sx={{ p: 2 }}>
             {/* Filterleiste */}
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 2 }}>
-              <TextField
-                placeholder="Search devices..."
-                variant="outlined"
-                size="small"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                sx={{ flex: '1 1 250px' }}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon />
-                    </InputAdornment>
-                  ),
-                }}
-              />
+            {filtersVisible && (
+              <Box sx={{ mb: 3 }}>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 1 }}>
+                  <Box sx={{ flex: '1 1 250px', minWidth: '200px' }}>
+                    <TextField
+                      placeholder="Search devices..."
+                      variant="outlined"
+                      size="small"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      fullWidth
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <SearchIcon />
+                          </InputAdornment>
+                        ),
+                      }}
+                    />
+                  </Box>
 
-              <FormControl size="small" sx={{ minWidth: 120 }}>
-                <InputLabel id="status-select-label">Status</InputLabel>
-                <Select
-                  labelId="status-select-label"
-                  value={statusFilter}
-                  label="Status"
-                  onChange={(e: SelectChangeEvent) => setStatusFilter(e.target.value)}
-                >
-                  <MenuItem value="all">All Status</MenuItem>
-                  <MenuItem value="active">Active</MenuItem>
-                  <MenuItem value="inactive">Inactive</MenuItem>
-                </Select>
-              </FormControl>
+                  <Box sx={{ flex: '0 1 150px', minWidth: '120px' }}>
+                    <FormControl size="small" fullWidth>
+                      <InputLabel id="status-select-label">Status</InputLabel>
+                      <Select
+                        labelId="status-select-label"
+                        value={statusFilter}
+                        label="Status"
+                        onChange={(e: SelectChangeEvent) => setStatusFilter(e.target.value)}
+                      >
+                        <MenuItem value="all">All Status</MenuItem>
+                        <MenuItem value="active">Active</MenuItem>
+                        <MenuItem value="inactive">Inactive</MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Box>
 
-              <FormControl size="small" sx={{ minWidth: 150 }}>
-                <InputLabel id="platform-select-label">Platform</InputLabel>
-                <Select
-                  labelId="platform-select-label"
-                  value={platformFilter}
-                  label="Platform"
-                  onChange={(e: SelectChangeEvent) => setPlatformFilter(e.target.value)}
-                >
-                  <MenuItem value="all">All Platforms</MenuItem>
-                  {uniquePlatforms.map(platform => (
-                    <MenuItem key={platform} value={platform}>{platform}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Box>
+                  <Box sx={{ flex: '0 1 180px', minWidth: '150px' }}>
+                    <FormControl size="small" fullWidth>
+                      <InputLabel id="platform-select-label">Platform</InputLabel>
+                      <Select
+                        labelId="platform-select-label"
+                        value={platformFilter}
+                        label="Platform"
+                        onChange={(e: SelectChangeEvent) => setPlatformFilter(e.target.value)}
+                      >
+                        <MenuItem value="all">All Platforms</MenuItem>
+                        {uniquePlatforms.map(platform => (
+                          <MenuItem key={platform} value={platform}>{platform}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Box>
+                </Box>
+                
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => {
+                      setSearchTerm('');
+                      setStatusFilter('all');
+                      setPlatformFilter('all');
+                    }}
+                    disabled={searchTerm === '' && statusFilter === 'all' && platformFilter === 'all'}
+                  >
+                    Reset Filters
+                  </Button>
+                </Box>
+              </Box>
+            )}
 
             {/* Gerätetabelle */}
             <TableContainer>
@@ -750,14 +745,6 @@ const DevicesPage: React.FC = () => {
                                     data-test-id="info-button"
                                   >
                                     <InfoIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                                <Tooltip title="View Packages">
-                                  <IconButton 
-                                    size="small"
-                                    onClick={() => handleOpenDialog(device)}
-                                  >
-                                    <LocalShippingIcon fontSize="small" />
                                   </IconButton>
                                 </Tooltip>
                               </Box>
