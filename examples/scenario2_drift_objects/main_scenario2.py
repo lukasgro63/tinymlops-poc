@@ -40,8 +40,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.camera_handler import CameraHandler
 from utils.device_id_manager import DeviceIDManager
 from utils.preprocessors import resize_image
-from utils.sync_client import \
-    ExtendedSyncClient  # Use the extended version with additional features
+from utils.sync_client import ExtendedSyncClient  # Use the extended version with additional features
+from utils.geolocation import SimpleGeolocator  # Import the simple geolocation utility
 
 from tinylcm.core.classifiers.knn import LightweightKNN
 from tinylcm.core.data_logger.logger import DataLogger
@@ -922,6 +922,17 @@ def main():
         
         # Initialize ExtendedSyncClient for communication with TinySphere
         sync_config = tinylcm_config["sync_client"]
+        
+        # Get geolocation configuration
+        geolocation_config = tinylcm_config.get("geolocation", {"enabled": False})
+        geolocation_enabled = geolocation_config.get("enabled", False)
+        geolocation_api_key = geolocation_config.get("api_key", None)
+        geolocation_cache_ttl = geolocation_config.get("cache_ttl", 86400)  # 24 hours default
+        geolocation_update_interval = geolocation_config.get("update_interval_seconds", 3600)  # 1 hour default
+        geolocation_fallback = geolocation_config.get("fallback_coordinates", [0.0, 0.0])
+        
+        logger.info(f"Geolocation enabled: {geolocation_enabled}")
+        
         sync_client = ExtendedSyncClient(
             server_url=sync_config["server_url"],
             device_id=device_id,
@@ -929,7 +940,12 @@ def main():
             sync_dir=sync_config.get("sync_dir", "./sync_data"),
             sync_interval_seconds=sync_config["sync_interval_seconds"],
             max_retries=sync_config["max_retries"],
-            auto_register=sync_config["auto_register"]
+            auto_register=sync_config["auto_register"],
+            enable_geolocation=geolocation_enabled,
+            geolocation_api_key=geolocation_api_key,
+            geolocation_cache_ttl=geolocation_cache_ttl,
+            geolocation_update_interval=geolocation_update_interval,
+            geolocation_fallback_coordinates=geolocation_fallback
         )
 
         # Set prediction image transfer attribute directly if available in config
@@ -941,6 +957,18 @@ def main():
             logger.info("Prediction image transfer to TinySphere enabled")
         else:
             logger.info("Prediction image transfer to TinySphere disabled")
+            
+        # Log geolocation status
+        if sync_client.enable_geolocation:
+            logger.info("Geolocation enabled, device location will be sent to TinySphere")
+            # Update device info with initial location
+            success = sync_client.update_device_info()
+            if success:
+                logger.info("Initial device location sent to TinySphere")
+            else:
+                logger.warning("Failed to send initial device location to TinySphere")
+        else:
+            logger.info("Geolocation disabled")
         
         # Initialize InferencePipeline with the configured components
         pipeline = InferencePipeline(
@@ -1288,6 +1316,15 @@ def main():
                             logger.info("Sending metrics to TinySphere")
                             success = sync_client.create_and_send_metrics_package(metrics)
                             logger.info(f"Metrics package sent: {'Success' if success else 'Failed'}")
+                            
+                    # Update device info with current location
+                    if sync_client.enable_geolocation:
+                        logger.info("Updating device location...")
+                        success = sync_client.update_device_info()
+                        if success:
+                            logger.info("Device location updated successfully")
+                        else:
+                            logger.warning("Failed to update device location")
                             
                             # Send operational logs to TinySphere (raw JSONL files)
                             try:

@@ -5,10 +5,22 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
+    postgresql-client \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Zuerst TinyLCM installieren
+# Upgrade pip sofort 
+RUN pip install --upgrade pip
+
+# Konfiguriere pip für bessere Stabilität
+RUN pip config set global.timeout 180 && \
+    pip config set global.retries 10
+
+# Installiere TinyLCM-Abhängigkeiten zuerst aus einer vorgefertigten Liste
+COPY tinysphere/docker/tinylcm-requirements.txt /tmp/tinylcm-requirements.txt
+RUN pip install --no-cache-dir -r /tmp/tinylcm-requirements.txt
+
+# Jetzt installiere das eigentliche Paket
 COPY tinylcm/ /app/tinylcm/
 WORKDIR /app/tinylcm
 RUN pip install --no-cache-dir -e .
@@ -26,4 +38,8 @@ COPY tinysphere/ /app/tinysphere/
 # PYTHONPATH setzen für korrekte Imports
 ENV PYTHONPATH=/app/tinylcm:/app
 
-CMD ["uvicorn", "tinysphere.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Startup script erstellen
+COPY tinysphere/docker/start-api.sh /app/start-api.sh
+RUN chmod +x /app/start-api.sh
+
+CMD ["/app/start-api.sh"]

@@ -1,19 +1,64 @@
 # api/main.py
 import os
+import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
-from tinysphere.api.dependencies.db import engine
+from tinysphere.api.dependencies.db import engine, SessionLocal
 # Import database models
 from tinysphere.db.models import Base
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Create necessary directories
 os.makedirs("uploads", exist_ok=True)
 os.makedirs("package_extracts", exist_ok=True)
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
+# WICHTIG: Wir wählen einen der beiden Ansätze:
+# 1. Entweder Alembic-Migrationen (empfohlen für Produktion, verfolgt Schemaänderungen)
+# 2. Oder Base.metadata.create_all() (einfacher für Entwicklung, erstellt alle Tabellen neu)
+
+# Wir überprüfen den Environment-Modus
+# - Für Entwicklung: Base.metadata.create_all()
+# - Für Produktion: Keine automatische Schemaerstellung (Alembic-Migrationen übernehmen das)
+if os.getenv("ENVIRONMENT", "").lower() == "development":
+    logger.info("DEVELOPMENT MODE: Creating database schema automatically")
+    Base.metadata.create_all(bind=engine)
+else:
+    # In production, we rely solely on Alembic migrations
+    # Database schema should already be created by migrations
+    logger.info("PRODUCTION MODE: Using Alembic migrations for schema management")
+    
+    # OPTIONAL: Verifiziere das Schema, um Diagnose zu erleichtern
+    try:
+        db = SessionLocal()
+        try:
+            # Überprüfen Sie die wichtigsten Tabellen und Spalten
+            tables_query = text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+            tables = [row[0] for row in db.execute(tables_query)]
+            
+            if "devices" in tables:
+                # Prüfe, ob Geolokationsspalten existieren
+                columns_query = text("SELECT column_name FROM information_schema.columns WHERE table_name = 'devices' AND column_name IN ('latitude', 'longitude', 'geo_accuracy')")
+                geo_columns = [row[0] for row in db.execute(columns_query)]
+                
+                if len(geo_columns) == 3:
+                    logger.info("Database check: All geolocation columns exist in devices table")
+                else:
+                    missing = set(['latitude', 'longitude', 'geo_accuracy']) - set(geo_columns)
+                    logger.warning(f"Database check: Missing geolocation columns in devices table: {missing}")
+                
+            else:
+                logger.warning("Database check: 'devices' table not found in database")
+                
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Database check error: {e}")
 
 # Wir verwenden direkt den UTCBaseModel mit field_serializer für die Zeitzonenbehandlung
 # Das war der Ansatz, der bei unserer ursprünglichen Implementation funktioniert hat

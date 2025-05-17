@@ -46,6 +46,13 @@ try:
 except ImportError:
     STATE_MANAGER_AVAILABLE = False
 
+# Optional import for geolocation
+try:
+    from tinylcm.utils.geolocation import Geolocator
+    GEOLOCATION_AVAILABLE = True
+except ImportError:
+    GEOLOCATION_AVAILABLE = False
+
 
 class SyncClient:
     def __init__(
@@ -62,7 +69,11 @@ class SyncClient:
         drift_detectors: Optional[List[Any]] = None,
         adaptation_tracker: Optional['AdaptationTracker'] = None,
         state_manager: Optional['AdaptiveStateManager'] = None,
-        enable_prediction_images: bool = False
+        enable_prediction_images: bool = False,
+        enable_geolocation: bool = False,
+        geolocation_api_key: Optional[str] = None,
+        geolocation_update_interval: int = 3600,
+        geolocation_fallback_coordinates: Optional[Tuple[float, float]] = None
     ):
         if not self.validate_server_url(server_url):
             raise ValueError(f"Invalid server URL: {server_url}")
@@ -73,6 +84,25 @@ class SyncClient:
         self.auto_register = auto_register
         self.enable_prediction_images = enable_prediction_images
         self.pending_prediction_images = []
+        
+        # Geolocation setup
+        self.enable_geolocation = enable_geolocation
+        self.geolocation_update_interval = geolocation_update_interval
+        self.geolocation_fallback_coordinates = geolocation_fallback_coordinates
+        self.last_geolocation_update = 0
+        self.current_location = None
+        
+        # Initialize geolocator if enabled
+        if enable_geolocation and GEOLOCATION_AVAILABLE:
+            self.geolocator = Geolocator(
+                api_key=geolocation_api_key, 
+                fallback_coords=geolocation_fallback_coordinates
+            )
+            self.logger.info("Geolocation service initialized")
+        else:
+            self.geolocator = None
+            if enable_geolocation and not GEOLOCATION_AVAILABLE:
+                self.logger.warning("Geolocation requested but not available. Please install required packages.")
 
         # Set up sync interface
         if sync_interface is None:
@@ -111,7 +141,8 @@ class SyncClient:
 
         # Log image transfer status
         image_transfer_status = "enabled" if enable_prediction_images else "disabled"
-        self.logger.info(f"Initialized sync client for server: {server_url} (prediction image transfer: {image_transfer_status})")
+        geo_status = "enabled" if enable_geolocation and GEOLOCATION_AVAILABLE else "disabled"
+        self.logger.info(f"Initialized sync client for server: {server_url} (prediction image transfer: {image_transfer_status}, geolocation: {geo_status})")
 
         # Auto-register if needed
         if auto_register:
@@ -129,6 +160,48 @@ class SyncClient:
             return False
         return True
     
+    def _update_geolocation(self, force: bool = False) -> Dict[str, Union[float, str]]:
+        """
+        Update device geolocation information if enabled.
+        
+        Args:
+            force: If True, update even if interval hasn't passed
+            
+        Returns:
+            Dict with location data
+        """
+        # Return cached location if not time to update yet
+        current_time = time.time()
+        if not force and self.current_location and (current_time - self.last_geolocation_update) < self.geolocation_update_interval:
+            return self.current_location
+            
+        # Return empty location if geolocator not available
+        if not self.enable_geolocation or not GEOLOCATION_AVAILABLE or not self.geolocator:
+            return {
+                "latitude": 0.0,
+                "longitude": 0.0,
+                "accuracy": 0.0,
+                "source": "disabled"
+            }
+            
+        # Get location from geolocator
+        try:
+            location = self.geolocator.get_location()
+            self.current_location = location
+            self.last_geolocation_update = current_time
+            self.logger.debug(f"Updated geolocation: {location['latitude']}, {location['longitude']} (source: {location['source']})")
+            return location
+        except Exception as e:
+            self.logger.warning(f"Geolocation update failed: {str(e)}")
+            if self.current_location:
+                return self.current_location
+            return {
+                "latitude": 0.0,
+                "longitude": 0.0,
+                "accuracy": 0.0,
+                "source": "error"
+            }
+    
     def _get_device_info(self) -> Dict[str, Any]:
         import socket
         try:
@@ -137,7 +210,9 @@ class SyncClient:
         except Exception:
             hostname = "unknown"
             ip_address = "unknown"
-        return {
+            
+        # Get device info with basic details
+        device_info = {
             "device_id": self.device_id,
             "hostname": hostname,
             "ip_address": ip_address,
@@ -145,6 +220,18 @@ class SyncClient:
             "python_version": platform.python_version(),
             "tinylcm_version": self._get_tinylcm_version()
         }
+        
+        # Add geolocation data if enabled
+        if self.enable_geolocation and GEOLOCATION_AVAILABLE and self.geolocator:
+            location = self._update_geolocation()
+            device_info["location"] = {
+                "latitude": location.get("latitude", 0.0),
+                "longitude": location.get("longitude", 0.0),
+                "accuracy": location.get("accuracy", 0.0),
+                "source": location.get("source", "unknown")
+            }
+            
+        return device_info
     
     def _get_tinylcm_version(self) -> str:
         try:
@@ -173,6 +260,37 @@ class SyncClient:
             error_msg = f"Registration request failed: {str(e)}"
             self.logger.error(error_msg)
             raise TinyLCMConnectionError(error_msg)
+    
+    def update_device_info(self) -> bool:
+        """
+        Update device information on the server, including geolocation if enabled.
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        self.logger.info(f"Updating device information for {self.device_id}")
+        update_data = {
+            "device_id": self.device_id,
+            "device_info": self._get_device_info(),
+            "last_sync_time": time.time()
+        }
+        try:
+            response = self.connection_manager.execute_request(
+                method="PATCH", 
+                endpoint=f"devices/{self.device_id}", 
+                json=update_data
+            )
+            if response.status_code == 200:
+                self.logger.info(f"Successfully updated device information for {self.device_id}")
+                return True
+            else:
+                error_msg = f"Update failed: {response.status_code} - {response.text}"
+                self.logger.error(error_msg)
+                return False
+        except requests.RequestException as e:
+            error_msg = f"Update request failed: {str(e)}"
+            self.logger.error(error_msg)
+            return False
     
     def check_server_status(self) -> Dict[str, Any]:
         self.logger.debug("Checking server status")
@@ -1229,11 +1347,12 @@ class SyncClient:
         """Perform a comprehensive synchronization of all components with the server.
 
         This method synchronizes:
-        1. Quarantine buffer (samples and validation results)
-        2. Drift events and validations
-        3. Adaptation logs, snapshots, and feedback
-        4. Prediction images (if enabled)
-        5. Pending packages
+        1. Device info update (including geolocation if enabled)
+        2. Quarantine buffer (samples and validation results)
+        3. Drift events and validations
+        4. Adaptation logs, snapshots, and feedback
+        5. Prediction images (if enabled)
+        6. Pending packages
 
         Returns:
             Dictionary with comprehensive sync results
@@ -1243,6 +1362,13 @@ class SyncClient:
         results = {
             "success": True,
             "components": {}
+        }
+        
+        # Step 0: Update device information including geolocation
+        device_update_result = self.update_device_info()
+        results["components"]["device_info"] = {
+            "success": device_update_result,
+            "geolocation_enabled": self.enable_geolocation and GEOLOCATION_AVAILABLE
         }
 
         # Step 1: Sync quarantine data

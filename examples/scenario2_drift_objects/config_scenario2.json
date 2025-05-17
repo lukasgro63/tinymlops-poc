@@ -91,6 +91,13 @@
       "log_images": true,
       "log_drift_events": true,
       "max_log_size_mb": 100
+    },
+    "geolocation": {
+      "enabled": true,
+      "api_key": null,
+      "cache_ttl": 86400,
+      "update_interval_seconds": 3600,
+      "fallback_coordinates": [0.0, 0.0]
     }
   },
   "application": {

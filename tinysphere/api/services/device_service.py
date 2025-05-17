@@ -76,6 +76,9 @@ class DeviceService:
             tinylcm_version=device.tinylcm_version,
             registration_time=device.registration_time,
             device_info=device.device_info,
+            latitude=device.latitude,
+            longitude=device.longitude,
+            geo_accuracy=device.geo_accuracy,
             is_active=True
         )
         db.add(db_device)
@@ -119,7 +122,10 @@ class DeviceService:
                     tinylcm_version=device_info.get("tinylcm_version"),
                     is_active=True,
                     device_info=device_info,
-                    last_sync_time=current_time
+                    last_sync_time=current_time,
+                    latitude=device_data.get("latitude"),
+                    longitude=device_data.get("longitude"),
+                    geo_accuracy=device_data.get("geo_accuracy")
                 )
                 
                 return DeviceService.update_device(db, device_id, update_data)
@@ -147,7 +153,10 @@ class DeviceService:
                     python_version=device_info.get("python_version"),
                     tinylcm_version=device_info.get("tinylcm_version"),
                     device_info=device_info,
-                    registration_time=registration_time
+                    registration_time=registration_time,
+                    latitude=device_data.get("latitude"),
+                    longitude=device_data.get("longitude"),
+                    geo_accuracy=device_data.get("geo_accuracy")
                 )
                 
                 return DeviceService.create_device(db, device_create)
@@ -323,3 +332,51 @@ class DeviceService:
                 })
         
         return result
+        
+    @staticmethod
+    def get_all_device_locations(db: Session) -> List[Dict[str, Any]]:
+        """Get location data for all devices with valid coordinates."""
+        devices = db.query(Device).filter(
+            Device.latitude.isnot(None),
+            Device.longitude.isnot(None)
+        ).all()
+        
+        result = []
+        # Get current UTC time for last_update field
+        current_time = datetime.now(timezone.utc).isoformat()
+        
+        for device in devices:
+            result.append({
+                "device_id": device.device_id,
+                "name": device.hostname or device.device_id,
+                "latitude": device.latitude,
+                "longitude": device.longitude,
+                "geo_accuracy": device.geo_accuracy,  # Renamed from accuracy to geo_accuracy
+                "accuracy": device.geo_accuracy,      # Keep for backward compatibility
+                "is_active": device.is_active,
+                "last_update": device.last_sync_time.isoformat() if device.last_sync_time else current_time
+            })
+            
+        return result
+        
+    @staticmethod
+    def get_device_location(db: Session, device_id: str) -> Optional[Dict[str, Any]]:
+        """Get location data for a specific device."""
+        device = db.query(Device).filter(Device.device_id == device_id).first()
+        
+        if not device or device.latitude is None or device.longitude is None:
+            return None
+        
+        # Get current UTC time for last_update field
+        current_time = datetime.now(timezone.utc).isoformat()
+            
+        return {
+            "device_id": device.device_id,
+            "name": device.hostname or device.device_id,
+            "latitude": device.latitude,
+            "longitude": device.longitude,
+            "geo_accuracy": device.geo_accuracy,  # Renamed from accuracy to geo_accuracy
+            "accuracy": device.geo_accuracy,      # Keep for backward compatibility
+            "is_active": device.is_active,
+            "last_update": device.last_sync_time.isoformat() if device.last_sync_time else current_time
+        }

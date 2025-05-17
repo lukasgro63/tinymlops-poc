@@ -4,6 +4,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import InfoIcon from '@mui/icons-material/Info';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
+import LocationOnIcon from '@mui/icons-material/LocationOn';
 import MemoryIcon from '@mui/icons-material/Memory';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
@@ -39,6 +40,7 @@ import ErrorDisplay from '../components/common/ErrorDisplay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ConnectivityTrendChart from '../components/common/ConnectivityTrendChart';
 import DeviceDetailsDialog from '../components/common/DeviceDetailsDialog';
+import DeviceMapChart from '../components/common/DeviceMapChart';
 import DevicePerformanceChart from '../components/common/DevicePerformanceChart';
 import DeviceStatusChart from '../components/common/DeviceStatusChart';
 import PlatformDistributionChart from '../components/common/PlatformDistributionChart';
@@ -49,12 +51,14 @@ import {
   getDeviceConnectivityTrends,
   getDeviceMetrics,
   getDevicePlatforms,
+  getDeviceLocations,
   getDevices,
   getDevicesSummary,
   getTopDevices
 } from '../services/api';
 import {
   Device,
+  DeviceLocation,
   DeviceMetrics,
   DeviceSummary,
   DeviceTrend,
@@ -72,6 +76,7 @@ const DevicesPage: React.FC = () => {
   // State für Device-Daten
   const [devices, setDevices] = useState<Device[]>([]);
   const [deviceSummaries, setDeviceSummaries] = useState<DeviceSummary[]>([]);
+  const [deviceLocations, setDeviceLocations] = useState<DeviceLocation[]>([]);
   const [platformData, setPlatformData] = useState<PlatformDistribution[]>([]);
   const [deviceMetrics, setDeviceMetrics] = useState<DeviceMetrics | null>(null);
   const [connectivityTrends, setConnectivityTrends] = useState<DeviceTrend[]>([]);
@@ -140,6 +145,7 @@ const DevicesPage: React.FC = () => {
       const [
         devicesData,
         summariesData,
+        locationsData,
         platformsData,
         metricsData,
         trendsData,
@@ -147,6 +153,7 @@ const DevicesPage: React.FC = () => {
       ] = await Promise.all([
         getDevices(),
         getDevicesSummary(),
+        getDeviceLocations(),
         getDevicePlatforms(),
         getDeviceMetrics(),
         getDeviceConnectivityTrends(7),
@@ -156,6 +163,7 @@ const DevicesPage: React.FC = () => {
       // State mit echten Daten aktualisieren
       setDevices(devicesData);
       setDeviceSummaries(summariesData);
+      setDeviceLocations(locationsData.locations || []);
       setPlatformData(platformsData);
       setDeviceMetrics(metricsData);
       setConnectivityTrends(trendsData);
@@ -485,7 +493,27 @@ const DevicesPage: React.FC = () => {
         </Box>
       </Box>
 
-      {/* Zweite Reihe: Gerätemetriken-Dashboard und Top-Geräte */}
+      {/* Zweite Reihe: Gerätestandorte */}
+      <Box sx={{ mb: 3 }}>
+        <SectionCard
+          title="Device Locations"
+          icon={<LocationOnIcon style={{ fontSize: 20, color: '#0B2A5A' }} />}
+          height={400}
+        >
+          <DeviceMapChart 
+            devices={deviceLocations} 
+            height={360} 
+            onDeviceClick={(deviceId) => {
+              const device = devices.find(d => d.device_id === deviceId);
+              if (device) {
+                handleOpenDialog(device);
+              }
+            }}
+          />
+        </SectionCard>
+      </Box>
+
+      {/* Dritte Reihe: Gerätemetriken-Dashboard und Top-Geräte */}
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, mb: 3 }}>
         {/* Geräte-Performance-Chart */}
         <Box sx={{ flex: '2 1 600px', minWidth: '600px' }}>

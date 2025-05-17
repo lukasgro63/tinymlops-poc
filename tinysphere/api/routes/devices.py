@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from tinysphere.api.dependencies.db import get_db
 from tinysphere.api.models.device import (Device, DeviceRegistrationRequest,
-                                          DeviceRegistrationResponse)
+                                          DeviceRegistrationResponse, DeviceLocation)
 from tinysphere.api.services.device_service import DeviceService
 from tinysphere.api.services.notification_service import NotificationService
 
@@ -117,3 +117,40 @@ def register_device(registration: DeviceRegistrationRequest, db: Session = Depen
             registered=False,
             message=f"Registration failed: {str(e)}"
         )
+        
+@router.get("/locations")
+def get_all_device_locations(limit: int = 100, offset: int = 0, db: Session = Depends(get_db)):
+    """Get location data for all devices with valid coordinates."""
+    try:
+        locations = DeviceService.get_all_device_locations(db)
+        
+        # Implement pagination if needed
+        if offset >= len(locations):
+            paginated = []
+        else:
+            end = min(offset + limit, len(locations))
+            paginated = locations[offset:end]
+            
+        # Return in the format expected by the frontend
+        return {
+            "total": len(locations),
+            "locations": paginated
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching device locations: {str(e)}")
+
+@router.get("/{device_id}/location", response_model=DeviceLocation)
+def get_device_location(device_id: str, db: Session = Depends(get_db)):
+    """Get location data for a specific device."""
+    try:
+        location = DeviceService.get_device_location(db, device_id)
+        if location is None:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Device not found or location data not available for device: {device_id}"
+            )
+        return location
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching device location: {str(e)}")

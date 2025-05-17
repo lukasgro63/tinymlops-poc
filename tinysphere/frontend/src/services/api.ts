@@ -553,3 +553,96 @@ export const getOperationalLogs = async (
   
   return response.data;
 };
+
+// Device locations API methods
+export const getDeviceLocations = async (
+  limit: number = 100,
+  offset: number = 0
+): Promise<{total: number; locations: Array<{device_id: string; latitude: number; longitude: number; location_name?: string; last_update: string}>}> => {
+  try {
+    const response = await axios.get(
+      `${API_BASE_URL}/devices/locations?limit=${limit}&offset=${offset}`
+    );
+    
+    // Check if response matches expected format
+    if (response.data && Array.isArray(response.data)) {
+      // Handle case where API returns array instead of object
+      console.log("API returned array format for locations, converting to object format");
+      const locations = response.data.map((loc: any) => ({
+        device_id: loc.device_id,
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        location_name: loc.location_name || loc.name,
+        last_update: loc.last_update || (new Date()).toISOString()
+      }));
+      
+      return {
+        total: locations.length,
+        locations: locations
+      };
+    }
+    
+    // Handle case where API returns expected format
+    if (response.data && response.data.locations) {
+      // Make sure each location has a last_update field
+      const locations = response.data.locations.map((loc: any) => ({
+        ...loc,
+        last_update: loc.last_update || (new Date()).toISOString()
+      }));
+      
+      return {
+        total: response.data.total,
+        locations: locations
+      };
+    }
+    
+    // Fallback for any other unexpected format
+    console.error("Unexpected format for location data:", response.data);
+    return {
+      total: 0,
+      locations: []
+    };
+  } catch (error) {
+    console.error("Error fetching device locations:", error);
+    return {
+      total: 0,
+      locations: []
+    };
+  }
+};
+
+export const getDeviceLocation = async (deviceId: string): Promise<{device_id: string; latitude: number; longitude: number; location_name?: string; last_update: string} | null> => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/devices/${deviceId}/location`);
+    
+    if (!response.data) return null;
+    
+    // Handle case where name is used instead of location_name
+    const locationData = {
+      ...response.data,
+      location_name: response.data.location_name || response.data.name,
+      // Ensure last_update exists
+      last_update: response.data.last_update || (new Date()).toISOString()
+    };
+    
+    return locationData;
+  } catch (error) {
+    console.error(`Error fetching location for device ${deviceId}:`, error);
+    return null;
+  }
+};
+
+export const updateDeviceLocation = async (
+  deviceId: string,
+  location: {
+    latitude: number;
+    longitude: number;
+    location_name?: string;
+  }
+): Promise<{device_id: string; latitude: number; longitude: number; location_name?: string; last_update: string}> => {
+  const response = await axios.patch<{device_id: string; latitude: number; longitude: number; location_name?: string; last_update: string}>(
+    `${API_BASE_URL}/devices/${deviceId}/location`,
+    location
+  );
+  return response.data;
+};

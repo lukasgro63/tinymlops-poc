@@ -1,20 +1,19 @@
 # OPL List of Todos
 
+- TODO: Device (tinylcm) soll einen geo stempel mitsenden, wo es sich beffindet (also in tinylcm -> am besten bei device id) Im backend und UI können wir dann eine Karte einbauen, wo die devices sich befinden. Je mehr deives zb an einem standort sind, desto größer wird der kreis an diesem. Zusätzlich hover funktionen, die mir dann die device id und den namen des devices ziegen. --> Prüfen, wie wir on devie per http den standort bekommen.wlan triangulation oder so. Das ist dann die erste version. Die zweite version ist dann, dass wir das in der UI auch anzeigen können. Also eine Karte, wo die devices sich befinden. Je mehr deives zb an einem standort sind, desto größer wird der kreis an diesem. Zusätzlich hover funktionen, die mir dann die device id und den namen des devices ziegen. Die option, onb es eiene geo stemp sendet soll zudem optinal sein, also in der config des app codes auswählbar sei (z.b. config: /Users/lukasgrodmeier/Documents/GitHub/tinymlops-poc/examples/scenario2_drift_objects/config_scenario2.json). Und das ganze soll auch als component erstellt werdne, diese will ich dann auf der hompage haben und zwar neben dem Model Perfoemsnce chart Und auf der device seite, dort soll es so gemacht werden, dass das Top Devices by Package Count in die Zeile darpber geht, also zu den anderen charts dort, dann ahbn wir 4 da. und in der zweiten zeile soll das geo chart und das Device Performance Metrics sein. Bei dem geo chart will ich, dass selbes styling wie bei allen andren angewendet wird ´, 
 
-- TODO: Top Devices by Package Count soll ein stacked bar chart sein. Per device will ich die packages "aufgestapelt sehen" per device. Wobei die gleiche farbschmatik wie in dem Package Upload Timeline auf dem Home (dashbnoard) seite angwendet werden muss.
+- TODO: Im Data Hub die Logs müssen aggregiert werdden. Device sendet je nach einstellung alle paar sekunden ioder mInuten die Logs. Wir hjaben immer eine Session ID, für diese dann aber zb. 100 Logs. Es soll für eine Session ID imme rnur ein gesamtes log geben. Dieses muss daher im BAckend immer aufgemacht werden, und die neuen logs hinzugefügt werdne. -> Ebenfalls option, logs zu löschen, dann ebenfalls aus minio löschen. 
 
+
+
+- TODO: Autorefresh auf der Drift Page entfernen
 
 
 
 - TODO: Aus dem Model Performance Chart die System Metriken entfernen, diese sind Device spezifisch und nicht Model spezifisch. Also genau diese weg: System CPU Percentage avg, System Memory. Und an derm chart passt auch nicht, dass da in den filtern ein tagss filter ist, das feld muss raus, hat keine funktion
 
 
-- TODO: bei allen charts soll die filter option per defaulat aus sein
 
-
-_____________
-
-- TODO: Device soll einen geo stempel mitsenden, wo es sich beffindet (also in tinylcm -> am besten bei device id) Im backend und UI können wir dann eine Karte einbauen, wo die devices sich befinden. Je mehr deives zb an einem standort sind, desto größer wird der kreis an diesem. Zusätzlich hover funktionen, die mir dann die device id und den namen des devices ziegen. --> Prüfen, wie wir on devie per http den standort bekommen.wlan triangulation oder so. Das ist dann die erste version. Die zweite version ist dann, dass wir das in der UI auch anzeigen können. Also eine Karte, wo die devices sich befinden. Je mehr deives zb an einem standort sind, desto größer wird der kreis an diesem. Zusätzlich hover funktionen, die mir dann die device id und den namen des devices ziegen. Die option, onb es eiene geo stemp sendet soll zudem optinal sein, also in der config des app codes auswählbar sei (z.b. config: /Users/lukasgrodmeier/Documents/GitHub/tinymlops-poc/examples/scenario2_drift_objects/config_scenario2.json)
 
 - TODO: Platfrom extraktion on device: Wir wollen eher die OS Version haben. Bsp. Raspberry, dort sollte dann stehen PI Zero, PI 5, ... und OS:  bookworm, bullsey, usw, und nicht die vollstöndige, wie aktuell: Linux-6.12.25+rpt-rpi-v7-armv7l-with-glibc2.36
 
@@ -32,7 +31,7 @@ _____________
 
 - TODO: Zu viele Notifictaions. Keine Notification, wenn ein package erfolgreich verarbeitet wurde. -> nur wenn ein Fehler auftritt
 
-- TODO: Autorefresh auf der Drift Page entfernen
+
 
 - TODO: Drift page neu aufbauen. So wie die Anderen sietn auch, mit mehren einzelen charts.
 
@@ -57,7 +56,7 @@ _____________
 
 - TODO: Self Customization der Homepage. Der USer soll sein Dahboard slebt anpassen können. Dazu dieses in Sections und Spalten unterteilen. Dann kann in diese Charts / Tabellen die zur Verfügung sind, "hineingezogen" werden. Diese werden dann in der DB gespeichert und beim laden der Seite wieder angezeigt (User Management vorrausgesetzt für individuelle, sonst oer deoplyoment).
 
-- TODO: Im Data Hub die Logs müssen aggregiert werdden. Device sendet je nach einstellung alle paar sekunden ioder mInuten die Logs. Wir hjaben immer eine Session ID, für diese dann aber zb. 100 Logs. Es soll für eine Session ID imme rnur ein gesamtes log geben. Dieses muss daher im BAckend immer aufgemacht werden, und die neuen logs hinzugefügt werdne. -> Ebenfalls option, logs zu löschen, dann ebenfalls aus minio löschen. 
+
 
 - TODO: Spinx dokumentation erstellen und in frontend einbinden. Sowie Quickstart Examples guide erstellen.
 
@@ -68,3 +67,5 @@ _____________
 - TODO : Anziegen der Charts (dateb) für larning --Y PCA verteilung, loss usw. --> Siehe auch TODO zu retraining pipeline, diese baut dann hierauf auf.
 
 - TODO: Mother Style für die components mit folter, bzw fpr alle anlegen, die wir haben. Also auch für die charts, und die tables. Diese sollen dann in der UI immer gleich aussehen.
+
+- TODO: In der UI will ich die config sehen können, die ich für das device habe. Also die config, die ich in der app config habe. Das mit uzweio iptionen, als raw json oder schön aufberitet inb der ui in kacheln. --> 

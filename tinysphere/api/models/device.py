@@ -13,6 +13,9 @@ class DeviceBase(BaseModel):
     python_version: Optional[str] = None
     tinylcm_version: Optional[str] = None
     device_info: Optional[Dict[str, Any]] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    geo_accuracy: Optional[float] = None
 
 
 class DeviceCreate(DeviceBase):
@@ -28,6 +31,9 @@ class DeviceUpdate(BaseModel):
     device_info: Optional[Dict[str, Any]] = None
     is_active: Optional[bool] = None
     last_sync_time: Optional[datetime] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    geo_accuracy: Optional[float] = None
     
     class Config:
         from_attributes = True
@@ -50,6 +56,9 @@ class DeviceRegistrationRequest(BaseModel):
     ip_address: Optional[str] = None
     registration_time: Optional[datetime] = None
     device_info: Optional[Dict[str, Any]] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    geo_accuracy: Optional[float] = None
 
 
 # Response models
@@ -58,3 +67,12 @@ class DeviceRegistrationResponse(BaseModel):
     status: str
     registered: bool
     message: str
+    
+    
+class DeviceLocation(BaseModel):
+    device_id: str
+    name: str
+    latitude: float
+    longitude: float
+    accuracy: Optional[float] = None
+    is_active: bool

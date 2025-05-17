@@ -9,6 +9,7 @@ import TimelineIcon from '@mui/icons-material/Timeline';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import LocationOnIcon from '@mui/icons-material/LocationOn';
 import { Box, Typography, Tooltip, IconButton } from '@mui/material';
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -16,6 +17,7 @@ import ErrorDisplay from '../components/common/ErrorDisplay';
 
 // Components
 import ModelPerformanceChart from '../components/common/ModelPerformanceChart';
+import DeviceMapChart from '../components/common/DeviceMapChart';
 import PackageUploadChart from '../components/common/PackageUploadChart';
 import RecentActivitiesList from '../components/common/RecentActivitiesList';
 import RecentDriftEventsTable from '../components/common/RecentDriftEventsTable';
@@ -26,6 +28,7 @@ import SystemStatusIndicator from '../components/common/SystemStatusIndicator';
 // API Services
 import {
   getDevicesSummary,
+  getDeviceLocations,
   getModels,
   getModelsPerformance,
   getModelsSummary,
@@ -35,6 +38,8 @@ import {
 } from '../services/api';
 import {
   DeviceSummary,
+  DeviceLocation,
+  DeviceLocationsResponse,
   ModelPerformanceData,
   ModelSummary,
   PackageActivity,
@@ -47,6 +52,7 @@ const Dashboard: React.FC = () => {
   // State for dashboard data
   const [systemStatus, setSystemStatus] = useState<any>(null);
   const [deviceSummaries, setDeviceSummaries] = useState<DeviceSummary[]>([]);
+  const [deviceLocations, setDeviceLocations] = useState<DeviceLocation[]>([]);
   const [modelSummaries, setModelSummaries] = useState<ModelSummary[]>([]);
   const [packageActivities, setPackageActivities] = useState<PackageActivity[]>([]);
   const [modelNames, setModelNames] = useState<string[]>([]);
@@ -92,6 +98,7 @@ const Dashboard: React.FC = () => {
       const [
         statusData,
         devicesData,
+        locationsData,
         modelsData,
         activitiesData,
         modelNamesData,
@@ -99,6 +106,7 @@ const Dashboard: React.FC = () => {
       ] = await Promise.all([
         getSystemStatus(),
         getDevicesSummary(),
+        getDeviceLocations(),
         getModelsSummary(),
         getPackageActivity(7),
         getModels(),
@@ -108,6 +116,7 @@ const Dashboard: React.FC = () => {
       // Update all state
       setSystemStatus(statusData);
       setDeviceSummaries(devicesData);
+      setDeviceLocations(locationsData.locations || []);
       setModelSummaries(modelsData);
       setPackageActivities(activitiesData);
       setModelNames(modelNamesData);
@@ -236,52 +245,70 @@ const Dashboard: React.FC = () => {
         </Box>
       </Box>
       
-      {/* Bottom Row: Model Performance */}
-      <Box sx={{ mb: 3 }}>
-        <SectionCard 
-          title="Model Performance Trends"
-          icon={<ShowChartIcon style={{ fontSize: 20, color: '#00647D' }} />}
-          height={400}
-          action={
-            <Box sx={{ display: 'flex', gap: 1 }}>
-              <Tooltip title="Last updated">
-                <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
-                  {modelPerformanceLastUpdated ? `Updated: ${modelPerformanceLastUpdated.toLocaleTimeString()}` : ''}
-                </Typography>
-              </Tooltip>
-              <Tooltip title={modelPerformanceFiltersVisible ? "Hide Filters" : "Show Filters"}>
-                <IconButton 
-                  size="small" 
-                  onClick={() => setModelPerformanceFiltersVisible(!modelPerformanceFiltersVisible)}
-                  color={modelPerformanceFiltersVisible ? "primary" : "default"}
-                >
-                  <FilterListIcon />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Refresh Data">
-                <IconButton 
-                  size="small" 
-                  onClick={() => {
-                    if (modelPerformanceChartRef.current?.refresh) {
-                      modelPerformanceChartRef.current.refresh();
-                    }
-                    setModelPerformanceLastUpdated(new Date());
-                  }}
-                >
-                  <RefreshIcon />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          }
-        >
-          <ModelPerformanceChart 
-            models={modelNames} 
-            performanceData={performanceData}
-            ref={modelPerformanceChartRef}
-            filtersVisible={modelPerformanceFiltersVisible}
-            onLastUpdated={(date) => setModelPerformanceLastUpdated(date)}
-          />
-        </SectionCard>
+      {/* Bottom Row: Model Performance and Device Map */}
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, mb: 3 }}>
+        {/* Model Performance */}
+        <Box sx={{ flex: '2 1 600px', minWidth: '500px' }}>
+          <SectionCard 
+            title="Model Performance Trends"
+            icon={<ShowChartIcon style={{ fontSize: 20, color: '#00647D' }} />}
+            height={400}
+            action={
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Tooltip title="Last updated">
+                  <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
+                    {modelPerformanceLastUpdated ? `Updated: ${modelPerformanceLastUpdated.toLocaleTimeString()}` : ''}
+                  </Typography>
+                </Tooltip>
+                <Tooltip title={modelPerformanceFiltersVisible ? "Hide Filters" : "Show Filters"}>
+                  <IconButton 
+                    size="small" 
+                    onClick={() => setModelPerformanceFiltersVisible(!modelPerformanceFiltersVisible)}
+                    color={modelPerformanceFiltersVisible ? "primary" : "default"}
+                  >
+                    <FilterListIcon />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Refresh Data">
+                  <IconButton 
+                    size="small" 
+                    onClick={() => {
+                      if (modelPerformanceChartRef.current?.refresh) {
+                        modelPerformanceChartRef.current.refresh();
+                      }
+                      setModelPerformanceLastUpdated(new Date());
+                    }}
+                  >
+                    <RefreshIcon />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            }
+          >
+            <ModelPerformanceChart 
+              models={modelNames} 
+              performanceData={performanceData}
+              ref={modelPerformanceChartRef}
+              filtersVisible={modelPerformanceFiltersVisible}
+              onLastUpdated={(date) => setModelPerformanceLastUpdated(date)}
+            />
+          </SectionCard>
+        </Box>
+
+        {/* Device Map */}
+        <Box sx={{ flex: '1 1 400px', minWidth: '300px' }}>
+          <SectionCard 
+            title="Device Locations"
+            icon={<LocationOnIcon style={{ fontSize: 20, color: '#00647D' }} />}
+            height={400}
+          >
+            <DeviceMapChart 
+              devices={deviceLocations} 
+              height={340} 
+              onDeviceClick={(deviceId) => navigate(`/devices?device=${deviceId}`)}
+            />
+          </SectionCard>
+        </Box>
       </Box>
       
       {/* Removed Recent Drift Events Table */}

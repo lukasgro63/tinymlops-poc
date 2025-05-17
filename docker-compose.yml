@@ -147,6 +147,7 @@ services:
       MINIO_SECURE: "False"
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: /app/tinylcm:/app  # Wichtig für Imports
+      ENVIRONMENT: "development"  # Setze auf "development" für das Neu-Erstellen der Tabellen
     ports:
       - "8000:8000"
     networks:
