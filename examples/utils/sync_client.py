@@ -948,47 +948,57 @@ class ExtendedSyncClient:
             # Get device info including geolocation
             device_info = self._get_device_info()
             
-            # Update device info via client
-            if hasattr(self.client, 'update_device_info'):
-                # Check if the method accepts arguments by inspecting its signature
-                import inspect
-                sig = inspect.signature(self.client.update_device_info)
-                if len(sig.parameters) > 0:
-                    # Method accepts arguments
-                    success = self.client.update_device_info(device_info)
-                else:
-                    # Method doesn't accept arguments
-                    # We'll update the location data in the client directly
-                    if self.enable_geolocation and 'location' in device_info:
-                        location = device_info['location']
-                        if hasattr(self.client, 'current_location'):
-                            self.client.current_location = {
-                                'latitude': location['latitude'],
-                                'longitude': location['longitude'],
-                                'accuracy': location['accuracy'],
-                                'source': location['source']
-                            }
-                            self.client.last_geolocation_update = time.time()
+            # Rather than using the client's update_device_info which may use PATCH (not supported),
+            # we'll directly use the registration endpoint which uses POST
+            success = False
+            
+            if hasattr(self.client, 'connection_manager'):
+                # Store geolocation in client for later use
+                if self.enable_geolocation and 'location' in device_info:
+                    location = device_info['location']
+                    if hasattr(self.client, 'current_location'):
+                        self.client.current_location = {
+                            'latitude': location['latitude'],
+                            'longitude': location['longitude'],
+                            'accuracy': location['accuracy'],
+                            'source': location['source']
+                        }
+                        self.client.last_geolocation_update = time.time()
+                
+                # Use POST to /devices/register endpoint instead of PATCH to update device info
+                update_data = {
+                    "device_id": self.device_id,
+                    "device_info": device_info,
+                    "last_sync_time": time.time()
+                }
+                
+                try:
+                    response = self.client.connection_manager.execute_request(
+                        method="POST", 
+                        endpoint="devices/register", 
+                        json=update_data
+                    )
                     
-                    # Then call the update method without arguments
-                    success = self.client.update_device_info()
-                    
-                if success:
-                    logger.info(f"Updated device info with server")
-                else:
-                    logger.warning(f"Failed to update device info with server")
-                return success
-            else:
-                # Fallback: use register endpoint for update (auto_register handles this)
-                if self.client.auto_register:
-                    success = self.client.register_device(device_info)
-                    if success:
-                        logger.info(f"Updated device info via registration endpoint")
+                    if response.status_code == 200:
+                        logger.info(f"Successfully updated device info with server via registration endpoint")
+                        success = True
                     else:
-                        logger.warning(f"Failed to update device info via registration")
-                    return success
-                    
-            return False
+                        error_msg = f"Update via registration failed: {response.status_code} - {response.text}"
+                        logger.warning(error_msg)
+                        success = False
+                except Exception as e:
+                    logger.warning(f"Error updating device info via registration: {e}")
+                    success = False
+            else:
+                # Fallback if we don't have connection_manager access
+                if hasattr(self.client, 'register_device'):
+                    success = self.client.register_device()
+                    if success:
+                        logger.info(f"Updated device info via register_device method")
+                    else:
+                        logger.warning(f"Failed to update device info via register_device method")
+                
+            return success
         except Exception as e:
             logger.error(f"Error updating device info: {e}")
             return False
