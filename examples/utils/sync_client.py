@@ -950,7 +950,29 @@ class ExtendedSyncClient:
             
             # Update device info via client
             if hasattr(self.client, 'update_device_info'):
-                success = self.client.update_device_info(device_info)
+                # Check if the method accepts arguments by inspecting its signature
+                import inspect
+                sig = inspect.signature(self.client.update_device_info)
+                if len(sig.parameters) > 0:
+                    # Method accepts arguments
+                    success = self.client.update_device_info(device_info)
+                else:
+                    # Method doesn't accept arguments
+                    # We'll update the location data in the client directly
+                    if self.enable_geolocation and 'location' in device_info:
+                        location = device_info['location']
+                        if hasattr(self.client, 'current_location'):
+                            self.client.current_location = {
+                                'latitude': location['latitude'],
+                                'longitude': location['longitude'],
+                                'accuracy': location['accuracy'],
+                                'source': location['source']
+                            }
+                            self.client.last_geolocation_update = time.time()
+                    
+                    # Then call the update method without arguments
+                    success = self.client.update_device_info()
+                    
                 if success:
                     logger.info(f"Updated device info with server")
                 else:
