@@ -1303,6 +1303,9 @@ def main():
             
             # Periodically sync with TinySphere
             if current_time - last_sync_time >= sync_interval:
+                # Initialize variables that might be used after the try block
+                sync_results = None
+                
                 try:
                     # Get operational metrics from monitor
                     if operational_monitor:
@@ -1316,7 +1319,9 @@ def main():
                             logger.info("Sending metrics to TinySphere")
                             success = sync_client.create_and_send_metrics_package(metrics)
                             logger.info(f"Metrics package sent: {'Success' if success else 'Failed'}")
-                            
+                        except Exception as e:
+                            logger.error(f"Failed to collect or send metrics: {str(e)}")
+                    
                     # Update device info with current location
                     if sync_client.enable_geolocation:
                         logger.info("Updating device location...")
@@ -1325,55 +1330,55 @@ def main():
                             logger.info("Device location updated successfully")
                         else:
                             logger.warning("Failed to update device location")
+                    
+                    # Send operational logs to TinySphere (raw JSONL files)
+                    if operational_monitor:
+                        try:
+                            # Get operational logs directory from the operational monitor
+                            operational_logs_dir = operational_monitor.storage_dir
+                            session_id = operational_monitor.session_id
                             
-                            # Send operational logs to TinySphere (raw JSONL files)
-                            try:
-                                # Get operational logs directory from the operational monitor
-                                operational_logs_dir = operational_monitor.storage_dir
-                                session_id = operational_monitor.session_id
-                                
-                                logger.info(f"Sending operational logs from {operational_logs_dir}")
-                                success = sync_client.create_and_send_operational_logs_package(
-                                    operational_logs_dir=str(operational_logs_dir),
-                                    session_id=session_id
-                                )
-                                logger.info(f"Operational logs package sent: {'Success' if success else 'Failed'}")
-                            except Exception as e:
-                                logger.error(f"Error sending operational logs: {e}", exc_info=True)
+                            logger.info(f"Sending operational logs from {operational_logs_dir}")
+                            success = sync_client.create_and_send_operational_logs_package(
+                                operational_logs_dir=str(operational_logs_dir),
+                                session_id=session_id
+                            )
+                            logger.info(f"Operational logs package sent: {'Success' if success else 'Failed'}")
                         except Exception as e:
-                            logger.error(f"Error getting or sending metrics: {e}", exc_info=True)
+                            logger.error(f"Error sending operational logs: {e}", exc_info=True)
 
                     # Sync all pending packages
                     logger.debug("Syncing pending packages with TinySphere")
                     sync_results = sync_client.sync_all_pending_packages()
-
-                    # Process sync results
-                    if sync_results:
-                        logger.info(f"Synced {len(sync_results)} packages with TinySphere")
-
-                        # Clean up transferred images if enabled
-                        if sync_client.enable_prediction_images and sync_config.get("cleanup_transferred_images", False):
-                            # Check if any prediction image packages were successfully synced
-                            prediction_image_packages = [r for r in sync_results
-                                                     if r.get("success") and r.get("package_type", "") == "prediction_images"]
-
-                            # Get list of transferred images for cleanup
-                            images_to_clean = []
-                            for pkg in prediction_image_packages:
-                                # Extract images from package details if available
-                                if "processed_images" in pkg:
-                                    images_to_clean.extend(pkg["processed_images"])
-
-                            # Delete transferred images
-                            if images_to_clean:
-                                success_count, fail_count = sync_client.delete_transferred_images(images_to_clean)
-                                logger.info(f"Cleaned up {success_count} transferred images, {fail_count} failed")
-                    else:
-                        logger.debug("No packages to sync with TinySphere")
-
-                    last_sync_time = current_time
+                    
                 except Exception as e:
-                    logger.warning(f"Failed to synchronize with TinySphere: {e}")
+                    logger.error(f"Error during TinySphere sync: {str(e)}")
+
+                # Process sync results
+                if sync_results:
+                    logger.info(f"Synced {len(sync_results)} packages with TinySphere")
+
+                    # Clean up transferred images if enabled
+                    if sync_client.enable_prediction_images and sync_config.get("cleanup_transferred_images", False):
+                        # Check if any prediction image packages were successfully synced
+                        prediction_image_packages = [r for r in sync_results
+                                                  if r.get("success") and r.get("package_type", "") == "prediction_images"]
+
+                        # Get list of transferred images for cleanup
+                        images_to_clean = []
+                        for pkg in prediction_image_packages:
+                            # Extract images from package details if available
+                            if "processed_images" in pkg:
+                                images_to_clean.extend(pkg["processed_images"])
+
+                        # Delete transferred images
+                        if images_to_clean:
+                            success_count, fail_count = sync_client.delete_transferred_images(images_to_clean)
+                            logger.info(f"Cleaned up {success_count} transferred images, {fail_count} failed")
+                else:
+                    logger.debug("No packages to sync with TinySphere")
+
+                last_sync_time = current_time
             
             # Sleep to maintain the desired framerate
             elapsed = time.time() - loop_start_time
