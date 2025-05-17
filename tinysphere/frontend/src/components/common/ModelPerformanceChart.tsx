@@ -61,6 +61,7 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
   const [chartData, setChartData] = useState<ChartDataItem[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   // Filter state
   const [filtersVisible, setFiltersVisible] = useState<boolean>(true);
@@ -282,6 +283,9 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
         console.log("No metrics found in performance data, using defaults");
       }
 
+      // Update last updated timestamp
+      setLastUpdated(new Date());
+
       // Don't update performanceData here as we're using the prop
     } catch (error) {
       console.error('Error fetching model performance data:', error);
@@ -421,7 +425,7 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
       .join(' ');
   };
 
-  // Basic controls (header with action buttons)
+  // Basic controls (for consistency with DevicePerformanceChart)
   const renderBasicControls = () => {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -430,6 +434,11 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
         </Box>
 
         <Box sx={{ display: 'flex', gap: 1 }}>
+          <MuiTooltip title="Last updated">
+            <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
+              {lastUpdated ? `Updated: ${lastUpdated.toLocaleTimeString()}` : ''}
+            </Typography>
+          </MuiTooltip>
           <MuiTooltip title={filtersVisible ? "Hide Filters" : "Show Filters"}>
             <IconButton 
               size="small" 

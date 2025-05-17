@@ -275,6 +275,11 @@ const ModelRegistryTable: React.FC<ModelRegistryTableProps> = ({
         </Box>
 
         <Box sx={{ display: 'flex', gap: 1 }}>
+          <Tooltip title="Last updated">
+            <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
+              {lastUpdated ? `Updated: ${lastUpdated.toLocaleTimeString()}` : ''}
+            </Typography>
+          </Tooltip>
           <Tooltip title={filtersVisible ? "Hide Filters" : "Show Filters"}>
             <IconButton 
               size="small" 

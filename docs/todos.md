@@ -1,13 +1,16 @@
 # OPL List of Todos
 
 
-- TODO: Device Seite überarbieten. Avg Inference Time, Avg CPU Usage und Avg Memory Usage Status Cards sind nicht nützlich, wenn wir mehre geräte haben. Daher ein Chart erstellen, wo pro device diese metriken im zeitverklauf abgebildet werden. Siehe dazu anlog wie Model Performance chart aufgesetzt wurde -.-.> NaN metriken rausfltern, sollen nicht im dropdown sien
+- TODO: Device Seite überarbieten. Avg Inference Time, Avg CPU Usage und Avg Memory Usage Status Cards sind nicht nützlich, wenn wir mehre geräte haben. Daher ein Chart erstellen, wo pro device diese metriken im zeitverklauf abgebildet werden. Siehe dazu anlog wie Model Performance chart aufgesetzt wurde -.-.> NaN metriken rausfltern, sollen nicht im dropddown sein. Und gleiche Frabe für alle linien. Soll analog sein wie Model Performance Trends auf der model siete, da ist es schon rochrig it den nan wetren. Muss nur noch herausgefilterte werden, was zu modlel gehört und was zu device!
 
 
 
 
 ___
 
+- TODO: Device soll einen geo stempel mitsenden, wo es sich beffindet (also in tinylcm -> am besten bei device id) Im backend und UI können wir dann eine Karte einbauen, wo die devices sich befinden. Je mehr deives zb an einem standort sind, desto größer wird der kreis an diesem. Zusätzlich hover funktionen, die mir dann die device id und den namen des devices ziegen. --> Prüfen, wie wir on devie per http den standort bekommen.wlan triangulation oder so. Das ist dann die erste version. Die zweite version ist dann, dass wir das in der UI auch anzeigen können. Also eine Karte, wo die devices sich befinden. Je mehr deives zb an einem standort sind, desto größer wird der kreis an diesem. Zusätzlich hover funktionen, die mir dann die device id und den namen des devices ziegen.
+
+- TODO: Top Devices by Package Count soll ein stacked bar chart sein. Per device will ich die packages "aufgestapelt sehen" per device. Wobei die gleiche farbschmatik wie in dem Package Upload Timeline auf dem Home (dashbnoard) seite angwendet werden muss.
 
 - TODO: Platfrom extraktion on device: Wir wollen eher die OS Version haben. Bsp. Raspberry, dort sollte dann stehen PI Zero, PI 5, ... und OS:  bookworm, bullsey, usw, und nicht die vollstöndige, wie aktuell: Linux-6.12.25+rpt-rpi-v7-armv7l-with-glibc2.36
 
@@ -60,3 +63,5 @@ ___
 - TODO: Chatbot einbauen, der mir bei Fragen hilft. -> Siehe auch TODO zu Spinx und Quickstart guide. Dort kann ich dann auch die API ansprechen, und mir die Endpoints zeigen lassen.
 
 - TODO : Anziegen der Charts (dateb) für larning --Y PCA verteilung, loss usw. --> Siehe auch TODO zu retraining pipeline, diese baut dann hierauf auf.
+
+- TODO: Mother Style für die components mit folter, bzw fpr alle anlegen, die wir haben. Also auch für die charts, und die tables. Diese sollen dann in der UI immer gleich aussehen.

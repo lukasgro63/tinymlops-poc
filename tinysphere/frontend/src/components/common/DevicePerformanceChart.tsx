@@ -45,6 +45,7 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
   const [performanceData, setPerformanceData] = useState<DevicePerformanceData[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   // Filter state
   const [filtersVisible, setFiltersVisible] = useState<boolean>(true);
@@ -211,6 +212,9 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
       } else {
         setPerformanceData(data);
       }
+      
+      // Update lastUpdated timestamp
+      setLastUpdated(new Date());
     } catch (error) {
       console.error('Error fetching device performance data:', error);
       setError('Failed to load device performance data');
@@ -329,6 +333,11 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
         </Box>
 
         <Box sx={{ display: 'flex', gap: 1 }}>
+          <MuiTooltip title="Last updated">
+            <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
+              {lastUpdated ? `Updated: ${lastUpdated.toLocaleTimeString()}` : ''}
+            </Typography>
+          </MuiTooltip>
           <MuiTooltip title={filtersVisible ? "Hide Filters" : "Show Filters"}>
             <IconButton 
               size="small" 
