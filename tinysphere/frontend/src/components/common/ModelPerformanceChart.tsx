@@ -63,7 +63,7 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   // Filter state
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
+  const [filtersVisible, setFiltersVisible] = useState<boolean>(true);
   const [timeRange, setTimeRange] = useState<number>(7); // Default 7 days
   const [maxRuns, setMaxRuns] = useState<number>(10); // Default 10 runs
   const [tags, setTags] = useState<string>(''); // Tags filter in key=value format
@@ -421,7 +421,7 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
       .join(' ');
   };
 
-  // Basic controls (model and metric)
+  // Basic controls (header with action buttons)
   const renderBasicControls = () => {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -429,49 +429,22 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
           {title && <Typography variant="h6">{title}</Typography>}
         </Box>
 
-        <Box sx={{ display: 'flex', gap: 2 }}>
-          {isModelListMode && (
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <InputLabel id="model-select-label">Model</InputLabel>
-              <Select
-                labelId="model-select-label"
-                value={selectedModel}
-                label="Model"
-                onChange={handleModelChange}
-              >
-                {models.map((model) => (
-                  <MenuItem key={model} value={model}>
-                    {model}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          )}
-
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel id="metric-select-label">Metric</InputLabel>
-            <Select
-              labelId="metric-select-label"
-              value={selectedMetric}
-              label="Metric"
-              onChange={handleMetricChange}
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <MuiTooltip title={filtersVisible ? "Hide Filters" : "Show Filters"}>
+            <IconButton 
+              size="small" 
+              onClick={() => setFiltersVisible(!filtersVisible)}
+              color={filtersVisible ? "primary" : "default"}
             >
-              {availableMetrics.map((metric) => (
-                <MenuItem key={metric} value={metric}>
-                  {formatMetricName(metric)}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          <MuiTooltip title="Toggle Advanced Filters">
-            <IconButton onClick={() => setShowAdvancedFilters(!showAdvancedFilters)} color="primary">
-              {showAdvancedFilters ? <ExpandLess /> : <FilterList />}
+              <FilterList />
             </IconButton>
           </MuiTooltip>
 
           <MuiTooltip title="Refresh Data">
-            <IconButton onClick={fetchPerformanceData} color="primary">
+            <IconButton 
+              size="small" 
+              onClick={fetchPerformanceData}
+            >
               <Refresh />
             </IconButton>
           </MuiTooltip>
@@ -480,16 +453,52 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
     );
   };
 
-  // Advanced filters
-  const renderAdvancedFilters = () => {
-    if (!showAdvancedFilters) return null;
+  // Filters section
+  const renderFilters = () => {
+    if (!filtersVisible) return null;
 
     return (
-      <Box sx={{ mb: 3, p: 2, border: '1px solid #eee', borderRadius: 1 }}>
-        <Typography variant="subtitle2" sx={{ mb: 2 }}>Advanced Filters</Typography>
+      <Box sx={{ mb: 3 }}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 1 }}>
+          {isModelListMode && (
+            <Box sx={{ flex: '1 1 250px', minWidth: '200px' }}>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="model-select-label">Model</InputLabel>
+                <Select
+                  labelId="model-select-label"
+                  value={selectedModel}
+                  label="Model"
+                  onChange={handleModelChange}
+                >
+                  {models.map((model) => (
+                    <MenuItem key={model} value={model}>
+                      {model}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Box>
+          )}
 
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-          <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
+          <Box sx={{ flex: isModelListMode ? '0 1 200px' : '1 1 250px', minWidth: isModelListMode ? '150px' : '200px' }}>
+            <FormControl size="small" fullWidth>
+              <InputLabel id="metric-select-label">Metric</InputLabel>
+              <Select
+                labelId="metric-select-label"
+                value={selectedMetric}
+                label="Metric"
+                onChange={handleMetricChange}
+              >
+                {availableMetrics.map((metric) => (
+                  <MenuItem key={metric} value={metric}>
+                    {formatMetricName(metric)}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+
+          <Box sx={{ flex: '0 1 150px', minWidth: '120px' }}>
             <TextField
               label="Time Range (days)"
               type="number"
@@ -501,7 +510,7 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
             />
           </Box>
 
-          <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
+          <Box sx={{ flex: '0 1 150px', minWidth: '120px' }}>
             <TextField
               label="Max Runs"
               type="number"
@@ -525,7 +534,7 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
           </Box>
         </Box>
 
-        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button
             variant="outlined"
             size="small"
@@ -533,7 +542,21 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
               setTimeRange(7);
               setMaxRuns(10);
               setTags('');
+              
+              // Only reset model if there are defaults available
+              if (models.length > 0 && isModelListMode) {
+                setSelectedModel(models[0]);
+              }
+              
+              // Only reset metric if there are defaults available
+              if (availableMetrics.length > 0) {
+                setSelectedMetric(availableMetrics[0]);
+                if (onMetricChange) {
+                  onMetricChange(availableMetrics[0]);
+                }
+              }
             }}
+            disabled={timeRange === 7 && maxRuns === 10 && tags === ''}
           >
             Reset Filters
           </Button>
@@ -547,11 +570,11 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
       {/* Basic controls (always shown) */}
       {(!externalSelectedMetric || isModelListMode) && renderBasicControls()}
 
-      {/* Advanced filters (toggleable) */}
-      {(!externalSelectedMetric || isModelListMode) && renderAdvancedFilters()}
+      {/* Filters (toggleable) */}
+      {(!externalSelectedMetric || isModelListMode) && renderFilters()}
 
       {/* Chart container */}
-      <Box sx={{ height: showAdvancedFilters ? 'calc(100% - 170px)' : 'calc(100% - 60px)' }}>
+      <Box sx={{ height: filtersVisible ? 'calc(100% - 170px)' : 'calc(100% - 60px)' }}>
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
             <Typography>Loading model data...</Typography>

@@ -47,7 +47,7 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   // Filter state
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
+  const [filtersVisible, setFiltersVisible] = useState<boolean>(true);
   const [timeRange, setTimeRange] = useState<number>(7); // Default 7 days
   const [maxDataPoints, setMaxDataPoints] = useState<number>(10); // Default 10 data points
 
@@ -328,55 +328,22 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
           {title && <Typography variant="h6">{title}</Typography>}
         </Box>
 
-        <Box sx={{ display: 'flex', gap: 2 }}>
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <InputLabel id="device-select-label">Device</InputLabel>
-            <Select
-              labelId="device-select-label"
-              value={selectedDevice}
-              label="Device"
-              onChange={handleDeviceChange}
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <MuiTooltip title={filtersVisible ? "Hide Filters" : "Show Filters"}>
+            <IconButton 
+              size="small" 
+              onClick={() => setFiltersVisible(!filtersVisible)}
+              color={filtersVisible ? "primary" : "default"}
             >
-              {devices.map((device) => (
-                <MenuItem key={device.device_id} value={device.device_id}>
-                  {device.hostname || device.device_id}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel id="metric-select-label">Metric</InputLabel>
-            <Select
-              labelId="metric-select-label"
-              value={selectedMetric}
-              label="Metric"
-              onChange={handleMetricChange}
-            >
-              {/* Only show metrics that are available for this device */}
-              {deviceAvailableMetrics.length > 0 
-                ? deviceAvailableMetrics.map((metric) => (
-                    <MenuItem key={metric} value={metric}>
-                      {formatMetricName(metric)}
-                    </MenuItem>
-                  ))
-                : availableMetrics.map((metric) => (
-                    <MenuItem key={metric} value={metric}>
-                      {formatMetricName(metric)}
-                    </MenuItem>
-                  ))
-              }
-            </Select>
-          </FormControl>
-
-          <MuiTooltip title="Toggle Advanced Filters">
-            <IconButton onClick={() => setShowAdvancedFilters(!showAdvancedFilters)} color="primary">
-              {showAdvancedFilters ? <ExpandLess /> : <FilterList />}
+              <FilterList />
             </IconButton>
           </MuiTooltip>
 
           <MuiTooltip title="Refresh Data">
-            <IconButton onClick={fetchDevicePerformance} color="primary">
+            <IconButton 
+              size="small" 
+              onClick={fetchDevicePerformance}
+            >
               <Refresh />
             </IconButton>
           </MuiTooltip>
@@ -385,16 +352,58 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
     );
   };
 
-  // Advanced filters
-  const renderAdvancedFilters = () => {
-    if (!showAdvancedFilters) return null;
+  // Filters section  
+  const renderFilters = () => {
+    if (!filtersVisible) return null;
 
     return (
-      <Box sx={{ mb: 3, p: 2, border: '1px solid #eee', borderRadius: 1 }}>
-        <Typography variant="subtitle2" sx={{ mb: 2 }}>Advanced Filters</Typography>
-
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-          <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
+      <Box sx={{ mb: 3 }}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 1 }}>
+          <Box sx={{ flex: '1 1 250px', minWidth: '200px' }}>
+            <FormControl size="small" fullWidth>
+              <InputLabel id="device-select-label">Device</InputLabel>
+              <Select
+                labelId="device-select-label"
+                value={selectedDevice}
+                label="Device"
+                onChange={handleDeviceChange}
+              >
+                {devices.map((device) => (
+                  <MenuItem key={device.device_id} value={device.device_id}>
+                    {device.hostname || device.device_id}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+          
+          <Box sx={{ flex: '0 1 200px', minWidth: '150px' }}>
+            <FormControl size="small" fullWidth>
+              <InputLabel id="metric-select-label">Metric</InputLabel>
+              <Select
+                labelId="metric-select-label"
+                value={selectedMetric}
+                label="Metric"
+                onChange={handleMetricChange}
+              >
+                {/* Only show metrics that are available for this device */}
+                {deviceAvailableMetrics.length > 0 
+                  ? deviceAvailableMetrics.map((metric) => (
+                      <MenuItem key={metric} value={metric}>
+                        {formatMetricName(metric)}
+                      </MenuItem>
+                    ))
+                  : availableMetrics.map((metric) => (
+                      <MenuItem key={metric} value={metric}>
+                        {formatMetricName(metric)}
+                      </MenuItem>
+                    ))
+                }
+              </Select>
+            </FormControl>
+          </Box>
+          
+          <Box sx={{ flex: '0 1 150px', minWidth: '120px' }}>
             <TextField
               label="Time Range (days)"
               type="number"
@@ -406,7 +415,7 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
             />
           </Box>
 
-          <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
+          <Box sx={{ flex: '0 1 150px', minWidth: '120px' }}>
             <TextField
               label="Max Data Points"
               type="number"
@@ -419,14 +428,26 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
           </Box>
         </Box>
 
-        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button
             variant="outlined"
             size="small"
             onClick={() => {
+              // Reset all filters to default values
               setTimeRange(7);
               setMaxDataPoints(10);
+              
+              // Only reset device and metric if there are defaults available
+              if (devices.length > 0) {
+                setSelectedDevice(devices[0].device_id);
+              }
+              if (deviceAvailableMetrics.length > 0) {
+                setSelectedMetric(deviceAvailableMetrics[0]);
+              } else if (availableMetrics.length > 0) {
+                setSelectedMetric(availableMetrics[0]);
+              }
             }}
+            disabled={timeRange === 7 && maxDataPoints === 10}
           >
             Reset Filters
           </Button>
@@ -455,11 +476,11 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
       {/* Basic controls (always shown) */}
       {renderBasicControls()}
 
-      {/* Advanced filters (toggleable) */}
-      {renderAdvancedFilters()}
+      {/* Filters (toggleable) */}
+      {renderFilters()}
 
       {/* Chart container */}
-      <Box sx={{ height: showAdvancedFilters ? 'calc(100% - 170px)' : 'calc(100% - 60px)' }}>
+      <Box sx={{ height: filtersVisible ? 'calc(100% - 170px)' : 'calc(100% - 60px)' }}>
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
             <Typography>Loading device performance data...</Typography>

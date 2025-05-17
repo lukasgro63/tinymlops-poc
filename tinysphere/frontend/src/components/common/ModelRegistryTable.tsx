@@ -62,6 +62,7 @@ const ModelRegistryTable: React.FC<ModelRegistryTableProps> = ({
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   
   // Filter state
+  const [filtersVisible, setFiltersVisible] = useState<boolean>(true);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [stageFilter, setStageFilter] = useState<string>('all');
   const [deviceFilter, setDeviceFilter] = useState<string>('all');
@@ -267,56 +268,109 @@ const ModelRegistryTable: React.FC<ModelRegistryTableProps> = ({
 
   return (
     <Box sx={{ p: 2 }}>
-      {/* Filter bar */}
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 2 }}>
-        <TextField
-          placeholder="Search models..."
-          variant="outlined"
-          size="small"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          sx={{ flex: '1 1 250px' }}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon />
-              </InputAdornment>
-            ),
-          }}
-        />
+      {/* Filter controls */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Typography variant="subtitle1">Models</Typography>
+        </Box>
 
-        <FormControl size="small" sx={{ minWidth: 120 }}>
-          <InputLabel id="stage-select-label">Stage</InputLabel>
-          <Select
-            labelId="stage-select-label"
-            value={stageFilter}
-            label="Stage"
-            onChange={(e: SelectChangeEvent) => setStageFilter(e.target.value)}
-          >
-            <MenuItem value="all">All Stages</MenuItem>
-            <MenuItem value="production">Production</MenuItem>
-            <MenuItem value="staging">Staging</MenuItem>
-            <MenuItem value="none">None</MenuItem>
-          </Select>
-        </FormControl>
-
-        {uniqueDevices.length > 0 && (
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel id="device-select-label">Device</InputLabel>
-            <Select
-              labelId="device-select-label"
-              value={deviceFilter}
-              label="Device"
-              onChange={(e: SelectChangeEvent) => setDeviceFilter(e.target.value)}
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Tooltip title={filtersVisible ? "Hide Filters" : "Show Filters"}>
+            <IconButton 
+              size="small" 
+              onClick={() => setFiltersVisible(!filtersVisible)}
+              color={filtersVisible ? "primary" : "default"}
             >
-              <MenuItem value="all">All Devices</MenuItem>
-              {uniqueDevices.map(device => (
-                <MenuItem key={device} value={device}>{device}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        )}
+              <FilterListIcon />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="Refresh Data">
+            <IconButton 
+              size="small" 
+              onClick={handleRefresh}
+            >
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
+        </Box>
       </Box>
+
+      {/* Filter bar */}
+      {filtersVisible && (
+        <Box sx={{ mb: 3 }}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 1 }}>
+            <Box sx={{ flex: '1 1 250px', minWidth: '200px' }}>
+              <TextField
+                placeholder="Search models..."
+                variant="outlined"
+                size="small"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                fullWidth
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Box>
+
+            <Box sx={{ flex: '0 1 150px', minWidth: '120px' }}>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="stage-select-label">Stage</InputLabel>
+                <Select
+                  labelId="stage-select-label"
+                  value={stageFilter}
+                  label="Stage"
+                  onChange={(e: SelectChangeEvent) => setStageFilter(e.target.value)}
+                >
+                  <MenuItem value="all">All Stages</MenuItem>
+                  <MenuItem value="production">Production</MenuItem>
+                  <MenuItem value="staging">Staging</MenuItem>
+                  <MenuItem value="none">None</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+
+            {uniqueDevices.length > 0 && (
+              <Box sx={{ flex: '0 1 180px', minWidth: '150px' }}>
+                <FormControl size="small" fullWidth>
+                  <InputLabel id="device-select-label">Device</InputLabel>
+                  <Select
+                    labelId="device-select-label"
+                    value={deviceFilter}
+                    label="Device"
+                    onChange={(e: SelectChangeEvent) => setDeviceFilter(e.target.value)}
+                  >
+                    <MenuItem value="all">All Devices</MenuItem>
+                    {uniqueDevices.map(device => (
+                      <MenuItem key={device} value={device}>{device}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Box>
+            )}
+          </Box>
+          
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => {
+                setSearchTerm('');
+                setStageFilter('all');
+                setDeviceFilter('all');
+              }}
+              disabled={searchTerm === '' && stageFilter === 'all' && deviceFilter === 'all'}
+            >
+              Reset Filters
+            </Button>
+          </Box>
+        </Box>
+      )}
       
       {/* Model table */}
       <TableContainer sx={{ bgcolor: 'transparent' }}>

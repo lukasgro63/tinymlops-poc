@@ -314,20 +314,6 @@ const Models: React.FC = () => {
         <SectionCard 
           title="Model Registry" 
           icon={<StorageIcon style={{ fontSize: 20, color: '#00647D' }} />}
-          action={
-            <Box sx={{ display: 'flex', gap: 1 }}>
-              <Tooltip title="Last updated">
-                <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
-                  {lastUpdated ? `Updated: ${lastUpdated.toLocaleTimeString()}` : ''}
-                </Typography>
-              </Tooltip>
-              <Tooltip title="Refresh data">
-                <IconButton size="small" onClick={() => fetchModelsData()} disabled={loading}>
-                  <RefreshIcon />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          }
         >
           <ModelRegistryTable 
             initialData={modelSummaries}
@@ -342,59 +328,58 @@ const Models: React.FC = () => {
         <SectionCard 
           title="Model Performance Trends"
           icon={<ShowChartIcon style={{ fontSize: 20, color: '#00647D' }} />}
+          height={400}
         >
-          <Box sx={{ height: 300 }}>
-            {metricsLoading ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                <CircularProgress size={24} />
-              </Box>
-            ) : (
-              <ModelPerformanceChart
-                models={modelList}
-                performanceData={versionMetrics.map(metric => {
-                  // Handle potential NaN values in metrics
-                  let metricValue: number | null = null;
+          {metricsLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : (
+            <ModelPerformanceChart
+              models={modelList}
+              performanceData={versionMetrics.map(metric => {
+                // Handle potential NaN values in metrics
+                let metricValue: number | null = null;
+                
+                if (metric.metrics && metric.metrics[selectedMetric] !== undefined) {
+                  const value = metric.metrics[selectedMetric];
                   
-                  if (metric.metrics && metric.metrics[selectedMetric] !== undefined) {
-                    const value = metric.metrics[selectedMetric];
-                    
-                    // Handle different value types
-                    if (value === null) {
+                  // Handle different value types
+                  if (value === null) {
+                    metricValue = null;
+                  } else if (typeof value === 'number') {
+                    // If it's a numeric NaN, set to null
+                    metricValue = isNaN(value) ? null : value;
+                  } else if (typeof value === 'string') {
+                    // If it's a string 'NaN', set to null, otherwise try to parse it
+                    const strValue = value as string;
+                    if (strValue === 'NaN' || strValue === 'nan' || strValue.toLowerCase() === 'nan') {
                       metricValue = null;
-                    } else if (typeof value === 'number') {
-                      // If it's a numeric NaN, set to null
-                      metricValue = isNaN(value) ? null : value;
-                    } else if (typeof value === 'string') {
-                      // If it's a string 'NaN', set to null, otherwise try to parse it
-                      const strValue = value as string;
-                      if (strValue === 'NaN' || strValue === 'nan' || strValue.toLowerCase() === 'nan') {
-                        metricValue = null;
-                      } else {
-                        // Try to parse as number
-                        const parsed = parseFloat(strValue);
-                        metricValue = isNaN(parsed) ? null : parsed;
-                      }
                     } else {
-                      // Any other type becomes null
-                      metricValue = null;
+                      // Try to parse as number
+                      const parsed = parseFloat(strValue);
+                      metricValue = isNaN(parsed) ? null : parsed;
                     }
+                  } else {
+                    // Any other type becomes null
+                    metricValue = null;
                   }
-                  
-                  return {
-                    model_name: selectedModel,
-                    version: metric.version,
-                    stage: metric.stage,
-                    metric_name: selectedMetric,
-                    value: metricValue,
-                    timestamp: metric.created_at,
-                    run_id: metric.run_id
-                  };
-                })}
-                selectedMetric={selectedMetric}
-                onMetricChange={(metric) => setSelectedMetric(metric)}
-              />
-            )}
-          </Box>
+                }
+                
+                return {
+                  model_name: selectedModel,
+                  version: metric.version,
+                  stage: metric.stage,
+                  metric_name: selectedMetric,
+                  value: metricValue,
+                  timestamp: metric.created_at,
+                  run_id: metric.run_id
+                };
+              })}
+              selectedMetric={selectedMetric}
+              onMetricChange={(metric) => setSelectedMetric(metric)}
+            />
+          )}
         </SectionCard>
       </Box>
       
