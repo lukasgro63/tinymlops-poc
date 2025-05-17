@@ -1,13 +1,15 @@
 # OPL List of Todos
 
-- TODO: Device Seite das Device Performance metric chart muss überarbeitet werde, --> NaN metriken rausfltern, sollen nicht im dropddown sein. Und gleiche Frabe für alle linien. Soll analog sein wie Model Performance Trends auf der model siete, da ist es schon rochrig it den nan wetren. Muss nur noch herausgefilterte werden, was zu modlel gehört und was zu device!
+
+- TODO: Top Devices by Package Count soll ein stacked bar chart sein. Per device will ich die packages "aufgestapelt sehen" per device. Wobei die gleiche farbschmatik wie in dem Package Upload Timeline auf dem Home (dashbnoard) seite angwendet werden muss.
+
 
 
 
 - TODO: Aus dem Model Performance Chart die System Metriken entfernen, diese sind Device spezifisch und nicht Model spezifisch. Also genau diese weg: System CPU Percentage avg, System Memory. Und an derm chart passt auch nicht, dass da in den filtern ein tagss filter ist, das feld muss raus, hat keine funktion
 
 
-- TODO: Top Devices by Package Count soll ein stacked bar chart sein. Per device will ich die packages "aufgestapelt sehen" per device. Wobei die gleiche farbschmatik wie in dem Package Upload Timeline auf dem Home (dashbnoard) seite angwendet werden muss.
+- TODO: bei allen charts soll die filter option per defaulat aus sein
 
 
 _____________
