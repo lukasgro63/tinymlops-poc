@@ -156,7 +156,7 @@ const DevicePerformanceChart = React.forwardRef<{refresh: () => Promise<void>}, 
         return;
       }
       
-      // Find metrics that have valid data
+      // Find metrics that have valid data (not NaN or undefined)
       const validMetrics: string[] = [];
       
       // Check each metric in the available metrics list
@@ -173,13 +173,27 @@ const DevicePerformanceChart = React.forwardRef<{refresh: () => Promise<void>}, 
       }
       
       // Check if device's available_metrics field has anything
-      if (device.mlflow_metrics.available_metrics && 
+      if (device.mlflow_metrics && 
+          device.mlflow_metrics.available_metrics && 
           Array.isArray(device.mlflow_metrics.available_metrics) && 
           device.mlflow_metrics.available_metrics.length > 0) {
         // Add metrics from available_metrics list that aren't already in our validMetrics
+        // AND have valid data (not NaN)
         device.mlflow_metrics.available_metrics.forEach(metric => {
-          if (!validMetrics.includes(metric as string)) {
-            validMetrics.push(metric as string);
+          const metricStr = metric as string;
+          
+          // Safely check if mlflow_metrics is defined
+          if (device.mlflow_metrics) {
+            const metricData = device.mlflow_metrics[metricStr as keyof typeof device.mlflow_metrics];
+            
+            // Only add if it's not already in validMetrics AND has valid data
+            if (!validMetrics.includes(metricStr) && 
+                metricData && 
+                typeof metricData === 'object' && 
+                'avg' in metricData && 
+                !isNaN(metricData.avg as number)) {
+              validMetrics.push(metricStr);
+            }
           }
         });
       }
@@ -221,7 +235,27 @@ const DevicePerformanceChart = React.forwardRef<{refresh: () => Promise<void>}, 
       if (data.length === 0) {
         setError('No performance data available for this device and metric');
       } else {
-        setPerformanceData(data);
+        // Pre-process data to handle NaN values properly (like in ModelPerformanceChart)
+        const processedData = data.map(item => {
+          const newItem = {...item};
+          
+          // Handle NaN in value field
+          if (typeof newItem.value === 'number' && isNaN(newItem.value)) {
+            newItem.value = null;
+          }
+          
+          // Handle string 'NaN' values
+          if (newItem.value !== null && typeof newItem.value === 'string') {
+            const strValue = newItem.value as string;
+            if (strValue.toLowerCase() === 'nan') {
+              newItem.value = null;
+            }
+          }
+          
+          return newItem;
+        });
+        
+        setPerformanceData(processedData);
       }
       
       // Update lastUpdated timestamp
@@ -450,19 +484,9 @@ const DevicePerformanceChart = React.forwardRef<{refresh: () => Promise<void>}, 
     );
   };
 
-  // Get chart color based on metric
+  // Use a consistent color for all lines
   const getChartColor = (): string => {
-    const metricToCheck = selectedMetric.toLowerCase();
-    
-    if (metricToCheck === 'inference_time' || metricToCheck.includes('latency')) {
-      return '#00647D'; // Blue
-    } else if (metricToCheck.includes('cpu')) {
-      return '#E5A823'; // Yellow
-    } else if (metricToCheck.includes('memory')) {
-      return '#4CAF50'; // Green
-    } else {
-      return '#00647D'; // Default blue
-    }
+    return '#00647D'; // Blue (same as Model Performance Chart)
   };
 
   return (
@@ -520,8 +544,8 @@ const DevicePerformanceChart = React.forwardRef<{refresh: () => Promise<void>}, 
                 stroke={getChartColor()}
                 activeDot={{ r: 8 }}
                 name={formatMetricName(selectedMetric)}
-                connectNulls={true}
-                isAnimationActive={false}
+                connectNulls={true}  // Skip null/undefined/NaN values in line connection
+                isAnimationActive={false} // Disable animation to prevent issues with NaN values
               />
             </LineChart>
           </ResponsiveContainer>

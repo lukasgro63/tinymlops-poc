@@ -75,7 +75,6 @@ const ModelPerformanceChart = React.forwardRef<{refresh: () => Promise<void>}, M
   const [internalFiltersVisible, setInternalFiltersVisible] = useState<boolean>(externalFiltersVisible !== undefined ? externalFiltersVisible : true);
   const [timeRange, setTimeRange] = useState<number>(7); // Default 7 days
   const [maxRuns, setMaxRuns] = useState<number>(10); // Default 10 runs
-  const [tags, setTags] = useState<string>(''); // Tags filter in key=value format
   
   // Use external filtersVisible if provided
   const filtersVisible = externalFiltersVisible !== undefined ? externalFiltersVisible : internalFiltersVisible;
@@ -218,7 +217,7 @@ const ModelPerformanceChart = React.forwardRef<{refresh: () => Promise<void>}, M
     if (isModelListMode) {
       fetchPerformanceData();
     }
-  }, [isModelListMode, selectedModel, selectedMetric, timeRange, maxRuns, tags]);
+  }, [isModelListMode, selectedModel, selectedMetric, timeRange, maxRuns]);
 
   // If external selectedMetric changes, update internal state
   useEffect(() => {
@@ -336,8 +335,6 @@ const ModelPerformanceChart = React.forwardRef<{refresh: () => Promise<void>}, M
     // Special handling for specific metrics
     if (metricToCheck.includes('latency') || metricToCheck.includes('time')) {
       return [0, 'auto'];  // For time-based metrics
-    } else if (metricToCheck.includes('cpu') || metricToCheck.includes('memory')) {
-      return [0, 100];     // For percentage-based metrics (0-100%)
     } else if (metricToCheck.includes('loss')) {
       return [0, 'auto'];  // For loss metrics
     } else if (metricToCheck.includes('confidence')) {
@@ -387,9 +384,6 @@ const ModelPerformanceChart = React.forwardRef<{refresh: () => Promise<void>}, M
       if (metricToCheck.includes('latency') || metricToCheck.includes('time')) {
         // Format as milliseconds with 2 decimal places
         return `${numValue.toFixed(2)} ms`;
-      } else if (metricToCheck.includes('cpu') || metricToCheck.includes('memory')) {
-        // Format as percentage
-        return `${numValue.toFixed(1)}%`;
       } else if (metricToCheck.includes('loss')) {
         // Format loss with 4 decimal places
         return numValue.toFixed(4);
