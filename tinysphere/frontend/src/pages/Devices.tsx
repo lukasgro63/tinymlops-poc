@@ -103,6 +103,11 @@ const DevicesPage: React.FC = () => {
   // Automatische Aktualisierung
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  
+  // Performance Chart State
+  const [performanceChartFiltersVisible, setPerformanceChartFiltersVisible] = useState<boolean>(true);
+  const [performanceChartLastUpdated, setPerformanceChartLastUpdated] = useState<Date | null>(null);
+  const devicePerformanceChartRef = React.useRef<any>(null);
 
   // Daten laden beim ersten Render
   useEffect(() => {
@@ -488,8 +493,44 @@ const DevicesPage: React.FC = () => {
             title="Device Performance Metrics"
             icon={<SpeedIcon style={{ fontSize: 20, color: '#0B2A5A' }} />}
             height={400}
+            action={
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Tooltip title="Last updated">
+                  <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
+                    {performanceChartLastUpdated ? `Updated: ${performanceChartLastUpdated.toLocaleTimeString()}` : ''}
+                  </Typography>
+                </Tooltip>
+                <Tooltip title={performanceChartFiltersVisible ? "Hide Filters" : "Show Filters"}>
+                  <IconButton 
+                    size="small" 
+                    onClick={() => setPerformanceChartFiltersVisible(!performanceChartFiltersVisible)}
+                    color={performanceChartFiltersVisible ? "primary" : "default"}
+                  >
+                    <FilterListIcon />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Refresh Data">
+                  <IconButton 
+                    size="small" 
+                    onClick={() => {
+                      // Wenn die Komponente eine refresh-Methode hat
+                      if (devicePerformanceChartRef.current?.refresh) {
+                        devicePerformanceChartRef.current.refresh();
+                      }
+                      setPerformanceChartLastUpdated(new Date());
+                    }}
+                  >
+                    <RefreshIcon />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            }
           >
-            <DevicePerformanceChart />
+            <DevicePerformanceChart 
+              ref={devicePerformanceChartRef}
+              filtersVisible={performanceChartFiltersVisible}
+              onLastUpdated={(date) => setPerformanceChartLastUpdated(date)}
+            />
           </SectionCard>
         </Box>
 

@@ -7,7 +7,9 @@ import ShowChartIcon from '@mui/icons-material/ShowChart';
 import StorageIcon from '@mui/icons-material/Storage';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import { Box, Typography } from '@mui/material';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import { Box, Typography, Tooltip, IconButton } from '@mui/material';
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ErrorDisplay from '../components/common/ErrorDisplay';
@@ -57,6 +59,11 @@ const Dashboard: React.FC = () => {
   // Loading and error states
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Model Performance Chart state
+  const [modelPerformanceFiltersVisible, setModelPerformanceFiltersVisible] = useState<boolean>(true);
+  const [modelPerformanceLastUpdated, setModelPerformanceLastUpdated] = useState<Date | null>(null);
+  const modelPerformanceChartRef = React.useRef<any>(null);
   
   // Fetch all dashboard data on mount
   useEffect(() => {
@@ -235,10 +242,44 @@ const Dashboard: React.FC = () => {
           title="Model Performance Trends"
           icon={<ShowChartIcon style={{ fontSize: 20, color: '#00647D' }} />}
           height={400}
+          action={
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Tooltip title="Last updated">
+                <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
+                  {modelPerformanceLastUpdated ? `Updated: ${modelPerformanceLastUpdated.toLocaleTimeString()}` : ''}
+                </Typography>
+              </Tooltip>
+              <Tooltip title={modelPerformanceFiltersVisible ? "Hide Filters" : "Show Filters"}>
+                <IconButton 
+                  size="small" 
+                  onClick={() => setModelPerformanceFiltersVisible(!modelPerformanceFiltersVisible)}
+                  color={modelPerformanceFiltersVisible ? "primary" : "default"}
+                >
+                  <FilterListIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Refresh Data">
+                <IconButton 
+                  size="small" 
+                  onClick={() => {
+                    if (modelPerformanceChartRef.current?.refresh) {
+                      modelPerformanceChartRef.current.refresh();
+                    }
+                    setModelPerformanceLastUpdated(new Date());
+                  }}
+                >
+                  <RefreshIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          }
         >
           <ModelPerformanceChart 
             models={modelNames} 
             performanceData={performanceData}
+            ref={modelPerformanceChartRef}
+            filtersVisible={modelPerformanceFiltersVisible}
+            onLastUpdated={(date) => setModelPerformanceLastUpdated(date)}
           />
         </SectionCard>
       </Box>

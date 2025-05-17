@@ -42,16 +42,24 @@ interface ModelPerformanceChartProps {
 
   // Optional title
   title?: string;
+  
+  // Filter visibility controlled from parent
+  filtersVisible?: boolean;
+  
+  // Callback for when data is updated
+  onLastUpdated?: (date: Date) => void;
 }
 
-const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
+const ModelPerformanceChart = React.forwardRef<{refresh: () => Promise<void>}, ModelPerformanceChartProps>(({
   models = [],
   performanceData = [],
   data = [],
   selectedMetric: externalSelectedMetric,
   onMetricChange,
-  title
-}) => {
+  title,
+  filtersVisible: externalFiltersVisible,
+  onLastUpdated
+}, ref) => {
   // Determine if we're in "models list" mode or "direct data" mode
   const isModelListMode = models.length > 0 && !data.length;
 
@@ -64,10 +72,13 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   // Filter state
-  const [filtersVisible, setFiltersVisible] = useState<boolean>(true);
+  const [internalFiltersVisible, setInternalFiltersVisible] = useState<boolean>(externalFiltersVisible !== undefined ? externalFiltersVisible : true);
   const [timeRange, setTimeRange] = useState<number>(7); // Default 7 days
   const [maxRuns, setMaxRuns] = useState<number>(10); // Default 10 runs
   const [tags, setTags] = useState<string>(''); // Tags filter in key=value format
+  
+  // Use external filtersVisible if provided
+  const filtersVisible = externalFiltersVisible !== undefined ? externalFiltersVisible : internalFiltersVisible;
 
   // Metric options - include all known operational metrics from MLflow
   const [availableMetrics, setAvailableMetrics] = useState<string[]>([
@@ -83,11 +94,6 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
     'latency_p95_ms', 'latency_p99_ms', 'latency_std_ms',
     'latency_mean', 'latency_median', 'latency_min', 'latency_max',
     'latency_p95', 'latency_p99', 'latency_std',
-    
-    // System metrics
-    'system_cpu_percent_avg', 'system_cpu_percent_max', 'system_cpu_percent_current',
-    'system_memory_percent_avg', 'system_memory_percent_max', 'system_memory_percent_current',
-    'system_timestamp_avg', 'system_timestamp_max', 'system_timestamp_current',
     
     // Operation metrics
     'total_inferences', 'uptime_seconds',
@@ -251,17 +257,12 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
         params.model_name = selectedModel;
       }
 
-      // Add tags filter if specified
-      if (tags && tags.trim() !== '') {
-        params.tags = tags;
-      }
-
       // Include operational metrics
       params.include_operational_metrics = true;
 
       // Fetch data with filters
       const data = await getModelsPerformance(params.metric, params.days, params.limit,
-                                            params.model_name, params.tags,
+                                            params.model_name, undefined,
                                             params.include_operational_metrics);
 
       // Extract available metrics from the data
@@ -284,7 +285,13 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
       }
 
       // Update last updated timestamp
-      setLastUpdated(new Date());
+      const updateDate = new Date();
+      setLastUpdated(updateDate);
+      
+      // Notify parent of update if callback provided
+      if (onLastUpdated) {
+        onLastUpdated(updateDate);
+      }
 
       // Don't update performanceData here as we're using the prop
     } catch (error) {
@@ -320,10 +327,6 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
     if (!isNaN(value) && value > 0) {
       setMaxRuns(value);
     }
-  };
-
-  const handleTagsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setTags(event.target.value);
   };
 
   // Determine Y-axis domain based on metric
@@ -425,42 +428,10 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
       .join(' ');
   };
 
-  // Basic controls (for consistency with DevicePerformanceChart)
-  const renderBasicControls = () => {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          {title && <Typography variant="h6">{title}</Typography>}
-        </Box>
-
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <MuiTooltip title="Last updated">
-            <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
-              {lastUpdated ? `Updated: ${lastUpdated.toLocaleTimeString()}` : ''}
-            </Typography>
-          </MuiTooltip>
-          <MuiTooltip title={filtersVisible ? "Hide Filters" : "Show Filters"}>
-            <IconButton 
-              size="small" 
-              onClick={() => setFiltersVisible(!filtersVisible)}
-              color={filtersVisible ? "primary" : "default"}
-            >
-              <FilterList />
-            </IconButton>
-          </MuiTooltip>
-
-          <MuiTooltip title="Refresh Data">
-            <IconButton 
-              size="small" 
-              onClick={fetchPerformanceData}
-            >
-              <Refresh />
-            </IconButton>
-          </MuiTooltip>
-        </Box>
-      </Box>
-    );
-  };
+  // Expose refresh method via ref
+  React.useImperativeHandle(ref, () => ({
+    refresh: fetchPerformanceData
+  }));
 
   // Filters section
   const renderFilters = () => {
@@ -530,17 +501,6 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
               InputProps={{ inputProps: { min: 1 } }}
             />
           </Box>
-
-          <Box sx={{ flex: '1 1 200px', minWidth: '150px' }}>
-            <TextField
-              label="Tags (key1=value1,key2=value2)"
-              size="small"
-              fullWidth
-              value={tags}
-              onChange={handleTagsChange}
-              placeholder="e.g. device=pi01,type=test"
-            />
-          </Box>
         </Box>
 
         <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -550,7 +510,6 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
             onClick={() => {
               setTimeRange(7);
               setMaxRuns(10);
-              setTags('');
               
               // Only reset model if there are defaults available
               if (models.length > 0 && isModelListMode) {
@@ -565,7 +524,7 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
                 }
               }
             }}
-            disabled={timeRange === 7 && maxRuns === 10 && tags === ''}
+            disabled={timeRange === 7 && maxRuns === 10}
           >
             Reset Filters
           </Button>
@@ -576,14 +535,18 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
 
   return (
     <Box sx={{ height: '100%', p: 2 }}>
-      {/* Basic controls (always shown) */}
-      {(!externalSelectedMetric || isModelListMode) && renderBasicControls()}
-
+      {/* Title only shown if within the component (not in SectionCard header) */}
+      {title && (
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="h6">{title}</Typography>
+        </Box>
+      )}
+      
       {/* Filters (toggleable) */}
       {(!externalSelectedMetric || isModelListMode) && renderFilters()}
 
       {/* Chart container */}
-      <Box sx={{ height: filtersVisible ? 'calc(100% - 170px)' : 'calc(100% - 60px)' }}>
+      <Box sx={{ height: filtersVisible ? 'calc(100% - 120px)' : 'calc(100% - 20px)' }}>
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
             <Typography>Loading model data...</Typography>
@@ -631,6 +594,6 @@ const ModelPerformanceChart: React.FC<ModelPerformanceChartProps> = ({
       </Box>
     </Box>
   );
-};
+});
 
 export default ModelPerformanceChart;

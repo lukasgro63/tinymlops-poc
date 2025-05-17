@@ -29,15 +29,23 @@ interface DevicePerformanceChartProps {
 
   // Optional title
   title?: string;
+  
+  // Filter visibility controlled from parent
+  filtersVisible?: boolean;
+  
+  // Callback for when data is updated
+  onLastUpdated?: (date: Date) => void;
 }
 
-const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
+const DevicePerformanceChart = React.forwardRef<{refresh: () => Promise<void>}, DevicePerformanceChartProps>(({
   selectedDevice: externalSelectedDevice,
   onDeviceChange,
   selectedMetric: externalSelectedMetric,
   onMetricChange,
-  title
-}) => {
+  title,
+  filtersVisible: externalFiltersVisible,
+  onLastUpdated
+}, ref) => {
   // Internal state
   const [devices, setDevices] = useState<DeviceSummary[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string>(externalSelectedDevice || '');
@@ -48,9 +56,12 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   // Filter state
-  const [filtersVisible, setFiltersVisible] = useState<boolean>(true);
+  const [internalFiltersVisible, setInternalFiltersVisible] = useState<boolean>(externalFiltersVisible !== undefined ? externalFiltersVisible : true);
   const [timeRange, setTimeRange] = useState<number>(7); // Default 7 days
   const [maxDataPoints, setMaxDataPoints] = useState<number>(10); // Default 10 data points
+  
+  // Use external filtersVisible if provided
+  const filtersVisible = externalFiltersVisible !== undefined ? externalFiltersVisible : internalFiltersVisible;
 
   // Metric options - including all known operational metrics from MLflow
   const availableMetrics = [
@@ -214,7 +225,13 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
       }
       
       // Update lastUpdated timestamp
-      setLastUpdated(new Date());
+      const updateDate = new Date();
+      setLastUpdated(updateDate);
+      
+      // Notify parent of update if callback provided
+      if (onLastUpdated) {
+        onLastUpdated(updateDate);
+      }
     } catch (error) {
       console.error('Error fetching device performance data:', error);
       setError('Failed to load device performance data');
@@ -324,42 +341,10 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
     return device?.hostname || deviceId;
   };
 
-  // Basic controls (device and metric selectors)
-  const renderBasicControls = () => {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          {title && <Typography variant="h6">{title}</Typography>}
-        </Box>
-
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <MuiTooltip title="Last updated">
-            <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
-              {lastUpdated ? `Updated: ${lastUpdated.toLocaleTimeString()}` : ''}
-            </Typography>
-          </MuiTooltip>
-          <MuiTooltip title={filtersVisible ? "Hide Filters" : "Show Filters"}>
-            <IconButton 
-              size="small" 
-              onClick={() => setFiltersVisible(!filtersVisible)}
-              color={filtersVisible ? "primary" : "default"}
-            >
-              <FilterList />
-            </IconButton>
-          </MuiTooltip>
-
-          <MuiTooltip title="Refresh Data">
-            <IconButton 
-              size="small" 
-              onClick={fetchDevicePerformance}
-            >
-              <Refresh />
-            </IconButton>
-          </MuiTooltip>
-        </Box>
-      </Box>
-    );
-  };
+  // Expose refresh method via ref
+  React.useImperativeHandle(ref, () => ({
+    refresh: fetchDevicePerformance
+  }));
 
   // Filters section  
   const renderFilters = () => {
@@ -482,14 +467,18 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
 
   return (
     <Box sx={{ height: '100%', p: 2 }}>
-      {/* Basic controls (always shown) */}
-      {renderBasicControls()}
-
+      {/* Title only shown if within the component (not in SectionCard header) */}
+      {title && (
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="h6">{title}</Typography>
+        </Box>
+      )}
+      
       {/* Filters (toggleable) */}
       {renderFilters()}
 
       {/* Chart container */}
-      <Box sx={{ height: filtersVisible ? 'calc(100% - 170px)' : 'calc(100% - 60px)' }}>
+      <Box sx={{ height: filtersVisible ? 'calc(100% - 120px)' : 'calc(100% - 20px)' }}>
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
             <Typography>Loading device performance data...</Typography>
@@ -540,6 +529,6 @@ const DevicePerformanceChart: React.FC<DevicePerformanceChartProps> = ({
       </Box>
     </Box>
   );
-};
+});
 
 export default DevicePerformanceChart;

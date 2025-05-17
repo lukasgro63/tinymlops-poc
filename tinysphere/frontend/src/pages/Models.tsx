@@ -5,7 +5,8 @@ import {
   CheckCircle as CheckCircleIcon,
   CompareArrows as CompareArrowsIcon,
   HourglassEmpty as HourglassEmptyIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  FilterList as FilterListIcon
 } from '@mui/icons-material';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
 import StorageIcon from '@mui/icons-material/Storage';
@@ -66,6 +67,11 @@ const Models: React.FC = () => {
   const [comparisonLoading, setComparisonLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  
+  // Model Performance Chart state
+  const [perfChartFiltersVisible, setPerfChartFiltersVisible] = useState<boolean>(true);
+  const [perfChartLastUpdated, setPerfChartLastUpdated] = useState<Date | null>(null);
+  const modelPerfChartRef = React.useRef<any>(null);
   
   // Fetch initial data on load
   // Function to fetch all models data
@@ -329,6 +335,36 @@ const Models: React.FC = () => {
           title="Model Performance Trends"
           icon={<ShowChartIcon style={{ fontSize: 20, color: '#00647D' }} />}
           height={400}
+          action={
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Tooltip title="Last updated">
+                <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
+                  {perfChartLastUpdated ? `Updated: ${perfChartLastUpdated.toLocaleTimeString()}` : ''}
+                </Typography>
+              </Tooltip>
+              <Tooltip title={perfChartFiltersVisible ? "Hide Filters" : "Show Filters"}>
+                <IconButton 
+                  size="small" 
+                  onClick={() => setPerfChartFiltersVisible(!perfChartFiltersVisible)}
+                  color={perfChartFiltersVisible ? "primary" : "default"}
+                >
+                  <FilterListIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Refresh Data">
+                <IconButton 
+                  size="small" 
+                  onClick={() => {
+                    fetchModelMetrics(selectedModel);
+                    setPerfChartLastUpdated(new Date());
+                  }}
+                  disabled={metricsLoading}
+                >
+                  <RefreshIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          }
         >
           {metricsLoading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
@@ -378,6 +414,9 @@ const Models: React.FC = () => {
               })}
               selectedMetric={selectedMetric}
               onMetricChange={(metric) => setSelectedMetric(metric)}
+              ref={modelPerfChartRef}
+              filtersVisible={perfChartFiltersVisible}
+              onLastUpdated={(date) => setPerfChartLastUpdated(date)}
             />
           )}
         </SectionCard>
