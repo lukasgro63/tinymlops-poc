@@ -73,6 +73,11 @@ const Models: React.FC = () => {
   const [perfChartLastUpdated, setPerfChartLastUpdated] = useState<Date | null>(null);
   const modelPerfChartRef = React.useRef<any>(null);
   
+  // Model Registry state
+  const [registryFiltersVisible, setRegistryFiltersVisible] = useState<boolean>(true);
+  const [registryLastUpdated, setRegistryLastUpdated] = useState<Date | null>(null);
+  const modelRegistryRef = React.useRef<any>(null);
+  
   // Fetch initial data on load
   // Function to fetch all models data
   const fetchModelsData = async () => {
@@ -94,7 +99,9 @@ const Models: React.FC = () => {
       }
       
       // Update last updated timestamp
-      setLastUpdated(new Date());
+      const updateTime = new Date();
+      setLastUpdated(updateTime);
+      setRegistryLastUpdated(updateTime);
       
     } catch (err) {
       console.error('Error fetching model data:', err);
@@ -320,11 +327,44 @@ const Models: React.FC = () => {
         <SectionCard 
           title="Model Registry" 
           icon={<StorageIcon style={{ fontSize: 20, color: '#00647D' }} />}
+          action={
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Tooltip title="Last updated">
+                <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
+                  {registryLastUpdated ? `Updated: ${registryLastUpdated.toLocaleTimeString()}` : ''}
+                </Typography>
+              </Tooltip>
+              <Tooltip title={registryFiltersVisible ? "Hide Filters" : "Show Filters"}>
+                <IconButton 
+                  size="small" 
+                  onClick={() => setRegistryFiltersVisible(!registryFiltersVisible)}
+                  color={registryFiltersVisible ? "primary" : "default"}
+                >
+                  <FilterListIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Refresh Data">
+                <IconButton 
+                  size="small" 
+                  onClick={() => {
+                    fetchModelsData();
+                    setRegistryLastUpdated(new Date());
+                  }}
+                  disabled={loading}
+                >
+                  <RefreshIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          }
         >
           <ModelRegistryTable 
             initialData={modelSummaries}
             selectedModel={selectedModel}
             onModelSelect={(modelName) => setSelectedModel(modelName)}
+            ref={modelRegistryRef}
+            filtersVisible={registryFiltersVisible}
+            onLastUpdated={(date) => setRegistryLastUpdated(date)}
           />
         </SectionCard>
       </Box>

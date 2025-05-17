@@ -47,14 +47,22 @@ interface ModelRegistryTableProps {
   selectedModel?: string;
   refreshInterval?: number;
   initialData?: ModelSummary[];
+  
+  // Filter visibility controlled from parent
+  filtersVisible?: boolean;
+  
+  // Callback for when data is updated
+  onLastUpdated?: (date: Date) => void;
 }
 
-const ModelRegistryTable: React.FC<ModelRegistryTableProps> = ({
+const ModelRegistryTable = React.forwardRef<{refresh: () => Promise<void>}, ModelRegistryTableProps>(({
   onModelSelect,
   selectedModel,
   refreshInterval = 0,
-  initialData
-}) => {
+  initialData,
+  filtersVisible: externalFiltersVisible,
+  onLastUpdated
+}, ref) => {
   // Data state
   const [loading, setLoading] = useState<boolean>(!initialData);
   const [error, setError] = useState<string | null>(null);
@@ -62,10 +70,13 @@ const ModelRegistryTable: React.FC<ModelRegistryTableProps> = ({
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   
   // Filter state
-  const [filtersVisible, setFiltersVisible] = useState<boolean>(true);
+  const [internalFiltersVisible, setInternalFiltersVisible] = useState<boolean>(externalFiltersVisible !== undefined ? externalFiltersVisible : true);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [stageFilter, setStageFilter] = useState<string>('all');
   const [deviceFilter, setDeviceFilter] = useState<string>('all');
+  
+  // Use external filtersVisible if provided
+  const filtersVisible = externalFiltersVisible !== undefined ? externalFiltersVisible : internalFiltersVisible;
   
   // Sorting and pagination
   const [order, setOrder] = useState<Order>('desc');
@@ -80,7 +91,13 @@ const ModelRegistryTable: React.FC<ModelRegistryTableProps> = ({
       setError(null);
       const data = await getModelsSummary();
       setModelSummaries(data);
-      setLastUpdated(new Date());
+      const updateDate = new Date();
+      setLastUpdated(updateDate);
+      
+      // Notify parent of update if callback provided
+      if (onLastUpdated) {
+        onLastUpdated(updateDate);
+      }
     } catch (err) {
       console.error('Error fetching model registry data:', err);
       setError('Failed to load model registry data');
@@ -94,9 +111,18 @@ const ModelRegistryTable: React.FC<ModelRegistryTableProps> = ({
     if (!initialData) {
       fetchModels();
     } else {
-      setLastUpdated(new Date());
+      const updateDate = new Date();
+      setLastUpdated(updateDate);
+      if (onLastUpdated) {
+        onLastUpdated(updateDate);
+      }
     }
   }, [initialData]);
+  
+  // Expose refresh method via ref
+  React.useImperativeHandle(ref, () => ({
+    refresh: fetchModels
+  }));
 
   // Set up refresh interval if specified
   useEffect(() => {
@@ -268,38 +294,7 @@ const ModelRegistryTable: React.FC<ModelRegistryTableProps> = ({
 
   return (
     <Box sx={{ p: 2 }}>
-      {/* Filter controls */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <Typography variant="subtitle1">Models</Typography>
-        </Box>
-
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Tooltip title="Last updated">
-            <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
-              {lastUpdated ? `Updated: ${lastUpdated.toLocaleTimeString()}` : ''}
-            </Typography>
-          </Tooltip>
-          <Tooltip title={filtersVisible ? "Hide Filters" : "Show Filters"}>
-            <IconButton 
-              size="small" 
-              onClick={() => setFiltersVisible(!filtersVisible)}
-              color={filtersVisible ? "primary" : "default"}
-            >
-              <FilterListIcon />
-            </IconButton>
-          </Tooltip>
-
-          <Tooltip title="Refresh Data">
-            <IconButton 
-              size="small" 
-              onClick={handleRefresh}
-            >
-              <RefreshIcon />
-            </IconButton>
-          </Tooltip>
-        </Box>
-      </Box>
+      {/* The filter controls are now in the parent component */}
 
       {/* Filter bar */}
       {filtersVisible && (
@@ -490,6 +485,6 @@ const ModelRegistryTable: React.FC<ModelRegistryTableProps> = ({
       />
     </Box>
   );
-};
+});
 
 export default ModelRegistryTable;
