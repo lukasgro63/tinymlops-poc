@@ -961,6 +961,12 @@ def main():
         # Log geolocation status
         if sync_client.enable_geolocation:
             logger.info("Geolocation enabled, device location will be sent to TinySphere")
+            # Force a geolocation update
+            try:
+                location = sync_client._update_geolocation()
+                logger.info(f"Initial geolocation: {location.get('latitude'):.6f}, {location.get('longitude'):.6f} (source: {location.get('source')})")
+            except Exception as e:
+                logger.warning(f"Failed to get initial geolocation: {e}")
         else:
             logger.info("Geolocation disabled")
             
@@ -969,6 +975,11 @@ def main():
         logger.info(f"Device platform details: {device_info.get('platform', 'unknown')} " +
                    f"{device_info.get('platform_version', 'unknown')} " +
                    f"on {device_info.get('device_model', 'unknown')}")
+            
+        # Log exact location data being sent
+        if 'location' in device_info:
+            loc = device_info['location']
+            logger.info(f"Sending device location: lat={loc.get('latitude'):.6f}, lon={loc.get('longitude'):.6f}, source={loc.get('source')}")
             
         # Update device info with platform details and initial location
         success = sync_client.update_device_info()

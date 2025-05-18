@@ -1100,19 +1100,23 @@ class ExtendedSyncClient:
                         self.client.last_geolocation_update = time.time()
                 
                 # Use POST to /devices/register endpoint instead of PATCH to update device info
-                # First, get enhanced device info with our platform detection
-                device_info = self._get_device_info()
+                # Log the data we're sending to help debug
+                logger.info(f"Sending device update with platform={device_info.get('platform')}, " + 
+                            f"platform_version={device_info.get('platform_version')}, " +
+                            f"device_model={device_info.get('device_model')}")
+                
+                # Log geolocation data if present
+                if 'location' in device_info:
+                    loc = device_info['location']
+                    logger.info(f"Device update includes geolocation: " + 
+                               f"lat={loc.get('latitude'):.6f}, lon={loc.get('longitude'):.6f}, " + 
+                               f"source={loc.get('source')}, accuracy={loc.get('accuracy')}")
                 
                 update_data = {
                     "device_id": self.device_id,
                     "device_info": device_info,
                     "last_sync_time": time.time()
                 }
-                
-                # Log the data we're sending to help debug
-                logger.info(f"Sending device update with platform={device_info.get('platform')}, " + 
-                            f"platform_version={device_info.get('platform_version')}, " +
-                            f"device_model={device_info.get('device_model')}")
                 
                 try:
                     response = self.client.connection_manager.execute_request(
