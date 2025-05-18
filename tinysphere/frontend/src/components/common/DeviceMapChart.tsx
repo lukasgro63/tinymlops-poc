@@ -1,6 +1,6 @@
 import { Box, Typography, useTheme } from '@mui/material';
 import React, { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, CircleMarker, Tooltip } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { Device, DeviceLocation } from '../../types/api';
@@ -103,6 +103,7 @@ const DeviceMapChart: React.FC<DeviceMapChartProps> = ({
                 }
               }}
             >
+              {/* Popup erscheint beim Klicken */}
               <Popup>
                 <Typography variant="subtitle1" fontWeight="medium">
                   {device.device_id}
@@ -116,6 +117,14 @@ const DeviceMapChart: React.FC<DeviceMapChartProps> = ({
                   Last update: {new Date(device.last_update || Date.now()).toLocaleString()}
                 </Typography>
               </Popup>
+              
+              {/* Tooltip erscheint beim Hover */}
+              <Tooltip direction="top" offset={[0, -20]} opacity={1} permanent={false}>
+                <div>
+                  <strong>{device.device_id}</strong><br />
+                  Last update: {new Date(device.last_update || Date.now()).toLocaleString()}
+                </div>
+              </Tooltip>
             </Marker>
           ))}
       </MapContainer>
