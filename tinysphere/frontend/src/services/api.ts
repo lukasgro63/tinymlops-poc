@@ -350,9 +350,27 @@ export const getDriftEvents = async (params?: {
     `${API_BASE_URL}/drift/events?${queryParams.toString()}`
   );
   
+  // Process the events to check for original_drift_type in metadata
+  const processedEvents = response.data.map(event => {
+    // Create a shallow copy of the event
+    const processedEvent = { ...event };
+    
+    try {
+      // Check if there's metadata with an original_drift_type field
+      if (event.metadata && typeof event.metadata === 'object' && 'original_drift_type' in event.metadata) {
+        // Override the drift_type with the original one from metadata
+        processedEvent.drift_type = event.metadata.original_drift_type as any;
+      }
+    } catch (error) {
+      console.error('Error processing drift event metadata:', error);
+    }
+    
+    return processedEvent;
+  });
+  
   // Client-seitige Sortierung als Fallback, falls Backend-API keine Sortierung unterstützt
   if (params?.sort_order) {
-    const sortedData = [...response.data].sort((a, b) => {
+    const sortedData = [...processedEvents].sort((a, b) => {
       const dateA = new Date(a.timestamp).getTime();
       const dateB = new Date(b.timestamp).getTime();
       
@@ -363,7 +381,7 @@ export const getDriftEvents = async (params?: {
     return sortedData;
   }
   
-  return response.data;
+  return processedEvents;
 };
 
 export const getDriftEvent = async (eventId: string): Promise<DriftEvent> => {

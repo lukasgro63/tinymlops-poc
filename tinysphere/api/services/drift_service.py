@@ -191,30 +191,182 @@ class DriftService:
             return None
     
     @staticmethod
-    def _get_drift_type_enum(drift_type_str: str):
+    def _get_drift_type_enum(drift_type_str: str, db: Session = None):
         """
-        UNIVERSAL WORKAROUND: All drift types are mapped to UNKNOWN for database compatibility.
-        The original type is preserved in metadata.
+        Get a valid drift type enum value for the database.
         
         Args:
             drift_type_str: String representation of drift type
+            db: Optional database session for querying valid enum values
             
         Returns:
-            Always returns DriftType.UNKNOWN
+            A valid DriftType enum for the database
         """
         if not drift_type_str:
             return DriftType.UNKNOWN
+            
+        # First check if the value exists in the database
+        valid_enum_values = []
+        try:
+            if db:
+                from sqlalchemy.sql import text
+                enum_check = db.execute(
+                    text("SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid WHERE pg_type.typname = 'drifttype'")
+                ).fetchall()
+                valid_enum_values = [val[0] for val in enum_check]
+                logger.info(f"Found valid enum values for drift_type in database: {valid_enum_values}")
+        except Exception as e:
+            logger.error(f"Error checking enum values: {e}")
         
-        # Always convert to lowercase for logging
         drift_type_lower = drift_type_str.lower() if drift_type_str else "unknown"
         
-        # Log the original requested type
-        if drift_type_lower != "unknown":
-            logger.warning(f"UNIVERSAL WORKAROUND: Mapping '{drift_type_str}' to UNKNOWN for database compatibility")
+        # If we have database values, check if the type exists in database
+        if valid_enum_values:
+            # First try exact matches (case-sensitive)
+            if drift_type_str in valid_enum_values:
+                # The exact string is in the database
+                drift_enum = DriftType.match_value(drift_type_str)
+                logger.info(f"Found exact match for '{drift_type_str}' in database enum values: {drift_enum}")
+                return drift_enum
+                
+            # Then try lowercase matches
+            if drift_type_lower in [v.lower() for v in valid_enum_values]:
+                # The lowercase string is in the database
+                for val in valid_enum_values:
+                    if val.lower() == drift_type_lower:
+                        drift_enum = DriftType.match_value(val)
+                        logger.info(f"Found case-insensitive match for '{drift_type_lower}' in database")
+                        return drift_enum
             
-        # No complex mappings - always return UNKNOWN
-        # The actual type will be preserved in metadata
-        return DriftType.UNKNOWN
+            # Special handling for KNN_DISTANCE
+            if "knn" in drift_type_lower or "distance" in drift_type_lower:
+                # Check if knn_distance is available
+                if "knn_distance" in [v.lower() for v in valid_enum_values]:
+                    knn_index = [v.lower() for v in valid_enum_values].index("knn_distance")
+                    actual_value = valid_enum_values[knn_index]  # Get with correct case
+                    logger.info(f"Using KNN_DISTANCE enum (database value: {actual_value})")
+                    return DriftType.KNN_DISTANCE
+                else:
+                    # Fallback to confidence if knn_distance not in database
+                    logger.info(f"KNN_DISTANCE not in database, using CONFIDENCE as fallback")
+                    return DriftType.CONFIDENCE
+        
+        # Use the new match_value method for consistent handling
+        drift_enum = DriftType.match_value(drift_type_str)
+        logger.info(f"Using DriftType.match_value: '{drift_type_str}' -> {drift_enum}")
+        return drift_enum
+    
+    @staticmethod
+    def diagnose_drift_enum_problems(db: Session) -> Dict[str, Any]:
+        """
+        Diagnose problems with drift enum values in the database.
+        This method checks the database for valid enum values and compares them to the expected values.
+        
+        Args:
+            db: Database session
+            
+        Returns:
+            Dictionary with diagnostic information
+        """
+        from sqlalchemy.sql import text
+        
+        logger.info("Diagnosing drift enum problems...")
+        results = {
+            "enum_exists": False,
+            "expected_values": [],
+            "actual_values": [],
+            "missing_values": [],
+            "problems": [],
+            "suggestions": [],
+            "executed_sql": []
+        }
+        
+        try:
+            # Check if the enum type exists
+            enum_exists_query = "SELECT 1 FROM pg_type WHERE typname = 'drifttype'"
+            enum_exists = db.execute(text(enum_exists_query)).scalar() is not None
+            results["enum_exists"] = enum_exists
+            
+            # Get expected values from Python enum
+            expected_values = [e.value for e in DriftType]
+            results["expected_values"] = expected_values
+            
+            if not enum_exists:
+                results["problems"].append("drifttype enum does not exist in the database")
+                results["suggestions"].append("Run the add_drift_management_tables.py migration to create it")
+                return results
+                
+            # Get actual values from database
+            values_query = """
+            SELECT enumlabel FROM pg_enum 
+            JOIN pg_type ON pg_enum.enumtypid = pg_type.oid 
+            WHERE pg_type.typname = 'drifttype'
+            """
+            actual_values = [row[0] for row in db.execute(text(values_query)).fetchall()]
+            results["actual_values"] = actual_values
+            
+            # Find missing values
+            missing_values = [val for val in expected_values if val not in actual_values]
+            results["missing_values"] = missing_values
+            
+            if missing_values:
+                results["problems"].append(f"Missing enum values: {', '.join(missing_values)}")
+                
+                # Try to add missing values
+                for value in missing_values:
+                    add_sql = f"ALTER TYPE drifttype ADD VALUE IF NOT EXISTS '{value}';"
+                    results["executed_sql"].append(add_sql)
+                    try:
+                        db.execute(text(add_sql))
+                        logger.info(f"Added missing enum value: {value}")
+                        results["suggestions"].append(f"Successfully added missing enum value: {value}")
+                    except Exception as e:
+                        error_msg = str(e)
+                        logger.error(f"Error adding enum value {value}: {error_msg}")
+                        results["problems"].append(f"Error adding enum value {value}: {error_msg}")
+                        
+                        # If we can't add values directly, suggest a more complex solution
+                        if "cannot add value to enum type" in error_msg.lower():
+                            results["suggestions"].append(
+                                "PostgreSQL doesn't allow adding values to an enum type that's in use. "
+                                "To fix this, you'll need to create a new enum type, update the column, "
+                                "and drop the old type. Consider using a migration for this."
+                            )
+                
+                # Check if any values were added
+                final_values = [row[0] for row in db.execute(text(values_query)).fetchall()]
+                newly_added = [val for val in final_values if val not in actual_values]
+                if newly_added:
+                    results["suggestions"].append(f"Added new values: {', '.join(newly_added)}")
+                    
+            # Check if there are any NULL values in the drift_type column
+            null_check = "SELECT COUNT(*) FROM drift_events WHERE drift_type IS NULL"
+            try:
+                null_count = db.execute(text(null_check)).scalar() or 0
+                if null_count > 0:
+                    results["problems"].append(f"Found {null_count} rows with NULL drift_type")
+                    results["suggestions"].append(
+                        f"Update these rows with valid drift_type values using: "
+                        f"UPDATE drift_events SET drift_type = 'confidence'::drifttype WHERE drift_type IS NULL"
+                    )
+            except Exception as e:
+                logger.error(f"Error checking for NULL drift_type values: {e}")
+                
+            # Check how many drift events exist
+            count_query = "SELECT COUNT(*) FROM drift_events"
+            try:
+                event_count = db.execute(text(count_query)).scalar() or 0
+                results["event_count"] = event_count
+                logger.info(f"Found {event_count} drift events in database")
+            except Exception as e:
+                logger.error(f"Error counting drift events: {e}")
+                
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error diagnosing drift enum problems: {e}")
+            results["problems"].append(f"Error during diagnosis: {str(e)}")
+            return results
     
     @staticmethod
     def _infer_drift_type_from_description(description: str, detector_name: str):
@@ -366,6 +518,9 @@ class DriftService:
                 
                 # For KNN distance events, use a safe fallback
                 try:
+                    # Import needed here to ensure text is available
+                    from sqlalchemy.sql import text
+                    
                     # First try to check the actual enum values in PostgreSQL
                     valid_enum_values = []
                     enum_check = db.execute(
@@ -468,31 +623,20 @@ class DriftService:
                             # Convert logical drift type to uppercase for case-sensitive matching
                             logical_drift_type_upper = logical_drift_type.upper() if logical_drift_type else "UNKNOWN"
                             
-                            # Use the most appropriate value for our logical drift_type
-                            if logical_drift_type == "knn_distance" and ("KNN_DISTANCE" in available_enum_values or "knn_distance" in available_enum_values):
-                                # The KNN distance type exists in the database - use case-sensitive match
-                                if "KNN_DISTANCE" in available_enum_values:
-                                    sample_drift_type = "KNN_DISTANCE"
-                                else:
-                                    sample_drift_type = "knn_distance"
-                                logger.info(f"Using actual {sample_drift_type} enum value")
-                            # Check for standard types in both upper and lower case
-                            elif "DISTRIBUTION" in available_enum_values:
-                                sample_drift_type = "DISTRIBUTION"
-                            elif "distribution" in available_enum_values:
-                                sample_drift_type = "distribution"
-                            elif "CONFIDENCE" in available_enum_values:
-                                sample_drift_type = "CONFIDENCE"
-                            elif "confidence" in available_enum_values:
-                                sample_drift_type = "confidence"
-                            elif "UNKNOWN" in available_enum_values:
-                                sample_drift_type = "UNKNOWN"
-                            elif "unknown" in available_enum_values:
-                                sample_drift_type = "unknown"
+                            # Use the new match_value method to find the most appropriate enum
+                            drift_enum = DriftType.match_value(logical_drift_type)
+                            
+                            # Find the actual value in the database that corresponds to this enum
+                            for val in available_enum_values:
+                                if val.lower() == drift_enum.value.lower():
+                                    sample_drift_type = val  # Use the exact case as it appears in the database
+                                    logger.info(f"Found matching enum in database: {sample_drift_type}")
+                                    break
                             else:
-                                # Use the first valid value
+                                # If no match found, use the first available enum value as fallback
                                 sample_drift_type = available_enum_values[0]
-                                
+                                logger.info(f"No exact match found, using first available enum: {sample_drift_type}")
+                            
                             logger.info(f"Selected valid enum value from database: {sample_drift_type}")
                         else:
                             # Default to distribution which should exist based on migration files
@@ -507,10 +651,26 @@ class DriftService:
                     # First get a valid status value from the database
                     status_value = "PENDING"  # Default value
                     try:
-                        # Get actual valid status value from database
-                        status_result = db.execute(text(
-                            "SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid WHERE pg_type.typname = 'driftstatus' LIMIT 1"
-                        )).fetchone()
+                        # Import needed here to ensure text is available
+                        from sqlalchemy.sql import text
+                        
+                        # Get actual valid status value from database - specifically look for 'pending' value
+                        status_result = db.execute(text("""
+                            SELECT enumlabel 
+                            FROM pg_enum 
+                            JOIN pg_type ON pg_enum.enumtypid = pg_type.oid 
+                            WHERE pg_type.typname = 'driftstatus' AND enumlabel = 'pending'
+                        """)).fetchone()
+                        
+                        # If 'pending' wasn't found, try to get any valid enum value
+                        if not status_result:
+                            status_result = db.execute(text("""
+                                SELECT enumlabel 
+                                FROM pg_enum 
+                                JOIN pg_type ON pg_enum.enumtypid = pg_type.oid 
+                                WHERE pg_type.typname = 'driftstatus' 
+                                LIMIT 1
+                            """)).fetchone()
                         
                         if status_result:
                             status_value = status_result[0]
@@ -525,9 +685,23 @@ class DriftService:
                     (event_id, device_id, model_id, drift_score, detector_name, drift_type, timestamp, received_at, status, description, event_metadata) 
                     VALUES 
                     (:event_id, :device_id, NULL, :drift_score, :detector_name, 
-                     :drift_type, 
+                     (
+                         (SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid 
+                          WHERE pg_type.typname = 'drifttype' 
+                          AND (enumlabel = :drift_type_param OR enumlabel ILIKE :drift_type_param)
+                          LIMIT 1)::drifttype
+                     ),
                      :timestamp, :received_at, 
-                     '{status_value}', :description, :metadata)
+                     (
+                         COALESCE(
+                             (SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid 
+                              WHERE pg_type.typname = 'driftstatus' AND enumlabel = 'pending' LIMIT 1),
+                             (SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid 
+                              WHERE pg_type.typname = 'driftstatus' LIMIT 1),
+                             'pending'
+                         )::driftstatus
+                     ),
+                     :description, :metadata)
                     """
 
                     # Prepare parameters with proper escaping
@@ -536,7 +710,7 @@ class DriftService:
                         "device_id": device_id,
                         "drift_score": event_data.get('drift_score', 0.0),
                         "detector_name": detector_name,
-                        "drift_type": sample_drift_type,  # This is a validated drift_type that exists in the database
+                        "drift_type_param": sample_drift_type,  # This is used in the subquery to find a valid enum value
                         "timestamp": event_data.get("timestamp", datetime.now(timezone.utc).isoformat()),
                         "received_at": datetime.now(timezone.utc).isoformat(),
                         "description": description,

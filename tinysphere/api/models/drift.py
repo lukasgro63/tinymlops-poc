@@ -67,6 +67,7 @@ class DriftEventResponse(DriftEventBase):
     resolution_notes: Optional[str] = None
     sample_count: int
     validation_count: int
+    metadata: Optional[Dict[str, Any]] = Field(default=None, alias="event_metadata")
 
 
 class DriftEventUpdateStatus(BaseModel):

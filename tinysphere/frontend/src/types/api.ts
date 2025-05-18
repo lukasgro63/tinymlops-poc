@@ -38,6 +38,11 @@ export interface DriftEvent {
   resolution_notes?: string;
   sample_count: number;
   validation_count: number;
+  metadata?: {
+    original_drift_type?: string;
+    drift_type_display?: string;
+    [key: string]: any;
+  };
 }
 
 export interface DriftSample {

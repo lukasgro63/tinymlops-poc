@@ -58,7 +58,8 @@ def get_drift_events(
             "resolved_at": event.resolved_at,
             "resolution_notes": event.resolution_notes,
             "sample_count": len(event.samples),
-            "validation_count": len(event.validations)
+            "validation_count": len(event.validations),
+            "metadata": event.event_metadata
         }
         result.append(event_dict)
     
@@ -88,7 +89,8 @@ def get_drift_event(event_id: str, db: Session = Depends(get_db)):
         "resolved_at": event.resolved_at,
         "resolution_notes": event.resolution_notes,
         "sample_count": len(event.samples),
-        "validation_count": len(event.validations)
+        "validation_count": len(event.validations),
+        "metadata": event.event_metadata
     }
 
 @router.post("/events", response_model=DriftEventResponse)
@@ -116,6 +118,9 @@ def create_drift_event(drift_event: DriftEventCreate, db: Session = Depends(get_
         from sqlalchemy import text
         db_conn = db.connection()
         try:
+            # Import needed to ensure text is available
+            from sqlalchemy.sql import text
+            
             # Query the database for valid drift type enum values using a more reliable approach
             valid_types = [row[0] for row in db.execute(
                 text("SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid WHERE pg_type.typname = 'drifttype'")
@@ -192,7 +197,8 @@ def create_drift_event(drift_event: DriftEventCreate, db: Session = Depends(get_
         "resolved_at": event.resolved_at,
         "resolution_notes": event.resolution_notes,
         "sample_count": len(event.samples),
-        "validation_count": len(event.validations)
+        "validation_count": len(event.validations),
+        "metadata": event.event_metadata
     }
 
 @router.patch("/events/{event_id}/status", response_model=DriftEventResponse)
@@ -234,7 +240,8 @@ def update_drift_event_status(
         "resolved_at": updated_event.resolved_at,
         "resolution_notes": updated_event.resolution_notes,
         "sample_count": len(updated_event.samples),
-        "validation_count": len(updated_event.validations)
+        "validation_count": len(updated_event.validations),
+        "metadata": updated_event.event_metadata
     }
 
 # Drift samples endpoints
@@ -413,6 +420,23 @@ def repair_drift_events(db: Session = Depends(get_db)):
     logger.info(f"Repair process completed: {results['repaired_count']} events repaired")
     return results
 
+@router.get("/diagnose", status_code=200)
+def diagnose_drift_enum_problems(db: Session = Depends(get_db)):
+    """
+    Diagnose problems with drift enum values in the database.
+    
+    This is an admin operation that checks the database for valid enum values and
+    compares them to the expected values. It can also try to add missing values to
+    the enum type.
+    
+    Returns:
+        Dictionary with diagnostic information
+    """
+    logger.info("Starting drift enum diagnosis")
+    results = DriftService.diagnose_drift_enum_problems(db)
+    logger.info(f"Diagnosis completed: {len(results.get('problems', []))} problems found")
+    return results
+
 @router.get("/devices/{device_id}/metrics")
 def get_device_drift_metrics(device_id: str, db: Session = Depends(get_db)):
     """
@@ -561,5 +585,6 @@ async def create_drift_event_with_data(
         "timestamp": event.timestamp,
         "received_at": event.received_at,
         "sample_count": len(event.samples),
-        "validation_count": len(event.validations)
+        "validation_count": len(event.validations),
+        "metadata": event.event_metadata
     }

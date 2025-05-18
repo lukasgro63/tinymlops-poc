@@ -77,7 +77,10 @@ const getStatusColor = (status: DriftStatus): 'success' | 'warning' | 'error' | 
 
 // Drift type icon mapping
 const DriftTypeIcon: React.FC<{ type: string }> = ({ type }) => {
-  switch (type) {
+  // Normalize the drift type to lowercase for consistent handling
+  const normalizedType = type.toLowerCase();
+  
+  switch (normalizedType) {
     case 'confidence':
       return <PsychologyIcon fontSize="small" />;
     case 'distribution':
@@ -557,7 +560,9 @@ const DriftPage: React.FC = () => {
                           <TableCell>
                             <Chip
                               icon={<DriftTypeIcon type={event.drift_type} />}
-                              label={event.drift_type.charAt(0).toUpperCase() + event.drift_type.slice(1)}
+                              label={event.drift_type.split('_')
+                                .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                                .join(' ')}
                               size="small"
                               variant="outlined"
                             />

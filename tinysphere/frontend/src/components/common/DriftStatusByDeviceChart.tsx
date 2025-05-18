@@ -100,7 +100,10 @@ const DriftStatusByDeviceChart: React.FC<DriftStatusByDeviceChartProps> = ({
             formatter={(value, name: string | number) => {
               if (typeof name === 'string') {
                 // Format display name by capitalizing first letter of each word
-                return [value, name.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')];
+                const formattedName = name.split('_')
+                  .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                  .join(' ');
+                return [value, formattedName];
               }
               return [value, name];
             }} 

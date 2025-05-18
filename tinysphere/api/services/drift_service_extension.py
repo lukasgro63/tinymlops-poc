@@ -55,7 +55,7 @@ class DriftServiceExtension:
                     from tinysphere.api.services.drift_service import DriftService
                     
                     # Simply get all drift events for the period and filter them in Python
-                    all_events = db.query(DriftEvent.id, DriftEvent.drift_type).filter(
+                    all_events = db.query(DriftEvent.id, DriftEvent.drift_type, DriftEvent.event_metadata).filter(
                         DriftEvent.timestamp >= start_date
                     ).all()
                     
@@ -66,15 +66,35 @@ class DriftServiceExtension:
                     # Special handling for KNN_DISTANCE with alternative formats
                     is_knn_search = drift_type_lower in ["knn_distance", "knn", "knndistance", "knn distance"]
                     
-                    for event_id, event_drift_type in all_events:
+                    for event_id, event_drift_type, event_metadata in all_events:
                         # Get value and convert to lowercase for comparison
                         event_type_value = event_drift_type.value.lower() if hasattr(event_drift_type, 'value') else str(event_drift_type).lower()
                         
-                        # First check exact match
-                        if event_type_value == drift_type_lower:
+                        # Also check metadata for original drift type (important for cases where we used a fallback value)
+                        original_type = None
+                        display_type = None
+                        try:
+                            if event_metadata and isinstance(event_metadata, dict):
+                                if "original_drift_type" in event_metadata:
+                                    original_type = event_metadata["original_drift_type"].lower()
+                                if "drift_type_display" in event_metadata:
+                                    display_type = event_metadata["drift_type_display"].lower()
+                        except Exception as e:
+                            logger.error(f"Error getting metadata in drift_service_extension: {e}")
+                        
+                        # First check exact match with database value (case-insensitive)
+                        if event_type_value.lower() == drift_type_lower:
+                            matching_ids.append(event_id)
+                        # Then check metadata original type
+                        elif original_type and original_type.lower() == drift_type_lower:
+                            matching_ids.append(event_id)
+                        # Then check display type
+                        elif display_type and display_type.lower() == drift_type_lower:
                             matching_ids.append(event_id)
                         # Special handling for KNN_DISTANCE to catch variations
-                        elif is_knn_search and ("knn" in event_type_value or "distance" in event_type_value):
+                        elif is_knn_search and ((event_type_value and ("knn" in event_type_value or "distance" in event_type_value)) or 
+                                              (original_type and ("knn" in original_type or "distance" in original_type)) or
+                                              (display_type and ("knn" in display_type))):
                             matching_ids.append(event_id)
                     
                     if matching_ids:
@@ -211,7 +231,7 @@ class DriftServiceExtension:
                     from tinysphere.api.services.drift_service import DriftService
                     
                     # Simply get all drift events for the period and filter them in Python
-                    all_events = db.query(DriftEvent.id, DriftEvent.drift_type).filter(
+                    all_events = db.query(DriftEvent.id, DriftEvent.drift_type, DriftEvent.event_metadata).filter(
                         DriftEvent.timestamp >= start_date
                     ).all()
                     
@@ -222,15 +242,35 @@ class DriftServiceExtension:
                     # Special handling for KNN_DISTANCE with alternative formats
                     is_knn_search = drift_type_lower in ["knn_distance", "knn", "knndistance", "knn distance"]
                     
-                    for event_id, event_drift_type in all_events:
+                    for event_id, event_drift_type, event_metadata in all_events:
                         # Get value and convert to lowercase for comparison
                         event_type_value = event_drift_type.value.lower() if hasattr(event_drift_type, 'value') else str(event_drift_type).lower()
                         
-                        # First check exact match
-                        if event_type_value == drift_type_lower:
+                        # Also check metadata for original drift type (important for cases where we used a fallback value)
+                        original_type = None
+                        display_type = None
+                        try:
+                            if event_metadata and isinstance(event_metadata, dict):
+                                if "original_drift_type" in event_metadata:
+                                    original_type = event_metadata["original_drift_type"].lower()
+                                if "drift_type_display" in event_metadata:
+                                    display_type = event_metadata["drift_type_display"].lower()
+                        except Exception as e:
+                            logger.error(f"Error getting metadata in drift_service_extension: {e}")
+                        
+                        # First check exact match with database value (case-insensitive)
+                        if event_type_value.lower() == drift_type_lower:
+                            matching_ids.append(event_id)
+                        # Then check metadata original type
+                        elif original_type and original_type.lower() == drift_type_lower:
+                            matching_ids.append(event_id)
+                        # Then check display type
+                        elif display_type and display_type.lower() == drift_type_lower:
                             matching_ids.append(event_id)
                         # Special handling for KNN_DISTANCE to catch variations
-                        elif is_knn_search and ("knn" in event_type_value or "distance" in event_type_value):
+                        elif is_knn_search and ((event_type_value and ("knn" in event_type_value or "distance" in event_type_value)) or 
+                                              (original_type and ("knn" in original_type or "distance" in original_type)) or
+                                              (display_type and ("knn" in display_type))):
                             matching_ids.append(event_id)
                     
                     if matching_ids:
