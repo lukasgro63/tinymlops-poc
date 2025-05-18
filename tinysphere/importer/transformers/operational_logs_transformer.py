@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 import boto3
 from botocore.exceptions import ClientError
 from pathlib import Path
@@ -195,37 +196,120 @@ class OperationalLogsTransformer(DataTransformer):
         if not session_id:
             session_id = "unknown_session"
             
-        # Upload log files to S3
+        # Check for existing consolidated logs - we'll aggregate by session ID
+        # Use a name that clearly indicates it's an operational log and includes the session_id
+        consolidated_log_key = f"{device_id}/{session_id}/operational_log_consolidated_{session_id}.jsonl"
+        existing_log_content = self._get_existing_log_content(bucket_name="data-logs", key=consolidated_log_key)
+            
+        # Upload aggregated log files to S3
         bucket_name = "data-logs"
         uploaded_files = []
         
         try:
-            for log_file in log_files:
-                # Construct S3 object key: device_id/session_id/filename
-                object_key = f"{device_id}/{session_id}/{log_file.name}"
+            # Create a temporary file to store the consolidated log
+            import tempfile
+            import os
+            
+            with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.jsonl') as temp_file:
+                temp_file_path = temp_file.name
                 
-                # Upload file
+                # If we have existing content, write it first
+                if existing_log_content:
+                    temp_file.write(existing_log_content)
+                    # Add a newline if the existing content doesn't end with one
+                    if not existing_log_content.endswith('\n'):
+                        temp_file.write('\n')
+                    
+                # Append content from all new log files
+                for log_file in log_files:
+                    self.logger.info(f"Aggregating content from {log_file.name}")
+                    
+                    with open(log_file, 'r') as f:
+                        file_content = f.read()
+                        temp_file.write(file_content)
+                        # Add a newline if the file doesn't end with one
+                        if file_content and not file_content.endswith('\n'):
+                            temp_file.write('\n')
+                
+                # Close the file to ensure all data is written
+                temp_file.flush()
+                os.fsync(temp_file.fileno())
+                
+            # Upload the consolidated file
+            try:
                 self.s3_client.upload_file(
-                    Filename=str(log_file),
+                    Filename=temp_file_path,
                     Bucket=bucket_name,
-                    Key=object_key
+                    Key=consolidated_log_key
                 )
                 
-                uploaded_files.append(object_key)
-                self.logger.info(f"Uploaded {log_file.name} to s3://{bucket_name}/{object_key}")
+                uploaded_files.append(consolidated_log_key)
+                self.logger.info(f"Uploaded consolidated log to s3://{bucket_name}/{consolidated_log_key}")
                 
-            # Create a success record in the database if needed
-            # TODO: Implement database record creation if required
+                # Clean up temp file
+                os.remove(temp_file_path)
+                
+            except Exception as upload_error:
+                self.logger.error(f"Failed to upload consolidated log: {str(upload_error)}")
+                # Still try to clean up
+                try:
+                    os.remove(temp_file_path)
+                except:
+                    pass
+                raise upload_error
             
+            # Also upload individual log files if configured to keep them
+            keep_individual_logs = logs_metadata.get("keep_individual_logs", False)
+            
+            if keep_individual_logs:
+                for log_file in log_files:
+                    # Construct S3 object key: device_id/session_id/individual/filename
+                    object_key = f"{device_id}/{session_id}/individual/{log_file.name}"
+                    
+                    # Upload file
+                    self.s3_client.upload_file(
+                        Filename=str(log_file),
+                        Bucket=bucket_name,
+                        Key=object_key
+                    )
+                    
+                    uploaded_files.append(object_key)
+                    self.logger.info(f"Uploaded individual log {log_file.name} to s3://{bucket_name}/{object_key}")
+                    
             return {
                 "status": "success",
-                "message": f"Uploaded {len(uploaded_files)} operational log files to MinIO",
+                "message": f"Aggregated logs for session {session_id} and uploaded to MinIO",
                 "bucket": bucket_name,
                 "device_id": device_id,
                 "session_id": session_id,
-                "files": uploaded_files
+                "consolidated_log": consolidated_log_key,
+                "individual_files": uploaded_files if keep_individual_logs else []
             }
             
         except Exception as e:
             self.logger.error(f"Failed to upload operational logs: {str(e)}")
             return {"status": "error", "message": f"Failed to upload operational logs: {str(e)}"}
+            
+    def _get_existing_log_content(self, bucket_name: str, key: str) -> str:
+        """Retrieve the content of an existing log file if it exists.
+        
+        Args:
+            bucket_name: S3 bucket name
+            key: S3 object key
+            
+        Returns:
+            Content of the file or empty string if the file doesn't exist
+        """
+        try:
+            response = self.s3_client.get_object(Bucket=bucket_name, Key=key)
+            content = response['Body'].read().decode('utf-8')
+            self.logger.info(f"Found existing log file at s3://{bucket_name}/{key} with size {len(content)} bytes")
+            return content
+        except Exception as e:
+            # If file doesn't exist or another error occurs, return empty string
+            error_message = str(e)
+            if "NoSuchKey" in error_message or "404" in error_message:
+                self.logger.info(f"No existing log file found at s3://{bucket_name}/{key}, will create new file")
+            else:
+                self.logger.warning(f"Error retrieving existing log file s3://{bucket_name}/{key}: {error_message}")
+            return ""

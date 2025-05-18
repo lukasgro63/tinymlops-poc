@@ -244,6 +244,9 @@ class OperationalLogsService:
                     elif '-' in log_filename:
                         extracted_log_type = log_filename.split('-', 1)[0]
                     
+                    # Determine if this is a consolidated log
+                    is_consolidated = "operational_log_consolidated_" in log_filename
+                    
                     # Add to results
                     logs.append({
                         'key': obj['Key'],
@@ -253,7 +256,8 @@ class OperationalLogsService:
                         'size': obj['Size'],
                         'last_modified': obj['LastModified'].isoformat(),
                         'url': url,
-                        'log_type': extracted_log_type
+                        'log_type': "consolidated" if is_consolidated else extracted_log_type,
+                        'is_consolidated': is_consolidated
                     })
             
             return {
@@ -286,3 +290,75 @@ class OperationalLogsService:
         except Exception as e:
             logger.error(f"Error generating URL for log {log_key}: {e}")
             return None
+            
+    def delete_logs(self, device_id: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Delete logs for a specific device and optionally a specific session.
+        
+        Args:
+            device_id: The device ID to delete logs for
+            session_id: Optional session ID to limit deletion to a specific session
+            
+        Returns:
+            Dictionary with deletion results
+        """
+        try:
+            # Build the prefix to list objects to delete
+            prefix = f"{device_id}/"
+            if session_id:
+                prefix += f"{session_id}/"
+                
+            # List objects to delete
+            response = self.s3_client.list_objects_v2(
+                Bucket=self.bucket_name,
+                Prefix=prefix
+            )
+            
+            if 'Contents' not in response:
+                return {
+                    "status": "success",
+                    "message": f"No logs found for {prefix}",
+                    "deleted_count": 0
+                }
+            
+            # Prepare deletion objects list
+            objects_to_delete = [{"Key": obj["Key"]} for obj in response["Contents"]]
+            
+            # Delete the objects
+            if objects_to_delete:
+                delete_response = self.s3_client.delete_objects(
+                    Bucket=self.bucket_name,
+                    Delete={"Objects": objects_to_delete}
+                )
+                
+                deleted_count = len(delete_response.get("Deleted", []))
+                error_count = len(delete_response.get("Errors", []))
+                
+                if error_count > 0:
+                    return {
+                        "status": "partial",
+                        "message": f"Deleted {deleted_count} logs, but encountered {error_count} errors",
+                        "deleted_count": deleted_count,
+                        "error_count": error_count,
+                        "errors": delete_response.get("Errors", [])
+                    }
+                else:
+                    return {
+                        "status": "success",
+                        "message": f"Successfully deleted {deleted_count} logs",
+                        "deleted_count": deleted_count
+                    }
+            else:
+                return {
+                    "status": "success",
+                    "message": "No logs to delete",
+                    "deleted_count": 0
+                }
+                
+        except Exception as e:
+            logger.error(f"Error deleting logs for {device_id}/{session_id if session_id else ''}: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to delete logs: {str(e)}",
+                "deleted_count": 0
+            }

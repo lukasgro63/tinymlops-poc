@@ -332,11 +332,20 @@ export interface OperationalLog {
   url: string;
   date?: string; // Date in YYYYMMDD format
   log_type?: string; // Type of the operational log (e.g., "system", "metrics", "inference")
+  is_consolidated?: boolean; // Whether this log is a consolidated log file
 }
 
 export interface OperationalLogResponse {
   total: number;
   logs: OperationalLog[];
+}
+
+export interface LogDeletionResponse {
+  status: string;
+  message: string;
+  deleted_count: number;
+  error_count?: number;
+  errors?: Array<{Key: string; Code: string; Message: string}>;
 }
 
 // Device location types

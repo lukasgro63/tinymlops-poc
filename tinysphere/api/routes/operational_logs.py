@@ -118,3 +118,30 @@ async def get_log(log_key: str, download: bool = False):
     except Exception as e:
         logger.error(f"Error retrieving log {log_key}: {e}")
         raise HTTPException(status_code=404, detail="Log not found")
+        
+@router.delete("/device/{device_id}", response_model=Dict[str, Any])
+def delete_device_logs(device_id: str):
+    """
+    Delete all logs for a specific device.
+    
+    Args:
+        device_id: ID of the device to delete logs for
+    """
+    result = operational_logs_service.delete_logs(device_id=device_id)
+    if result["status"] == "error":
+        raise HTTPException(status_code=500, detail=result["message"])
+    return result
+    
+@router.delete("/device/{device_id}/session/{session_id}", response_model=Dict[str, Any])
+def delete_session_logs(device_id: str, session_id: str):
+    """
+    Delete logs for a specific device and session.
+    
+    Args:
+        device_id: ID of the device to delete logs for
+        session_id: ID of the session to delete logs for
+    """
+    result = operational_logs_service.delete_logs(device_id=device_id, session_id=session_id)
+    if result["status"] == "error":
+        raise HTTPException(status_code=500, detail=result["message"])
+    return result
