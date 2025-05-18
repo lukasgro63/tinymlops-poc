@@ -52,6 +52,10 @@ class Device(Base):
     last_sync_time = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
     device_info = Column(JSON, nullable=True)
+    # Geolocation fields
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    geo_accuracy = Column(Float, nullable=True)
     metrics = relationship("DeviceMetric", back_populates="device", cascade="all, delete-orphan")
     drift_events = relationship("DriftEvent", back_populates="device", cascade="all, delete-orphan")
 

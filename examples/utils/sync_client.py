@@ -9,13 +9,21 @@ Extends the base SyncClient with application-specific functionality.
 import json
 import logging
 import os
-import tempfile  # Add this import
+import socket
+import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import shutil
-from datetime import datetime
+
+# Import geolocation module if available
+try:
+    from tinylcm.utils.geolocation import Geolocator
+    GEOLOCATION_AVAILABLE = True
+except ImportError:
+    GEOLOCATION_AVAILABLE = False
 
 from tinylcm.client.sync_client import SyncClient as TinyLCMSyncClient
 from tinylcm.client.sync_interface import SyncInterface, SyncPackage
@@ -39,7 +47,12 @@ class ExtendedSyncClient:
         sync_dir: str = "./sync_data",
         sync_interval_seconds: int = 30,
         max_retries: int = 3,
-        auto_register: bool = True
+        auto_register: bool = True,
+        enable_geolocation: bool = False,
+        geolocation_api_key: Optional[str] = None,
+        geolocation_cache_ttl: int = 86400,
+        geolocation_update_interval: int = 3600,
+        geolocation_fallback_coordinates: List[float] = [0.0, 0.0]
     ):
         """Initialize the extended SyncClient.
 
@@ -51,6 +64,11 @@ class ExtendedSyncClient:
             sync_interval_seconds: Interval between sync attempts
             max_retries: Maximum number of connection retry attempts
             auto_register: Whether to automatically register the device
+            enable_geolocation: Whether to enable geolocation
+            geolocation_api_key: API key for geolocation service (if needed)
+            geolocation_cache_ttl: Time-to-live for geolocation cache in seconds
+            geolocation_update_interval: Interval between geolocation updates in seconds
+            geolocation_fallback_coordinates: Default coordinates to use if geolocation fails [lat, lon]
         """
         # Create sync directory if it doesn't exist
         os.makedirs(sync_dir, exist_ok=True)
@@ -83,6 +101,32 @@ class ExtendedSyncClient:
         # Image transfer attributes (disabled by default)
         self.enable_prediction_images = False
         self.pending_prediction_images = []
+        
+        # Geolocation attributes
+        self.enable_geolocation = enable_geolocation
+        self.geolocation_api_key = geolocation_api_key
+        self.geolocation_cache_ttl = geolocation_cache_ttl
+        self.geolocation_update_interval = geolocation_update_interval
+        self.geolocation_fallback_coordinates = geolocation_fallback_coordinates
+        self.geolocator = None
+        self.location_cache = None
+        self.last_location_update = 0
+        
+        # Initialize geolocator if enabled
+        if self.enable_geolocation and GEOLOCATION_AVAILABLE:
+            try:
+                self.geolocator = Geolocator(
+                    api_key=self.geolocation_api_key,
+                    cache_ttl=self.geolocation_cache_ttl,
+                    fallback_coordinates=self.geolocation_fallback_coordinates
+                )
+                logger.info(f"Geolocator initialized for device {device_id}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize geolocator: {e}")
+        elif self.enable_geolocation and not GEOLOCATION_AVAILABLE:
+            logger.warning("Geolocation is enabled in config but the geolocation module is not available.")
+            logger.warning("Install the tinylcm package with geolocation extras: pip install tinylcm[geolocation]")
+
 
         logger.info(f"Extended SyncClient initialized for device {device_id}")
     
@@ -263,6 +307,10 @@ class ExtendedSyncClient:
                 img_results = self.sync_prediction_images()
                 if img_results:
                     results.extend(img_results)
+                    
+            # Update device information including geolocation if enabled
+            if self.enable_geolocation and GEOLOCATION_AVAILABLE and self.geolocator:
+                self.update_device_info()
 
             # Then sync all other pending packages
             pkg_results = self.client.sync_all_pending_packages()
@@ -799,6 +847,162 @@ class ExtendedSyncClient:
         logger.info(f"Deleted {success_count} transferred images, {fail_count} failed")
         return success_count, fail_count
 
+    def _update_geolocation(self) -> Dict[str, Any]:
+        """Update and retrieve geolocation information.
+        
+        Returns:
+            Dictionary with location information (latitude, longitude, accuracy, source)
+        """
+        if not self.enable_geolocation or not GEOLOCATION_AVAILABLE or not self.geolocator:
+            return {"latitude": 0.0, "longitude": 0.0, "accuracy": 0.0, "source": "disabled"}
+            
+        current_time = time.time()
+        
+        # Check if it's time to update location
+        if (current_time - self.last_location_update) >= self.geolocation_update_interval:
+            try:
+                location = self.geolocator.get_location()
+                self.location_cache = location
+                self.last_location_update = current_time
+                logger.info(f"Updated device geolocation: {location.get('latitude'):.6f}, {location.get('longitude'):.6f}")
+                return location
+            except Exception as e:
+                logger.warning(f"Failed to update geolocation: {e}")
+                # Fall back to cached location or defaults
+        
+        # Return cached location if available
+        if self.location_cache:
+            return self.location_cache
+            
+        # Use fallback coordinates if everything fails
+        return {
+            "latitude": self.geolocation_fallback_coordinates[0],
+            "longitude": self.geolocation_fallback_coordinates[1],
+            "accuracy": 0.0,
+            "source": "fallback"
+        }
+        
+    def _get_device_info(self) -> Dict[str, Any]:
+        """Get device information including hardware details and location.
+        
+        Returns:
+            Dictionary with device information
+        """
+        try:
+            # Get hostname
+            hostname = socket.gethostname()
+            
+            # Get IP address
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.settimeout(0.1)
+                s.connect(("8.8.8.8", 80))
+                ip_address = s.getsockname()[0]
+                s.close()
+            except:
+                ip_address = "127.0.0.1"  # Fallback
+            
+            # Basic device info
+            device_info = {
+                "device_id": self.device_id,
+                "hostname": hostname,
+                "ip_address": ip_address,
+                "last_update": time.time()
+            }
+            
+            # Add hardware info if psutil is available
+            try:
+                import psutil
+                device_info["hw_info"] = {
+                    "cpu_count": psutil.cpu_count(),
+                    "memory_total": psutil.virtual_memory().total,
+                    "disk_total": psutil.disk_usage("/").total
+                }
+            except ImportError:
+                pass
+                
+            # Add geolocation data if enabled
+            if self.enable_geolocation and GEOLOCATION_AVAILABLE and self.geolocator:
+                location = self._update_geolocation()
+                device_info["location"] = {
+                    "latitude": location.get("latitude", 0.0),
+                    "longitude": location.get("longitude", 0.0),
+                    "accuracy": location.get("accuracy", 0.0),
+                    "source": location.get("source", "unknown"),
+                    "updated_at": self.last_location_update
+                }
+                
+            return device_info
+        except Exception as e:
+            logger.error(f"Error getting device info: {e}")
+            # Return minimal device info
+            return {"device_id": self.device_id}
+    
+    def update_device_info(self) -> bool:
+        """Update device information with the server.
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Get device info including geolocation
+            device_info = self._get_device_info()
+            
+            # Rather than using the client's update_device_info which may use PATCH (not supported),
+            # we'll directly use the registration endpoint which uses POST
+            success = False
+            
+            if hasattr(self.client, 'connection_manager'):
+                # Store geolocation in client for later use
+                if self.enable_geolocation and 'location' in device_info:
+                    location = device_info['location']
+                    if hasattr(self.client, 'current_location'):
+                        self.client.current_location = {
+                            'latitude': location['latitude'],
+                            'longitude': location['longitude'],
+                            'accuracy': location['accuracy'],
+                            'source': location['source']
+                        }
+                        self.client.last_geolocation_update = time.time()
+                
+                # Use POST to /devices/register endpoint instead of PATCH to update device info
+                update_data = {
+                    "device_id": self.device_id,
+                    "device_info": device_info,
+                    "last_sync_time": time.time()
+                }
+                
+                try:
+                    response = self.client.connection_manager.execute_request(
+                        method="POST", 
+                        endpoint="devices/register", 
+                        json=update_data
+                    )
+                    
+                    if response.status_code == 200:
+                        logger.info(f"Successfully updated device info with server via registration endpoint")
+                        success = True
+                    else:
+                        error_msg = f"Update via registration failed: {response.status_code} - {response.text}"
+                        logger.warning(error_msg)
+                        success = False
+                except Exception as e:
+                    logger.warning(f"Error updating device info via registration: {e}")
+                    success = False
+            else:
+                # Fallback if we don't have connection_manager access
+                if hasattr(self.client, 'register_device'):
+                    success = self.client.register_device()
+                    if success:
+                        logger.info(f"Updated device info via register_device method")
+                    else:
+                        logger.warning(f"Failed to update device info via register_device method")
+                
+            return success
+        except Exception as e:
+            logger.error(f"Error updating device info: {e}")
+            return False
+        
     def close(self):
         """Close the connection and clean up resources."""
         try:
@@ -822,6 +1026,8 @@ def main():
     parser.add_argument('--key', default='tinylcm-demo-key', help='API key')
     parser.add_argument('--device', default=None, help='Device ID (defaults to hostname)')
     parser.add_argument('--sync-dir', default='./sync_data', help='Sync directory')
+    parser.add_argument('--geolocation', action='store_true', help='Enable geolocation')
+    parser.add_argument('--geo-key', default=None, help='Geolocation API key (if needed)')
     
     args = parser.parse_args()
     
@@ -835,7 +1041,9 @@ def main():
         server_url=args.server,
         api_key=args.key,
         device_id=args.device,
-        sync_dir=args.sync_dir
+        sync_dir=args.sync_dir,
+        enable_geolocation=args.geolocation,
+        geolocation_api_key=args.geo_key
     )
     
     # Check connection
@@ -849,6 +1057,18 @@ def main():
     # Register device
     registered = client.register_device()
     print(f"Device registration: {'Successful' if registered else 'Failed'}")
+    
+    # Update device info with geolocation if enabled
+    if args.geolocation:
+        updated = client.update_device_info()
+        print(f"Device info update with geolocation: {'Successful' if updated else 'Failed'}")
+        
+        # If successful, print the location
+        if updated and client.location_cache:
+            loc = client.location_cache
+            print(f"Device location: {loc.get('latitude'):.6f}, {loc.get('longitude'):.6f}")
+            print(f"Location source: {loc.get('source')}")
+            print(f"Location accuracy: {loc.get('accuracy')}")
     
     # Create and send a test metrics package
     test_metrics = {

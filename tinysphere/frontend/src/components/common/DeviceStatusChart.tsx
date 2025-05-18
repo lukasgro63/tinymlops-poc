@@ -31,6 +31,11 @@ const DeviceStatusChart: React.FC<DeviceStatusChartProps> = ({ activeCount, inac
     );
   }
 
+  // Custom legend formatter for consistent styling
+  const renderColorfulLegendText = (value: string) => {
+    return <span style={{ color: '#111', fontSize: '0.875rem', paddingLeft: '4px' }}>{value}</span>;
+  };
+
   return (
     <Box sx={{ height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
       <ResponsiveContainer width="100%" height="100%">
@@ -45,12 +50,13 @@ const DeviceStatusChart: React.FC<DeviceStatusChartProps> = ({ activeCount, inac
             dataKey="value"
             nameKey="name"
             label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+            fillOpacity={0.7}
           >
-            <Cell fill={ACTIVE_COLOR} />
-            <Cell fill={INACTIVE_COLOR} />
+            <Cell fill={ACTIVE_COLOR} fillOpacity={0.7} />
+            <Cell fill={INACTIVE_COLOR} fillOpacity={0.7} />
           </Pie>
           <Tooltip formatter={(value) => [`${value} devices`, 'Count']} />
-          <Legend />
+          <Legend formatter={renderColorfulLegendText} />
         </PieChart>
       </ResponsiveContainer>
     </Box>

@@ -45,23 +45,21 @@
     "drift_detectors": [
       {
         "type": "KNNDistanceMonitor",
-        "delta": 5,
-        "lambda_threshold": 25,
-        "warm_up_samples": 100,
+        "delta": 5, 
+        "lambda_threshold": 50,
+        "exit_threshold_factor": 0.7,
+        "high_confidence_threshold": 0.9,
+        "stable_known_classes": ["lego", "stone", "leaf"],
+        "reference_stats_path": "./initial_state/knn_reference_stats.json",
+        "warm_up_samples": 5,
         "reference_update_interval": 100,
         "reference_update_factor": 0.05,
         "pause_reference_update_during_drift": true,
-        "drift_cooldown_period": 30
-      },
-      {
-        "type": "NeighborDiversityDriftDetector",
-        "k_neighbors": 5,
-        "max_mismatched_neighbors_threshold": 3,
-        "warm_up_samples": 100,
         "drift_cooldown_period": 30,
-        "reference_update_interval": 30,
-        "reference_update_factor": 0.05,
-        "pause_reference_update_during_drift": true
+        "use_adaptive_thresholds": false,
+        "allow_runtime_threshold_adaptation": false,
+        "adaptive_delta_std_multiplier": 1.5,
+        "adaptive_lambda_std_multiplier": 5.0
       }
     ],
     "operational_monitor": {
@@ -93,6 +91,13 @@
       "log_images": true,
       "log_drift_events": true,
       "max_log_size_mb": 100
+    },
+    "geolocation": {
+      "enabled": true,
+      "api_key": null,
+      "cache_ttl": 86400,
+      "update_interval_seconds": 3600,
+      "fallback_coordinates": [0.0, 0.0]
     }
   },
   "application": {

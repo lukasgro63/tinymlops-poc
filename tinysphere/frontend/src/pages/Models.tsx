@@ -5,7 +5,8 @@ import {
   CheckCircle as CheckCircleIcon,
   CompareArrows as CompareArrowsIcon,
   HourglassEmpty as HourglassEmptyIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  FilterList as FilterListIcon
 } from '@mui/icons-material';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
 import StorageIcon from '@mui/icons-material/Storage';
@@ -67,6 +68,16 @@ const Models: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   
+  // Model Performance Chart state
+  const [perfChartFiltersVisible, setPerfChartFiltersVisible] = useState<boolean>(true);
+  const [perfChartLastUpdated, setPerfChartLastUpdated] = useState<Date | null>(null);
+  const modelPerfChartRef = React.useRef<any>(null);
+  
+  // Model Registry state
+  const [registryFiltersVisible, setRegistryFiltersVisible] = useState<boolean>(true);
+  const [registryLastUpdated, setRegistryLastUpdated] = useState<Date | null>(null);
+  const modelRegistryRef = React.useRef<any>(null);
+  
   // Fetch initial data on load
   // Function to fetch all models data
   const fetchModelsData = async () => {
@@ -88,7 +99,9 @@ const Models: React.FC = () => {
       }
       
       // Update last updated timestamp
-      setLastUpdated(new Date());
+      const updateTime = new Date();
+      setLastUpdated(updateTime);
+      setRegistryLastUpdated(updateTime);
       
     } catch (err) {
       console.error('Error fetching model data:', err);
@@ -318,11 +331,27 @@ const Models: React.FC = () => {
             <Box sx={{ display: 'flex', gap: 1 }}>
               <Tooltip title="Last updated">
                 <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
-                  {lastUpdated ? `Updated: ${lastUpdated.toLocaleTimeString()}` : ''}
+                  {registryLastUpdated ? `Updated: ${registryLastUpdated.toLocaleTimeString()}` : ''}
                 </Typography>
               </Tooltip>
-              <Tooltip title="Refresh data">
-                <IconButton size="small" onClick={() => fetchModelsData()} disabled={loading}>
+              <Tooltip title={registryFiltersVisible ? "Hide Filters" : "Show Filters"}>
+                <IconButton 
+                  size="small" 
+                  onClick={() => setRegistryFiltersVisible(!registryFiltersVisible)}
+                  color={registryFiltersVisible ? "primary" : "default"}
+                >
+                  <FilterListIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Refresh Data">
+                <IconButton 
+                  size="small" 
+                  onClick={() => {
+                    fetchModelsData();
+                    setRegistryLastUpdated(new Date());
+                  }}
+                  disabled={loading}
+                >
                   <RefreshIcon />
                 </IconButton>
               </Tooltip>
@@ -333,6 +362,9 @@ const Models: React.FC = () => {
             initialData={modelSummaries}
             selectedModel={selectedModel}
             onModelSelect={(modelName) => setSelectedModel(modelName)}
+            ref={modelRegistryRef}
+            filtersVisible={registryFiltersVisible}
+            onLastUpdated={(date) => setRegistryLastUpdated(date)}
           />
         </SectionCard>
       </Box>
@@ -342,59 +374,91 @@ const Models: React.FC = () => {
         <SectionCard 
           title="Model Performance Trends"
           icon={<ShowChartIcon style={{ fontSize: 20, color: '#00647D' }} />}
+          height={400}
+          action={
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Tooltip title="Last updated">
+                <Typography variant="caption" sx={{ alignSelf: 'center', mr: 1, color: 'text.secondary' }}>
+                  {perfChartLastUpdated ? `Updated: ${perfChartLastUpdated.toLocaleTimeString()}` : ''}
+                </Typography>
+              </Tooltip>
+              <Tooltip title={perfChartFiltersVisible ? "Hide Filters" : "Show Filters"}>
+                <IconButton 
+                  size="small" 
+                  onClick={() => setPerfChartFiltersVisible(!perfChartFiltersVisible)}
+                  color={perfChartFiltersVisible ? "primary" : "default"}
+                >
+                  <FilterListIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Refresh Data">
+                <IconButton 
+                  size="small" 
+                  onClick={() => {
+                    fetchModelMetrics(selectedModel);
+                    setPerfChartLastUpdated(new Date());
+                  }}
+                  disabled={metricsLoading}
+                >
+                  <RefreshIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          }
         >
-          <Box sx={{ height: 300 }}>
-            {metricsLoading ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                <CircularProgress size={24} />
-              </Box>
-            ) : (
-              <ModelPerformanceChart
-                models={modelList}
-                performanceData={versionMetrics.map(metric => {
-                  // Handle potential NaN values in metrics
-                  let metricValue: number | null = null;
+          {metricsLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : (
+            <ModelPerformanceChart
+              models={modelList}
+              performanceData={versionMetrics.map(metric => {
+                // Handle potential NaN values in metrics
+                let metricValue: number | null = null;
+                
+                if (metric.metrics && metric.metrics[selectedMetric] !== undefined) {
+                  const value = metric.metrics[selectedMetric];
                   
-                  if (metric.metrics && metric.metrics[selectedMetric] !== undefined) {
-                    const value = metric.metrics[selectedMetric];
-                    
-                    // Handle different value types
-                    if (value === null) {
+                  // Handle different value types
+                  if (value === null) {
+                    metricValue = null;
+                  } else if (typeof value === 'number') {
+                    // If it's a numeric NaN, set to null
+                    metricValue = isNaN(value) ? null : value;
+                  } else if (typeof value === 'string') {
+                    // If it's a string 'NaN', set to null, otherwise try to parse it
+                    const strValue = value as string;
+                    if (strValue === 'NaN' || strValue === 'nan' || strValue.toLowerCase() === 'nan') {
                       metricValue = null;
-                    } else if (typeof value === 'number') {
-                      // If it's a numeric NaN, set to null
-                      metricValue = isNaN(value) ? null : value;
-                    } else if (typeof value === 'string') {
-                      // If it's a string 'NaN', set to null, otherwise try to parse it
-                      const strValue = value as string;
-                      if (strValue === 'NaN' || strValue === 'nan' || strValue.toLowerCase() === 'nan') {
-                        metricValue = null;
-                      } else {
-                        // Try to parse as number
-                        const parsed = parseFloat(strValue);
-                        metricValue = isNaN(parsed) ? null : parsed;
-                      }
                     } else {
-                      // Any other type becomes null
-                      metricValue = null;
+                      // Try to parse as number
+                      const parsed = parseFloat(strValue);
+                      metricValue = isNaN(parsed) ? null : parsed;
                     }
+                  } else {
+                    // Any other type becomes null
+                    metricValue = null;
                   }
-                  
-                  return {
-                    model_name: selectedModel,
-                    version: metric.version,
-                    stage: metric.stage,
-                    metric_name: selectedMetric,
-                    value: metricValue,
-                    timestamp: metric.created_at,
-                    run_id: metric.run_id
-                  };
-                })}
-                selectedMetric={selectedMetric}
-                onMetricChange={(metric) => setSelectedMetric(metric)}
-              />
-            )}
-          </Box>
+                }
+                
+                return {
+                  model_name: selectedModel,
+                  version: metric.version,
+                  stage: metric.stage,
+                  metric_name: selectedMetric,
+                  value: metricValue,
+                  timestamp: metric.created_at,
+                  run_id: metric.run_id
+                };
+              })}
+              selectedMetric={selectedMetric}
+              onMetricChange={(metric) => setSelectedMetric(metric)}
+              ref={modelPerfChartRef}
+              filtersVisible={perfChartFiltersVisible}
+              onLastUpdated={(date) => setPerfChartLastUpdated(date)}
+            />
+          )}
         </SectionCard>
       </Box>
       

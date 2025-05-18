@@ -47,14 +47,22 @@ interface ModelRegistryTableProps {
   selectedModel?: string;
   refreshInterval?: number;
   initialData?: ModelSummary[];
+  
+  // Filter visibility controlled from parent
+  filtersVisible?: boolean;
+  
+  // Callback for when data is updated
+  onLastUpdated?: (date: Date) => void;
 }
 
-const ModelRegistryTable: React.FC<ModelRegistryTableProps> = ({
+const ModelRegistryTable = React.forwardRef<{refresh: () => Promise<void>}, ModelRegistryTableProps>(({
   onModelSelect,
   selectedModel,
   refreshInterval = 0,
-  initialData
-}) => {
+  initialData,
+  filtersVisible: externalFiltersVisible,
+  onLastUpdated
+}, ref) => {
   // Data state
   const [loading, setLoading] = useState<boolean>(!initialData);
   const [error, setError] = useState<string | null>(null);
@@ -62,9 +70,13 @@ const ModelRegistryTable: React.FC<ModelRegistryTableProps> = ({
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   
   // Filter state
+  const [internalFiltersVisible, setInternalFiltersVisible] = useState<boolean>(externalFiltersVisible !== undefined ? externalFiltersVisible : true);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [stageFilter, setStageFilter] = useState<string>('all');
   const [deviceFilter, setDeviceFilter] = useState<string>('all');
+  
+  // Use external filtersVisible if provided
+  const filtersVisible = externalFiltersVisible !== undefined ? externalFiltersVisible : internalFiltersVisible;
   
   // Sorting and pagination
   const [order, setOrder] = useState<Order>('desc');
@@ -79,7 +91,13 @@ const ModelRegistryTable: React.FC<ModelRegistryTableProps> = ({
       setError(null);
       const data = await getModelsSummary();
       setModelSummaries(data);
-      setLastUpdated(new Date());
+      const updateDate = new Date();
+      setLastUpdated(updateDate);
+      
+      // Notify parent of update if callback provided
+      if (onLastUpdated) {
+        onLastUpdated(updateDate);
+      }
     } catch (err) {
       console.error('Error fetching model registry data:', err);
       setError('Failed to load model registry data');
@@ -93,9 +111,18 @@ const ModelRegistryTable: React.FC<ModelRegistryTableProps> = ({
     if (!initialData) {
       fetchModels();
     } else {
-      setLastUpdated(new Date());
+      const updateDate = new Date();
+      setLastUpdated(updateDate);
+      if (onLastUpdated) {
+        onLastUpdated(updateDate);
+      }
     }
   }, [initialData]);
+  
+  // Expose refresh method via ref
+  React.useImperativeHandle(ref, () => ({
+    refresh: fetchModels
+  }));
 
   // Set up refresh interval if specified
   useEffect(() => {
@@ -267,56 +294,83 @@ const ModelRegistryTable: React.FC<ModelRegistryTableProps> = ({
 
   return (
     <Box sx={{ p: 2 }}>
+      {/* The filter controls are now in the parent component */}
+
       {/* Filter bar */}
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 2 }}>
-        <TextField
-          placeholder="Search models..."
-          variant="outlined"
-          size="small"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          sx={{ flex: '1 1 250px' }}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon />
-              </InputAdornment>
-            ),
-          }}
-        />
+      {filtersVisible && (
+        <Box sx={{ mb: 3 }}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 1 }}>
+            <Box sx={{ flex: '1 1 250px', minWidth: '200px' }}>
+              <TextField
+                placeholder="Search models..."
+                variant="outlined"
+                size="small"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                fullWidth
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Box>
 
-        <FormControl size="small" sx={{ minWidth: 120 }}>
-          <InputLabel id="stage-select-label">Stage</InputLabel>
-          <Select
-            labelId="stage-select-label"
-            value={stageFilter}
-            label="Stage"
-            onChange={(e: SelectChangeEvent) => setStageFilter(e.target.value)}
-          >
-            <MenuItem value="all">All Stages</MenuItem>
-            <MenuItem value="production">Production</MenuItem>
-            <MenuItem value="staging">Staging</MenuItem>
-            <MenuItem value="none">None</MenuItem>
-          </Select>
-        </FormControl>
+            <Box sx={{ flex: '0 1 150px', minWidth: '120px' }}>
+              <FormControl size="small" fullWidth>
+                <InputLabel id="stage-select-label">Stage</InputLabel>
+                <Select
+                  labelId="stage-select-label"
+                  value={stageFilter}
+                  label="Stage"
+                  onChange={(e: SelectChangeEvent) => setStageFilter(e.target.value)}
+                >
+                  <MenuItem value="all">All Stages</MenuItem>
+                  <MenuItem value="production">Production</MenuItem>
+                  <MenuItem value="staging">Staging</MenuItem>
+                  <MenuItem value="none">None</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
 
-        {uniqueDevices.length > 0 && (
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel id="device-select-label">Device</InputLabel>
-            <Select
-              labelId="device-select-label"
-              value={deviceFilter}
-              label="Device"
-              onChange={(e: SelectChangeEvent) => setDeviceFilter(e.target.value)}
+            {uniqueDevices.length > 0 && (
+              <Box sx={{ flex: '0 1 180px', minWidth: '150px' }}>
+                <FormControl size="small" fullWidth>
+                  <InputLabel id="device-select-label">Device</InputLabel>
+                  <Select
+                    labelId="device-select-label"
+                    value={deviceFilter}
+                    label="Device"
+                    onChange={(e: SelectChangeEvent) => setDeviceFilter(e.target.value)}
+                  >
+                    <MenuItem value="all">All Devices</MenuItem>
+                    {uniqueDevices.map(device => (
+                      <MenuItem key={device} value={device}>{device}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Box>
+            )}
+          </Box>
+          
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => {
+                setSearchTerm('');
+                setStageFilter('all');
+                setDeviceFilter('all');
+              }}
+              disabled={searchTerm === '' && stageFilter === 'all' && deviceFilter === 'all'}
             >
-              <MenuItem value="all">All Devices</MenuItem>
-              {uniqueDevices.map(device => (
-                <MenuItem key={device} value={device}>{device}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        )}
-      </Box>
+              Reset Filters
+            </Button>
+          </Box>
+        </Box>
+      )}
       
       {/* Model table */}
       <TableContainer sx={{ bgcolor: 'transparent' }}>
@@ -431,6 +485,6 @@ const ModelRegistryTable: React.FC<ModelRegistryTableProps> = ({
       />
     </Box>
   );
-};
+});
 
 export default ModelRegistryTable;

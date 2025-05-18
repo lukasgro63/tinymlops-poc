@@ -3,7 +3,14 @@ FROM node:18-alpine as build
 
 WORKDIR /app
 COPY tinysphere/frontend/package.json ./
-RUN npm install
+# Modifying package.json to use compatible React versions
+RUN sed -i 's/"react": "\^19.1.0"/"react": "^18.2.0"/g' package.json && \
+    sed -i 's/"react-dom": "\^19.1.0"/"react-dom": "^18.2.0"/g' package.json && \
+    sed -i 's/"@types\/react": "\^19.1.2"/"@types\/react": "^18.2.0"/g' package.json && \
+    sed -i 's/"@types\/react-dom": "\^19.1.2"/"@types\/react-dom": "^18.2.0"/g' package.json
+
+# Clean cache and install dependencies with compatible versions
+RUN npm cache clean --force && npm install
 
 COPY tinysphere/frontend/ ./
 RUN npm run build

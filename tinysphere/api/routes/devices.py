@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from tinysphere.api.dependencies.db import get_db
 from tinysphere.api.models.device import (Device, DeviceRegistrationRequest,
-                                          DeviceRegistrationResponse)
+                                          DeviceRegistrationResponse, DeviceLocation)
 from tinysphere.api.services.device_service import DeviceService
 from tinysphere.api.services.notification_service import NotificationService
 
@@ -38,6 +38,70 @@ def get_device_platforms(db: Session = Depends(get_db)):
         return DeviceService.get_device_platforms(db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching platform distribution: {str(e)}")
+        
+@router.get("/debug-locations")
+def get_debug_device_locations(db: Session = Depends(get_db)):
+    """Debug endpoint to get raw location data from database."""
+    try:
+        from sqlalchemy import text
+        
+        # Direct SQL query to get location data
+        results = db.execute(text("SELECT device_id, hostname, latitude, longitude, geo_accuracy FROM devices WHERE latitude IS NOT NULL")).fetchall()
+        
+        # Convert to list of dictionaries
+        locations = []
+        for row in results:
+            locations.append({
+                "device_id": row[0],
+                "hostname": row[1],
+                "latitude": float(row[2]),
+                "longitude": float(row[3]),
+                "geo_accuracy": float(row[4]) if row[4] is not None else None
+            })
+            
+        return {
+            "count": len(locations),
+            "locations": locations
+        }
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error fetching debug locations: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error fetching debug locations: {str(e)}")
+
+# Locations endpoint muss VOR dem /{device_id} Endpoint definiert werden!
+@router.get("/locations")
+def get_all_device_locations(limit: int = 100, offset: int = 0, db: Session = Depends(get_db)):
+    """Get location data for all devices with valid coordinates."""
+    try:
+        from sqlalchemy import text
+        
+        # EXAKT dieselbe Implementierung wie der Debug-Endpunkt
+        results = db.execute(text("SELECT device_id, hostname, latitude, longitude, geo_accuracy FROM devices WHERE latitude IS NOT NULL")).fetchall()
+        
+        # Convert to list of dictionaries
+        locations = []
+        for row in results:
+            locations.append({
+                "device_id": row[0],
+                "hostname": row[1],
+                "latitude": float(row[2]),
+                "longitude": float(row[3]),
+                "geo_accuracy": float(row[4]) if row[4] is not None else None
+            })
+            
+        # Einziger Unterschied: "total" statt "count" für Frontend-Kompatibilität
+        return {
+            "total": len(locations),
+            "locations": locations
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error fetching device locations: {str(e)}")
 
 @router.get("/metrics")
 def get_device_metrics(device_id: Optional[str] = None, db: Session = Depends(get_db)):
@@ -117,3 +181,73 @@ def register_device(registration: DeviceRegistrationRequest, db: Session = Depen
             registered=False,
             message=f"Registration failed: {str(e)}"
         )
+
+@router.get("/{device_id}/location", status_code=200)
+def get_device_location(device_id: str, db: Session = Depends(get_db)):
+    """Get location data for a specific device.
+    
+    Simplified implementation similar to the working debug endpoint.
+    """
+    try:
+        # Debug info for device location request
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Device location request for device: {device_id} - SIMPLE IMPLEMENTATION")
+        
+        # Use direct SQL to get device location
+        from sqlalchemy import text
+        from datetime import datetime, timezone
+        
+        # Query directly with SQL to bypass any ORM issues - using the same approach as the debug endpoint
+        sql_result = db.execute(text(
+            f"SELECT device_id, hostname, latitude, longitude, geo_accuracy, is_active, last_sync_time "
+            f"FROM devices WHERE device_id = '{device_id}' AND latitude IS NOT NULL"
+        )).fetchone()
+        
+        if not sql_result:
+            logger.warning(f"No location data found for device {device_id}")
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Device not found or location data not available for device: {device_id}"
+            )
+        
+        # Parse SQL result
+        result_device_id = sql_result[0]
+        hostname = sql_result[1]
+        latitude = sql_result[2]
+        longitude = sql_result[3]
+        geo_accuracy = sql_result[4]
+        is_active = sql_result[5]
+        last_sync_time = sql_result[6]
+        
+        logger.info(f"Found location for device {device_id}: lat={latitude}, lon={longitude}, accuracy={geo_accuracy}")
+        
+        # Get current UTC time for last_update field
+        current_time = datetime.now(timezone.utc).isoformat()
+        
+        # Create the location object
+        location = {
+            "device_id": result_device_id,
+            "name": hostname or result_device_id,
+            "location_name": hostname or result_device_id,  # Add location_name for frontend compatibility
+            "latitude": float(latitude),
+            "longitude": float(longitude),
+            "geo_accuracy": float(geo_accuracy) if geo_accuracy is not None else None,
+            "accuracy": float(geo_accuracy) if geo_accuracy is not None else None,
+            "is_active": bool(is_active) if is_active is not None else True,
+            "last_update": last_sync_time.isoformat() if last_sync_time else current_time
+        }
+        
+        # Log the location data that's being returned
+        logger.info(f"Returning location data for device {device_id}: {location}")
+        
+        return location
+    except HTTPException:
+        raise
+    except Exception as e:
+        import logging, traceback
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error fetching device location: {str(e)}")
+        logger.error(traceback.format_exc())
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error fetching device location: {str(e)}")

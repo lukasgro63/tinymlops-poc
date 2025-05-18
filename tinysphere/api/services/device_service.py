@@ -76,6 +76,9 @@ class DeviceService:
             tinylcm_version=device.tinylcm_version,
             registration_time=device.registration_time,
             device_info=device.device_info,
+            latitude=device.latitude,
+            longitude=device.longitude,
+            geo_accuracy=device.geo_accuracy,
             is_active=True
         )
         db.add(db_device)
@@ -108,9 +111,28 @@ class DeviceService:
             device_id = device_data["device_id"]
             existing_device = DeviceService.get_device_by_id(db, device_id)
             
-            if existing_device:
-                device_info = device_data.get("device_info", {})
+            # Extract location data from both top-level and inside device_info
+            latitude = device_data.get("latitude")
+            longitude = device_data.get("longitude")
+            geo_accuracy = device_data.get("geo_accuracy") or device_data.get("accuracy")
+            
+            # Extract device_info
+            device_info = device_data.get("device_info", {})
+            
+            # Check for location inside device_info
+            if device_info and "location" in device_info and isinstance(device_info["location"], dict):
+                location_data = device_info["location"]
+                latitude = location_data.get("latitude") if location_data.get("latitude") is not None else latitude
+                longitude = location_data.get("longitude") if location_data.get("longitude") is not None else longitude
+                accuracy_value = location_data.get("accuracy") or location_data.get("geo_accuracy")
+                geo_accuracy = accuracy_value if accuracy_value is not None else geo_accuracy
                 
+                # Log extracted location data for debugging
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"Device {device_id}: Extracted location data from nested format: lat={latitude}, lon={longitude}, accuracy={geo_accuracy}")
+            
+            if existing_device:
                 update_data = DeviceUpdate(
                     hostname=device_info.get("hostname"),
                     ip_address=device_info.get("ip_address"),
@@ -119,13 +141,19 @@ class DeviceService:
                     tinylcm_version=device_info.get("tinylcm_version"),
                     is_active=True,
                     device_info=device_info,
-                    last_sync_time=current_time
+                    last_sync_time=current_time,
+                    latitude=latitude,
+                    longitude=longitude,
+                    geo_accuracy=geo_accuracy
                 )
+                
+                # Log location data being saved for debugging
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"Updating device {device_id} with location: lat={latitude}, lon={longitude}, accuracy={geo_accuracy}")
                 
                 return DeviceService.update_device(db, device_id, update_data)
             else:
-                device_info = device_data.get("device_info", {})
-                
                 # Handle registration_time conversion
                 try:
                     registration_time_data = device_data.get("registration_time")
@@ -147,7 +175,10 @@ class DeviceService:
                     python_version=device_info.get("python_version"),
                     tinylcm_version=device_info.get("tinylcm_version"),
                     device_info=device_info,
-                    registration_time=registration_time
+                    registration_time=registration_time,
+                    latitude=latitude,
+                    longitude=longitude,
+                    geo_accuracy=geo_accuracy
                 )
                 
                 return DeviceService.create_device(db, device_create)
@@ -323,3 +354,174 @@ class DeviceService:
                 })
         
         return result
+        
+    @staticmethod
+    def get_all_device_locations(db: Session) -> List[Dict[str, Any]]:
+        """Get location data for all devices with valid coordinates."""
+        try:
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            # Log what we're doing for debugging
+            logger.info("Fetching all device locations from database")
+            
+            # First try direct SQL query to verify data is in the database
+            from sqlalchemy import text
+            sql_result = db.execute(text("SELECT device_id, hostname, latitude, longitude, geo_accuracy, is_active, last_sync_time FROM devices WHERE latitude IS NOT NULL AND longitude IS NOT NULL")).fetchall()
+            logger.info(f"SQL query found {len(sql_result)} devices with location data")
+            
+            for row in sql_result:
+                logger.info(f"SQL row: {row}")
+            
+            # Query devices with non-null latitude and longitude
+            devices = db.query(Device).filter(
+                Device.latitude.isnot(None),
+                Device.longitude.isnot(None)
+            ).all()
+            
+            logger.info(f"ORM query found {len(devices)} devices with location data in database")
+            
+            # If the SQL query found locations but the ORM query didn't, try raw SQL as fallback
+            if len(sql_result) > 0:
+                logger.warning(f"Found {len(sql_result)} locations via SQL, but ORM found {len(devices)} locations. Using SQL results directly to ensure data is returned.")
+                
+                result = []
+                current_time = datetime.now(timezone.utc).isoformat()
+                
+                for row in sql_result:
+                    # Parse the SQL result (device_id, hostname, latitude, longitude, geo_accuracy, is_active, last_sync_time)
+                    device_id = row[0]
+                    hostname = row[1]
+                    latitude = row[2]
+                    longitude = row[3]
+                    geo_accuracy = row[4]
+                    is_active = row[5]
+                    last_sync_time = row[6]
+                    
+                    location_data = {
+                        "device_id": device_id,
+                        "name": hostname or device_id,
+                        "location_name": hostname or device_id,  # Add location_name for frontend compatibility
+                        "latitude": float(latitude),
+                        "longitude": float(longitude),
+                        "geo_accuracy": float(geo_accuracy) if geo_accuracy is not None else None,
+                        "accuracy": float(geo_accuracy) if geo_accuracy is not None else None,
+                        "is_active": bool(is_active),
+                        "last_update": last_sync_time.isoformat() if last_sync_time else current_time
+                    }
+                    
+                    result.append(location_data)
+                
+                return result
+            
+            # Continue with normal ORM approach if ORM query found results
+            result = []
+            # Get current UTC time for last_update field
+            current_time = datetime.now(timezone.utc).isoformat()
+            
+            for device in devices:
+                # Debug actual values to verify data structure
+                logger.info(f"Device {device.device_id}: lat={device.latitude}, lon={device.longitude}, accuracy={device.geo_accuracy}")
+                
+                # Create location object with all fields frontend might need
+                location_data = {
+                    "device_id": device.device_id,
+                    "name": device.hostname or device.device_id,
+                    "location_name": device.hostname or device.device_id,  # Add location_name for frontend compatibility
+                    "latitude": float(device.latitude),
+                    "longitude": float(device.longitude),
+                    "geo_accuracy": float(device.geo_accuracy) if device.geo_accuracy is not None else None,
+                    "accuracy": float(device.geo_accuracy) if device.geo_accuracy is not None else None,
+                    "is_active": bool(device.is_active),
+                    "last_update": device.last_sync_time.isoformat() if device.last_sync_time else current_time
+                }
+                
+                result.append(location_data)
+                
+            return result
+        except Exception as e:
+            import logging
+            import traceback
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error getting device locations: {str(e)}")
+            logger.error(traceback.format_exc())
+            # In case of error, return empty list rather than failing
+            return []
+        
+    @staticmethod
+    def get_device_location(db: Session, device_id: str) -> Optional[Dict[str, Any]]:
+        """Get location data for a specific device."""
+        try:
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            logger.info(f"Fetching location for device: {device_id}")
+            
+            # First try direct SQL query to verify data is in the database
+            from sqlalchemy import text
+            sql_result = db.execute(text(f"SELECT device_id, hostname, latitude, longitude, geo_accuracy, is_active, last_sync_time FROM devices WHERE device_id = '{device_id}' AND latitude IS NOT NULL AND longitude IS NOT NULL")).fetchone()
+            
+            if sql_result:
+                logger.info(f"SQL query found location data for device {device_id}: {sql_result}")
+                
+                # Get current UTC time for last_update field
+                current_time = datetime.now(timezone.utc).isoformat()
+                
+                # Parse the SQL result
+                device_id = sql_result[0]
+                hostname = sql_result[1]
+                latitude = sql_result[2]
+                longitude = sql_result[3]
+                geo_accuracy = sql_result[4]
+                is_active = sql_result[5]
+                last_sync_time = sql_result[6]
+                
+                return {
+                    "device_id": device_id,
+                    "name": hostname or device_id,
+                    "location_name": hostname or device_id,  # Add location_name for frontend compatibility
+                    "latitude": float(latitude),
+                    "longitude": float(longitude),
+                    "geo_accuracy": float(geo_accuracy) if geo_accuracy is not None else None,
+                    "accuracy": float(geo_accuracy) if geo_accuracy is not None else None,
+                    "is_active": bool(is_active),
+                    "last_update": last_sync_time.isoformat() if last_sync_time else current_time
+                }
+            
+            # Fall back to ORM if SQL query didn't find anything
+            logger.info(f"SQL query found no location data for device {device_id}, trying ORM")
+            
+            device = db.query(Device).filter(Device.device_id == device_id).first()
+            
+            if not device:
+                logger.info(f"Device not found: {device_id}")
+                return None
+                
+            if device.latitude is None or device.longitude is None:
+                logger.info(f"Device {device_id} has no location data")
+                return None
+            
+            # Log the location data for debugging
+            logger.info(f"Device {device_id} location: lat={device.latitude}, lon={device.longitude}, accuracy={device.geo_accuracy}")
+            
+            # Get current UTC time for last_update field
+            current_time = datetime.now(timezone.utc).isoformat()
+                
+            return {
+                "device_id": device.device_id,
+                "name": device.hostname or device.device_id,
+                "location_name": device.hostname or device.device_id,  # Add location_name for frontend compatibility
+                "latitude": float(device.latitude),
+                "longitude": float(device.longitude),
+                "geo_accuracy": float(device.geo_accuracy) if device.geo_accuracy is not None else None,
+                "accuracy": float(device.geo_accuracy) if device.geo_accuracy is not None else None,
+                "is_active": bool(device.is_active),
+                "last_update": device.last_sync_time.isoformat() if device.last_sync_time else current_time
+            }
+        except Exception as e:
+            import logging
+            import traceback
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error fetching location for device {device_id}: {str(e)}")
+            logger.error(traceback.format_exc())
+            return None

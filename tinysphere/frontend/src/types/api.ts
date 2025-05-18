@@ -11,6 +11,10 @@ export interface Device {
   last_sync_time?: string;
   is_active: boolean;
   device_info?: Record<string, any>;
+  latitude?: number;
+  longitude?: number;
+  location_name?: string;
+  last_location_update?: string;
 }
 
 // Drift management types
@@ -119,6 +123,10 @@ export interface DeviceSummary {
   last_sync_time?: string;
   package_count: number;
   latest_package?: string;
+  latitude?: number;
+  longitude?: number;
+  location_name?: string;
+  last_location_update?: string;
   mlflow_metrics?: {
     inference_time?: {
       avg: number;
@@ -181,6 +189,15 @@ export interface ModelPerformanceData {
   metric_name: string;
   value: number | null;  // Allow null for missing metrics
   timestamp: number;
+  run_id?: string;
+}
+
+export interface DevicePerformanceData {
+  device_id: string;
+  metric_name: string;
+  value: number | null;  // Allow null for missing metrics
+  timestamp: number;
+  version?: number;      // For consistency with model data format
   run_id?: string;
 }
 
@@ -316,4 +333,18 @@ export interface OperationalLog {
 export interface OperationalLogResponse {
   total: number;
   logs: OperationalLog[];
+}
+
+// Device location types
+export interface DeviceLocation {
+  device_id: string;
+  latitude: number;
+  longitude: number;
+  location_name?: string;
+  last_update: string;
+}
+
+export interface DeviceLocationsResponse {
+  total: number;
+  locations: DeviceLocation[];
 }

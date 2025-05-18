@@ -138,14 +138,7 @@ const DriftPage: React.FC = () => {
   useEffect(() => {
     console.log("Drift Page: Loading initial data");
     fetchEvents();
-
-    // Set up polling interval (every 30 seconds)
-    const interval = setInterval(() => {
-      console.log("Drift Page: Polling for updates");
-      fetchEvents();
-    }, 30000);
-
-    return () => clearInterval(interval);
+    // Auto-refresh removed as per requirement
   }, [page, rowsPerPage]);
 
   // Re-fetch when filters or sort order change
