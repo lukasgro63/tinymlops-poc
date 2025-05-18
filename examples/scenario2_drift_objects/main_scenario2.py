@@ -961,14 +961,21 @@ def main():
         # Log geolocation status
         if sync_client.enable_geolocation:
             logger.info("Geolocation enabled, device location will be sent to TinySphere")
-            # Update device info with initial location
-            success = sync_client.update_device_info()
-            if success:
-                logger.info("Initial device location sent to TinySphere")
-            else:
-                logger.warning("Failed to send initial device location to TinySphere")
         else:
             logger.info("Geolocation disabled")
+            
+        # Get and log platform details
+        device_info = sync_client._get_device_info()
+        logger.info(f"Device platform details: {device_info.get('platform', 'unknown')} " +
+                   f"{device_info.get('platform_version', 'unknown')} " +
+                   f"on {device_info.get('device_model', 'unknown')}")
+            
+        # Update device info with platform details and initial location
+        success = sync_client.update_device_info()
+        if success:
+            logger.info("Initial device information sent to TinySphere")
+        else:
+            logger.warning("Failed to send initial device information to TinySphere")
         
         # Initialize InferencePipeline with the configured components
         pipeline = InferencePipeline(

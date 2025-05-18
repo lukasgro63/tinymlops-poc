@@ -5,6 +5,8 @@ export interface Device {
   hostname?: string;
   ip_address?: string;
   platform?: string;
+  platform_version?: string;  // Added for OS version (e.g., "bookworm")
+  device_model?: string;      // Added for device model (e.g., "Pi Zero")
   python_version?: string;
   tinylcm_version?: string;
   registration_time: string;
@@ -119,6 +121,8 @@ export interface DeviceSummary {
   device_id: string;
   hostname?: string;
   platform?: string;
+  platform_version?: string;  // Added for OS version (e.g., "bookworm")
+  device_model?: string;      // Added for device model (e.g., "Pi Zero")
   is_active: boolean;
   last_sync_time?: string;
   package_count: number;
