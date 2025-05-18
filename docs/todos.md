@@ -1,20 +1,8 @@
 # OPL List of Todos
 
 
-- TODO: Im Data Hub die Logs müssen aggregiert werdden. Device sendet je nach einstellung alle paar sekunden ioder mInuten die Logs. Wir hjaben immer eine Session ID, für diese dann aber zb. 100 Logs. Es soll für eine Session ID imme rnur ein gesamtes log geben. Dieses muss daher im BAckend immer aufgemacht werden, und die neuen logs hinzugefügt werdne. -> Ebenfalls option, logs zu löschen, dann ebenfalls aus minio löschen. 
-
-
-
-- TODO: Autorefresh auf der Drift Page entfernen
-
-
 
 - TODO: Aus dem Model Performance Chart die System Metriken entfernen, diese sind Device spezifisch und nicht Model spezifisch. Also genau diese weg: System CPU Percentage avg, System Memory. Und an derm chart passt auch nicht, dass da in den filtern ein tagss filter ist, das feld muss raus, hat keine funktion
-
-
-
-
-- TODO: Platfrom extraktion on device: Wir wollen eher die OS Version haben. Bsp. Raspberry, dort sollte dann stehen PI Zero, PI 5, ... und OS:  bookworm, bullsey, usw, und nicht die vollstöndige, wie aktuell: Linux-6.12.25+rpt-rpi-v7-armv7l-with-glibc2.36
 
 
 
@@ -24,7 +12,6 @@
 
 - TODO: Möglichkeit zum Löschen von Daten im Data Hub, mit Multi Select Option. -> Daten sollen dann auch aus MINIO rausgelöscht werden
 
-- TODO: Models Performance Chart auf der Models Page geht nicht richtig, baiserd imme rnur auf dem letzten run -> analog machen wie das auf Homepage
 
 - TODO: Model Registry, passt das rendering des Device Namen nicht, es zeigt immer pi an, die id schneidet es aber ab?
 

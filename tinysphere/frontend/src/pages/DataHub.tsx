@@ -196,14 +196,32 @@ const DataHub: React.FC = () => {
   // Load prediction types when device is selected
   useEffect(() => {
     const loadPredictionTypes = async () => {
-      if (!selectedDeviceId || selectedDeviceId === 'all') {
-        setPredictionTypes([]);
-        setSelectedType('');
-        return;
-      }
-      
       try {
-        const types = await getPredictionTypes(selectedDeviceId);
+        let types: string[] = [];
+        
+        if (!selectedDeviceId || selectedDeviceId === 'all') {
+          // For "All Devices", collect prediction types from all devices with images
+          const deviceIdsWithImages = await getPredictionImageDevices();
+          const allTypes = new Set<string>();
+          
+          // Get types from each device and combine them
+          for (const deviceId of deviceIdsWithImages) {
+            try {
+              const deviceTypes = await getPredictionTypes(deviceId);
+              deviceTypes.forEach(type => allTypes.add(type));
+            } catch (e) {
+              console.warn(`Failed to load prediction types for device ${deviceId}:`, e);
+            }
+          }
+          
+          types = Array.from(allTypes);
+          console.log(`Loaded ${types.length} combined prediction types for all devices`);
+        } else {
+          // For a specific device
+          types = await getPredictionTypes(selectedDeviceId);
+          console.log(`Loaded ${types.length} prediction types for device ${selectedDeviceId}`);
+        }
+        
         setPredictionTypes(types);
         
         // Auto-select first type if available
@@ -224,14 +242,32 @@ const DataHub: React.FC = () => {
   // Load drift types when device is selected
   useEffect(() => {
     const loadDriftTypes = async () => {
-      if (!selectedDeviceId || selectedDeviceId === 'all') {
-        setDriftTypes([]);
-        setSelectedDriftType('');
-        return;
-      }
-      
       try {
-        const types = await getDriftTypes(selectedDeviceId);
+        let types: string[] = [];
+        
+        if (!selectedDeviceId || selectedDeviceId === 'all') {
+          // For "All Devices", collect drift types from all devices with drift images
+          const deviceIdsWithDriftImages = await getDriftImageDevices();
+          const allTypes = new Set<string>();
+          
+          // Get types from each device and combine them
+          for (const deviceId of deviceIdsWithDriftImages) {
+            try {
+              const deviceTypes = await getDriftTypes(deviceId);
+              deviceTypes.forEach(type => allTypes.add(type));
+            } catch (e) {
+              console.warn(`Failed to load drift types for device ${deviceId}:`, e);
+            }
+          }
+          
+          types = Array.from(allTypes);
+          console.log(`Loaded ${types.length} combined drift types for all devices`);
+        } else {
+          // For a specific device
+          types = await getDriftTypes(selectedDeviceId);
+          console.log(`Loaded ${types.length} drift types for device ${selectedDeviceId}`);
+        }
+        
         setDriftTypes(types);
         
         // Auto-select first type if available
@@ -255,19 +291,37 @@ const DataHub: React.FC = () => {
   // Load operational log types when device is selected
   useEffect(() => {
     const loadLogTypes = async () => {
-      if (!selectedDeviceId || selectedDeviceId === 'all') {
-        setLogTypes([]);
-        setSelectedLogType('');
-        return;
-      }
-      
       try {
-        const typesList = await getOperationalLogTypes(selectedDeviceId);
-        setLogTypes(typesList);
+        let types: string[] = [];
+        
+        if (!selectedDeviceId || selectedDeviceId === 'all') {
+          // For "All Devices", collect log types from all devices with logs
+          const deviceIdsWithLogs = await getOperationalLogDevices();
+          const allTypes = new Set<string>();
+          
+          // Get types from each device and combine them
+          for (const deviceId of deviceIdsWithLogs) {
+            try {
+              const deviceTypes = await getOperationalLogTypes(deviceId);
+              deviceTypes.forEach(type => allTypes.add(type));
+            } catch (e) {
+              console.warn(`Failed to load log types for device ${deviceId}:`, e);
+            }
+          }
+          
+          types = Array.from(allTypes);
+          console.log(`Loaded ${types.length} combined log types for all devices`);
+        } else {
+          // For a specific device
+          types = await getOperationalLogTypes(selectedDeviceId);
+          console.log(`Loaded ${types.length} log types for device ${selectedDeviceId}`);
+        }
+        
+        setLogTypes(types);
         
         // Auto-select first type if available
-        if (typesList.length > 0) {
-          setSelectedLogType(typesList[0]);
+        if (types.length > 0) {
+          setSelectedLogType(types[0]);
         } else {
           setSelectedLogType('');
         }
@@ -330,24 +384,29 @@ const DataHub: React.FC = () => {
         } else {
           // For "All Devices" option - we need to fetch for each device with images
           const deviceIdsWithImages = await getPredictionImageDevices();
-          let allImages: PredictionImage[] = [];
           
-          // This is a simplified approach - in a real implementation, you might
-          // want to add pagination and more sophisticated fetching
-          for (const deviceId of deviceIdsWithImages) {
-            const response = await getPredictionImages(
+          // Define the number of images to fetch per device to avoid overloading
+          // Based on rowsPerPage, we'll try to get a fair distribution
+          const imagesPerDevice = Math.max(Math.ceil(rowsPerPage / (deviceIdsWithImages.length || 1)), 5);
+          
+          // Fetch prediction images from all devices concurrently for better performance
+          const imagePromises = deviceIdsWithImages.map(deviceId => 
+            getPredictionImages(
               deviceId,
               selectedType || undefined,
               undefined, // Removed date parameter
-              rowsPerPage,
+              imagesPerDevice, // Get a few images from each device
               0, // For simplicity, just get the first page from each device
               sortOrder,
               predictionStartDate || undefined,
               predictionEndDate || undefined
-            );
-            
-            allImages = [...allImages, ...response.images];
-          }
+            )
+          );
+          
+          const allResults = await Promise.all(imagePromises);
+          
+          // Combine all images
+          let allImages: PredictionImage[] = allResults.flatMap(response => response.images);
           
           // Apply date filtering on client side if needed
           if (predictionStartDate || predictionEndDate) {
@@ -359,6 +418,8 @@ const DataHub: React.FC = () => {
               return imageTimestamp >= startTimestamp && imageTimestamp <= endTimestamp;
             });
           }
+          
+          console.log(`Fetched ${allImages.length} prediction images from ${deviceIdsWithImages.length} devices`);
           
           // Sortieren der kombinierten Bilder von allen Geräten
           allImages.sort((a, b) => {
@@ -417,31 +478,30 @@ const DataHub: React.FC = () => {
         } else {
           // For "All Devices" option
           const deviceIdsWithLogs = await getOperationalLogDevices();
-          let allLogs: OperationalLog[] = [];
           
-          for (const deviceId of deviceIdsWithLogs) {
-            const response = await getOperationalLogs(
+          // Define the number of logs to fetch per device to avoid overloading
+          // Based on rowsPerPage, we'll try to get a fair distribution
+          const logsPerDevice = Math.max(Math.ceil(rowsPerPage / (deviceIdsWithLogs.length || 1)), 5);
+          
+          // Fetch operational logs from all devices concurrently for better performance
+          const logPromises = deviceIdsWithLogs.map(deviceId => 
+            getOperationalLogs(
               deviceId,
-              undefined,
-              rowsPerPage,
+              selectedLogType || undefined,
+              logsPerDevice, // Get a few logs from each device
               0, // For simplicity, just get the first page from each device
               sortOrder,
               startDate || undefined,
               endDate || undefined
-            );
-            
-            allLogs = [...allLogs, ...response.logs];
-          }
+            )
+          );
           
-          // Sort all logs
-          allLogs.sort((a, b) => {
-            const dateA = new Date(a.last_modified).getTime();
-            const dateB = new Date(b.last_modified).getTime();
-            
-            return sortOrder === 'desc' 
-              ? dateB - dateA  // Newest first (desc)
-              : dateA - dateB; // Oldest first (asc)
-          });
+          const allResults = await Promise.all(logPromises);
+          
+          // Combine all logs
+          let allLogs: OperationalLog[] = allResults.flatMap(response => response.logs);
+          
+          console.log(`Fetched ${allLogs.length} operational logs from ${deviceIdsWithLogs.length} devices`);
           
           // Apply date filtering on client side if needed
           if (startDate || endDate) {
@@ -453,6 +513,16 @@ const DataHub: React.FC = () => {
               return logTimestamp >= startTimestamp && logTimestamp <= endTimestamp;
             });
           }
+          
+          // Sort all logs
+          allLogs.sort((a, b) => {
+            const dateA = new Date(a.last_modified).getTime();
+            const dateB = new Date(b.last_modified).getTime();
+            
+            return sortOrder === 'desc' 
+              ? dateB - dateA  // Newest first (desc)
+              : dateA - dateB; // Oldest first (asc)
+          });
           
           // Simple client-side pagination
           const startIndex = page * rowsPerPage;
@@ -521,22 +591,31 @@ const DataHub: React.FC = () => {
         } else {
           // For "All Devices" option - we need to fetch for each device with images
           const deviceIdsWithDriftImages = await getDriftImageDevices();
-          let allDriftImages: DriftImage[] = [];
 
-          // This is a simplified approach - in a real implementation, you might
-          // want to add pagination and more sophisticated fetching
-          for (const deviceId of deviceIdsWithDriftImages) {
-            const response = await getDriftImages(
+          // Define the number of images to fetch per device to avoid overloading
+          // Based on rowsPerPage, we'll try to get a fair distribution
+          const imagesPerDevice = Math.max(Math.ceil(rowsPerPage / (deviceIdsWithDriftImages.length || 1)), 5);
+          
+          // Fetch drift images from all devices concurrently for better performance
+          const imagePromises = deviceIdsWithDriftImages.map(deviceId => 
+            getDriftImages(
               deviceId,
               selectedDriftType || undefined,
               undefined, // Removed date parameter
-              rowsPerPage,
+              imagesPerDevice, // Get a few images from each device
               0, // For simplicity, just get the first page from each device
               sortOrder,
               driftStartDate || undefined,
               driftEndDate || undefined
-            );
-
+            )
+          );
+          
+          const allResults = await Promise.all(imagePromises);
+          
+          // Process and combine all drift images
+          let allDriftImages: DriftImage[] = [];
+          
+          for (const response of allResults) {
             // Process images to set event_id from folder name if available
             const processedImages = response.images.map(image => {
               // Check if the image is in a folder that starts with "event_"
@@ -568,6 +647,8 @@ const DataHub: React.FC = () => {
               return imageTimestamp >= startTimestamp && imageTimestamp <= endTimestamp;
             });
           }
+
+          console.log(`Fetched ${allDriftImages.length} drift images from ${deviceIdsWithDriftImages.length} devices`);
 
           // Sortieren der kombinierten Drift-Bilder von allen Geräten
           allDriftImages.sort((a, b) => {
