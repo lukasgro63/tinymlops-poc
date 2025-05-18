@@ -38,9 +38,10 @@ if ! pg_isready -h $PGHOST -U $PGUSER; then
     fi
 fi
 
-# Add Geolocation columns directly if needed
-echo "Checking for Geolocation columns..."
+# Add required columns directly if needed
+echo "Checking for required device columns..."
 
+# Add Geolocation columns
 if ! psql -c "SELECT column_name FROM information_schema.columns WHERE table_name='devices' AND column_name='latitude'" | grep -q latitude; then
     echo "Adding geolocation columns directly..."
     psql -c "
@@ -57,6 +58,26 @@ if ! psql -c "SELECT column_name FROM information_schema.columns WHERE table_nam
             END IF;
             IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'devices' AND column_name = 'geo_accuracy') THEN
                 ALTER TABLE devices ADD COLUMN geo_accuracy FLOAT;
+            END IF;
+        END IF;
+    END \$\$;
+    "
+fi
+
+# Add Platform and Device Model columns
+if ! psql -c "SELECT column_name FROM information_schema.columns WHERE table_name='devices' AND column_name='platform_version'" | grep -q platform_version; then
+    echo "Adding platform version and device model columns directly..."
+    psql -c "
+    DO \$\$
+    BEGIN
+        -- Check if table exists
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'devices') THEN
+            -- Add columns if they don't exist
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'devices' AND column_name = 'platform_version') THEN
+                ALTER TABLE devices ADD COLUMN platform_version VARCHAR(255);
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'devices' AND column_name = 'device_model') THEN
+                ALTER TABLE devices ADD COLUMN device_model VARCHAR(255);
             END IF;
         END IF;
     END \$\$;

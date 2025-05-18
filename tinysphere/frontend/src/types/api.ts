@@ -5,6 +5,8 @@ export interface Device {
   hostname?: string;
   ip_address?: string;
   platform?: string;
+  platform_version?: string;  // Added for OS version (e.g., "bookworm")
+  device_model?: string;      // Added for device model (e.g., "Pi Zero")
   python_version?: string;
   tinylcm_version?: string;
   registration_time: string;
@@ -119,6 +121,8 @@ export interface DeviceSummary {
   device_id: string;
   hostname?: string;
   platform?: string;
+  platform_version?: string;  // Added for OS version (e.g., "bookworm")
+  device_model?: string;      // Added for device model (e.g., "Pi Zero")
   is_active: boolean;
   last_sync_time?: string;
   package_count: number;
@@ -328,11 +332,20 @@ export interface OperationalLog {
   url: string;
   date?: string; // Date in YYYYMMDD format
   log_type?: string; // Type of the operational log (e.g., "system", "metrics", "inference")
+  is_consolidated?: boolean; // Whether this log is a consolidated log file
 }
 
 export interface OperationalLogResponse {
   total: number;
   logs: OperationalLog[];
+}
+
+export interface LogDeletionResponse {
+  status: string;
+  message: string;
+  deleted_count: number;
+  error_count?: number;
+  errors?: Array<{Key: string; Code: string; Message: string}>;
 }
 
 // Device location types

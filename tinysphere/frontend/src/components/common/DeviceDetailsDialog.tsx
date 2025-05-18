@@ -254,8 +254,16 @@ const DeviceDetailsDialog: React.FC<DeviceDetailsDialogProps> = ({
                   </Typography>
                 </Box>
                 <Box sx={{ flex: '1 1 200px' }}>
-                  <Typography variant="subtitle2" color="text.secondary">Platform</Typography>
+                  <Typography variant="subtitle2" color="text.secondary">OS</Typography>
                   <Typography variant="body1">{device.platform || 'Unknown'}</Typography>
+                </Box>
+                <Box sx={{ flex: '1 1 200px' }}>
+                  <Typography variant="subtitle2" color="text.secondary">OS Version</Typography>
+                  <Typography variant="body1">{device.platform_version || 'N/A'}</Typography>
+                </Box>
+                <Box sx={{ flex: '1 1 200px' }}>
+                  <Typography variant="subtitle2" color="text.secondary">Device Model</Typography>
+                  <Typography variant="body1">{device.device_model || 'N/A'}</Typography>
                 </Box>
                 <Box sx={{ flex: '1 1 200px' }}>
                   <Typography variant="subtitle2" color="text.secondary">Python Version</Typography>

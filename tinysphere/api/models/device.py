@@ -10,6 +10,8 @@ class DeviceBase(BaseModel):
     hostname: Optional[str] = None
     ip_address: Optional[str] = None
     platform: Optional[str] = None
+    platform_version: Optional[str] = None  # Added for OS version
+    device_model: Optional[str] = None      # Added for device model
     python_version: Optional[str] = None
     tinylcm_version: Optional[str] = None
     device_info: Optional[Dict[str, Any]] = None
@@ -26,6 +28,8 @@ class DeviceUpdate(BaseModel):
     hostname: Optional[str] = None
     ip_address: Optional[str] = None
     platform: Optional[str] = None
+    platform_version: Optional[str] = None  # Added for OS version
+    device_model: Optional[str] = None      # Added for device model
     python_version: Optional[str] = None
     tinylcm_version: Optional[str] = None
     device_info: Optional[Dict[str, Any]] = None

@@ -50,7 +50,10 @@ const PlatformDistributionChart: React.FC<PlatformDistributionChartProps> = ({ d
               <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} fillOpacity={0.7} />
             ))}
           </Pie>
-          <Tooltip formatter={(value) => [`${value} devices`, 'Count']} />
+          <Tooltip 
+            formatter={(value, name, entry) => [`${value} devices`, `Platform: ${entry.payload.name}`]}
+            contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.9)', borderRadius: '4px' }}
+          />
           <Legend formatter={renderColorfulLegendText} />
         </PieChart>
       </ResponsiveContainer>

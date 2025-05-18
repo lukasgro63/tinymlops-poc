@@ -44,7 +44,8 @@ import {
   Sort as SortIcon,
   ArrowUpward as SortAscIcon,
   ArrowDownward as SortDescIcon,
-  DataObject as LogFileIcon
+  DataObject as LogFileIcon,
+  DeleteOutline as DeleteIcon
 } from '@mui/icons-material';
 import { format, parseISO } from 'date-fns';
 
@@ -60,7 +61,9 @@ import {
   getDriftImages,
   getOperationalLogDevices,
   getOperationalLogTypes,
-  getOperationalLogs
+  getOperationalLogs,
+  deleteDeviceLogs,
+  deleteSessionLogs
 } from '../services/api';
 import {
   Device,
@@ -152,6 +155,12 @@ const DataHub: React.FC = () => {
   
   // Selected image for details view
   const [selectedImage, setSelectedImage] = useState<PredictionImage | null>(null);
+  
+  // State for delete confirmation dialog
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteType, setDeleteType] = useState<'device' | 'session'>('device');
+  const [logToDelete, setLogToDelete] = useState<{deviceId: string; sessionId?: string} | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   // Load devices on initial render
   useEffect(() => {
@@ -708,6 +717,56 @@ const DataHub: React.FC = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+  
+  // Open delete confirmation dialog for device logs
+  const handleDeleteDeviceLogs = (deviceId: string) => {
+    setDeleteType('device');
+    setLogToDelete({ deviceId });
+    setDeleteDialogOpen(true);
+  };
+  
+  // Open delete confirmation dialog for session logs
+  const handleDeleteSessionLogs = (deviceId: string, sessionId: string) => {
+    setDeleteType('session');
+    setLogToDelete({ deviceId, sessionId });
+    setDeleteDialogOpen(true);
+  };
+  
+  // Handle log deletion confirmation
+  const handleConfirmDelete = async () => {
+    if (!logToDelete) return;
+    
+    setIsDeleting(true);
+    try {
+      if (deleteType === 'device') {
+        await deleteDeviceLogs(logToDelete.deviceId);
+      } else if (deleteType === 'session' && logToDelete.sessionId) {
+        await deleteSessionLogs(logToDelete.deviceId, logToDelete.sessionId);
+      }
+      
+      // Refresh logs list
+      setLoadingLogs(true);
+      
+      // Show success notification
+      // This could be replaced with a proper notification system
+      alert(`Successfully deleted ${deleteType === 'device' ? 'all device' : 'session'} logs`);
+      
+    } catch (error) {
+      console.error('Error deleting logs:', error);
+      alert(`Failed to delete logs: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsDeleting(false);
+      setDeleteDialogOpen(false);
+      setLogToDelete(null);
+    }
+  };
+  
+  // Close delete confirmation dialog
+  const handleCancelDelete = () => {
+    setDeleteDialogOpen(false);
+    setLogToDelete(null);
+    setIsDeleting(false);
   };
   
   // Format a date string from timestamp format (20220325) to readable format (Mar 25, 2022)
@@ -1281,14 +1340,25 @@ const DataHub: React.FC = () => {
                     <TableCell>{formatBytes(log.size)}</TableCell>
                     <TableCell>{formatTimestamp(log.last_modified)}</TableCell>
                     <TableCell>
-                      <Tooltip title="Download">
-                        <IconButton
-                          size="small"
-                          onClick={() => window.location.href = log.url}
-                        >
-                          <DownloadIcon />
-                        </IconButton>
-                      </Tooltip>
+                      <Box sx={{ display: 'flex', gap: 1 }}>
+                        <Tooltip title="Delete Log">
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleDeleteSessionLogs(log.device_id, log.session_id)}
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Download">
+                          <IconButton
+                            size="small"
+                            onClick={() => window.location.href = log.url}
+                          >
+                            <DownloadIcon />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1473,6 +1543,46 @@ const DataHub: React.FC = () => {
           </DialogContent>
         </Dialog>
       )}
+      
+      {/* Log deletion confirmation dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={handleCancelDelete}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          Confirm Log Deletion
+        </DialogTitle>
+        <DialogContent>
+          <Typography>
+            {deleteType === 'device' 
+              ? `Are you sure you want to delete all logs for device ${logToDelete?.deviceId}?` 
+              : `Are you sure you want to delete all logs for session ${logToDelete?.sessionId} on device ${logToDelete?.deviceId}?`
+            }
+          </Typography>
+          <Typography color="error" sx={{ mt: 2 }}>
+            This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', p: 2, gap: 1 }}>
+          <Button 
+            onClick={handleCancelDelete}
+            disabled={isDeleting}
+          >
+            Cancel
+          </Button>
+          <Button 
+            variant="contained" 
+            color="error"
+            onClick={handleConfirmDelete}
+            disabled={isDeleting}
+            startIcon={isDeleting ? <CircularProgress size={20} /> : <DeleteIcon />}
+          >
+            {isDeleting ? 'Deleting...' : 'Delete'}
+          </Button>
+        </Box>
+      </Dialog>
     </Box>
   );
 };

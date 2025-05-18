@@ -9,6 +9,7 @@ Extends the base SyncClient with application-specific functionality.
 import json
 import logging
 import os
+import platform
 import socket
 import tempfile
 import time
@@ -882,6 +883,133 @@ class ExtendedSyncClient:
             "source": "fallback"
         }
         
+    def _get_detailed_platform_info(self) -> Dict[str, str]:
+        """Get detailed platform information including OS type, version and device model.
+        
+        Returns:
+            Dictionary with detailed platform information
+        """
+        import os
+        import re
+        # Use imported platform module instead of importing as plt
+        import platform
+        
+        # Initialize with defaults
+        platform_info = {
+            "os_type": "unknown",
+            "os_version": "unknown",
+            "device_model": "unknown"
+        }
+        
+        try:
+            # Get basic OS information
+            system = platform.system().lower()
+            platform_info["os_type"] = system
+            
+            if system == "linux":
+                # For Linux, try to get distribution info
+                try:
+                    # Try os-release file first (modern Linux)
+                    if os.path.exists('/etc/os-release'):
+                        with open('/etc/os-release', 'r') as f:
+                            for line in f:
+                                if line.startswith('VERSION='):
+                                    platform_info["os_version"] = line.split('=')[1].strip().strip('"\'')
+                                elif line.startswith('ID='):
+                                    distro_id = line.split('=')[1].strip().strip('"\'')
+                                    platform_info["os_type"] = f"Linux-{distro_id}"
+                except Exception as e:
+                    logger.debug(f"Error reading os-release: {e}")
+                
+                # For Raspberry Pi, detect model
+                try:
+                    if os.path.exists('/proc/device-tree/model'):
+                        with open('/proc/device-tree/model', 'r') as f:
+                            model = f.read().strip('\x00')
+                            if model:
+                                platform_info["device_model"] = model
+                                # Extract Pi model type
+                                if "raspberry pi" in model.lower():
+                                    # Extract Pi model number (e.g., "Pi 4" from "Raspberry Pi 4 Model B")
+                                    pi_match = re.search(r'raspberry pi\s+(\w+)', model.lower())
+                                    if pi_match:
+                                        platform_info["device_model"] = f"Pi {pi_match.group(1)}"
+                                        
+                except Exception as e:
+                    logger.debug(f"Error reading device model: {e}")
+                
+                # If os_version is still unknown, try lsb_release command
+                if platform_info["os_version"] == "unknown":
+                    try:
+                        import subprocess
+                        output = subprocess.check_output(['lsb_release', '-d'], universal_newlines=True)
+                        platform_info["os_version"] = output.split(':')[1].strip()
+                    except Exception:
+                        # Fallback to platform.release()
+                        platform_info["os_version"] = platform.release()
+                        
+            elif system == "darwin":  # macOS
+                platform_info["os_type"] = "macOS"
+                platform_info["os_version"] = platform.mac_ver()[0]
+                # For Mac, get model identifier
+                try:
+                    import subprocess
+                    output = subprocess.check_output(['sysctl', '-n', 'hw.model'], universal_newlines=True)
+                    platform_info["device_model"] = output.strip()
+                except Exception:
+                    platform_info["device_model"] = "Mac"
+                    
+            elif system == "windows":
+                platform_info["os_type"] = "Windows"
+                platform_info["os_version"] = platform.version()
+                # For Windows, get detailed version and model
+                try:
+                    import subprocess
+                    # Get OS version
+                    output = subprocess.check_output(['systeminfo'], universal_newlines=True)
+                    for line in output.splitlines():
+                        if 'OS Version:' in line:
+                            platform_info["os_version"] = line.split(':')[1].strip()
+                        elif 'System Model:' in line:
+                            platform_info["device_model"] = line.split(':')[1].strip()
+                except Exception:
+                    pass
+            
+            # If we still don't have detailed info, use platform.platform()
+            if platform_info["os_version"] == "unknown":
+                platform_info["os_version"] = platform.version()
+                
+            if platform_info["device_model"] == "unknown":
+                platform_info["device_model"] = platform.machine()
+                
+        except Exception as e:
+            logger.warning(f"Error getting detailed platform info: {e}")
+            # Fallback to simple platform info
+            platform_info["os_type"] = platform.system()
+            platform_info["os_version"] = platform.release()
+            platform_info["device_model"] = platform.machine()
+            
+        return platform_info
+        
+    def _get_tinylcm_version(self) -> str:
+        """Get TinyLCM version from the library or fallback to a default.
+        
+        Returns:
+            TinyLCM version string
+        """
+        try:
+            # First try to get from the tinylcm package
+            import tinylcm
+            if hasattr(tinylcm, "__version__"):
+                return tinylcm.__version__
+            
+            # If not found in the package, try constants module
+            from tinylcm.constants import VERSION
+            return VERSION
+        except (ImportError, AttributeError):
+            # Fallback to hard-coded version as last resort
+            return "0.2.0"
+
     def _get_device_info(self) -> Dict[str, Any]:
         """Get device information including hardware details and location.
         
@@ -902,11 +1030,20 @@ class ExtendedSyncClient:
             except:
                 ip_address = "127.0.0.1"  # Fallback
             
-            # Basic device info
+            # Get platform info with specific details
+            platform_info = self._get_detailed_platform_info()
+            
+            # Use the already imported platform module
+            # Basic device info with enhanced platform details
             device_info = {
                 "device_id": self.device_id,
                 "hostname": hostname,
                 "ip_address": ip_address,
+                "platform": platform_info["os_type"],
+                "platform_version": platform_info["os_version"],
+                "device_model": platform_info["device_model"],
+                "python_version": platform.python_version(),
+                "tinylcm_version": self._get_tinylcm_version(),
                 "last_update": time.time()
             }
             
@@ -966,6 +1103,18 @@ class ExtendedSyncClient:
                         self.client.last_geolocation_update = time.time()
                 
                 # Use POST to /devices/register endpoint instead of PATCH to update device info
+                # Log the data we're sending to help debug
+                logger.info(f"Sending device update with platform={device_info.get('platform')}, " + 
+                            f"platform_version={device_info.get('platform_version')}, " +
+                            f"device_model={device_info.get('device_model')}")
+                
+                # Log geolocation data if present
+                if 'location' in device_info:
+                    loc = device_info['location']
+                    logger.info(f"Device update includes geolocation: " + 
+                               f"lat={loc.get('latitude'):.6f}, lon={loc.get('longitude'):.6f}, " + 
+                               f"source={loc.get('source')}, accuracy={loc.get('accuracy')}")
+                
                 update_data = {
                     "device_id": self.device_id,
                     "device_info": device_info,

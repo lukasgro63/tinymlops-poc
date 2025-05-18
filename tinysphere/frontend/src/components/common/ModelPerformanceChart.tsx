@@ -26,6 +26,7 @@ interface ChartDataItem {
   timestamp?: number;
   run_id?: string;
   isEmpty?: boolean; // Flag for empty data display
+  display_name?: string; // Optional display name for prettier rendering
 }
 
 interface ModelPerformanceChartProps {

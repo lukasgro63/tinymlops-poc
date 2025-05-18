@@ -44,7 +44,8 @@ import {
   MetricRow,
   Model,
   ModelSummary,
-  ModelVersionMetrics
+  ModelVersionMetrics,
+  ModelPerformanceData
 } from '../types/api';
 
 const Models: React.FC = () => {
@@ -139,37 +140,8 @@ const Models: React.FC = () => {
     }
   }, [selectedModel, selectedVersions]);
   
-  // Transform metrics data for the chart
-  useEffect(() => {
-    if (versionMetrics.length > 0) {
-      const chartData = versionMetrics.map(version => {
-        // Find the requested metric, default to the first available if not found
-        let metricValue = null;
-        if (version.metrics && Object.keys(version.metrics).length > 0) {
-          metricValue = version.metrics[selectedMetric] !== undefined 
-            ? version.metrics[selectedMetric] 
-            : Object.values(version.metrics)[0];
-        }
-        
-        return {
-          name: `v${version.version}`,
-          [selectedMetric]: metricValue,
-          stage: version.stage
-        };
-      });
-      
-      // Sort by version
-      chartData.sort((a, b) => {
-        const versionA = parseInt(a.name.substring(1));
-        const versionB = parseInt(b.name.substring(1));
-        return versionA - versionB;
-      });
-      
-      setPerformanceData(chartData);
-    } else {
-      setPerformanceData([]);
-    }
-  }, [versionMetrics, selectedMetric]);
+  // Note: We've removed the performanceData transformation useEffect as we're now 
+  // using the direct data from the API, similar to how the Dashboard page works
   
   // Fetch model versions
   const fetchModelVersions = async (modelName: string) => {
@@ -197,10 +169,10 @@ const Models: React.FC = () => {
     try {
       setMetricsLoading(true);
       
-      // First try using the dashboard performance endpoint which is more robust
+      // Use the dashboard performance endpoint which is more robust
       // This endpoint works better with experiment data
       console.log(`Fetching metrics for model ${modelName} using dashboard endpoint`);
-      const performanceData = await getModelsPerformance(
+      const perfData = await getModelsPerformance(
         selectedMetric,  // Use current selected metric
         30,              // Get data for last 30 days
         100,             // Get up to 100 data points
@@ -209,14 +181,18 @@ const Models: React.FC = () => {
         true             // Include operational metrics
       );
       
-      if (performanceData && performanceData.length > 0) {
-        console.log(`Found ${performanceData.length} performance data points for model ${modelName}`);
+      if (perfData && perfData.length > 0) {
+        console.log(`Found ${perfData.length} performance data points for model ${modelName}`);
         
-        // Convert performance data format to version metrics format
+        // Store original performance data for the chart
+        // This is the same data used by the Dashboard page
+        setPerformanceData(perfData);
+        
+        // Also convert to version metrics format for comparison table
         const versionMap = new Map();
         
-        // Group metrics by version
-        performanceData.forEach(item => {
+        // Group metrics by version (keeping only latest data for each version)
+        perfData.forEach(item => {
           if (!versionMap.has(item.version)) {
             versionMap.set(item.version, {
               version: item.version,
@@ -246,6 +222,44 @@ const Models: React.FC = () => {
         if (metrics && metrics.length > 0) {
           console.log(`Found ${metrics.length} metrics from model endpoint`);
           setVersionMetrics(metrics);
+          
+          // Convert to performance data format for chart
+          const chartData = metrics.flatMap(metric => {
+            const result: Array<ModelPerformanceData> = [];
+            
+            // Convert each metric to a separate data point
+            if (metric.metrics) {
+              Object.entries(metric.metrics).forEach(([metricName, value]) => {
+                // Convert value to number or null to match ModelPerformanceData type
+                let typedValue: number | null = null;
+                
+                if (value !== null && value !== undefined) {
+                  if (typeof value === 'number') {
+                    typedValue = isNaN(value) ? null : value;
+                  } else if (typeof value === 'string') {
+                    // Try to parse string to number
+                    const parsed = parseFloat(value);
+                    typedValue = isNaN(parsed) ? null : parsed;
+                  }
+                  // All other types become null
+                }
+                
+                result.push({
+                  model_name: modelName,
+                  version: metric.version,
+                  stage: metric.stage,
+                  metric_name: metricName,
+                  value: typedValue,
+                  timestamp: metric.created_at,
+                  run_id: metric.run_id
+                });
+              });
+            }
+            
+            return result;
+          });
+          
+          setPerformanceData(chartData);
         } else {
           console.warn(`No metrics found for model ${modelName} from either endpoint`);
           // Create empty metrics for existing versions
@@ -258,14 +272,17 @@ const Models: React.FC = () => {
               metrics: {}
             }));
             setVersionMetrics(emptyMetrics);
+            setPerformanceData([]);
           } else {
             setVersionMetrics([]);
+            setPerformanceData([]);
           }
         }
       }
     } catch (err) {
       console.error('Error fetching model metrics:', err);
       setVersionMetrics([]);
+      setPerformanceData([]);
     } finally {
       setMetricsLoading(false);
     }
@@ -412,46 +429,8 @@ const Models: React.FC = () => {
             </Box>
           ) : (
             <ModelPerformanceChart
-              models={modelList}
-              performanceData={versionMetrics.map(metric => {
-                // Handle potential NaN values in metrics
-                let metricValue: number | null = null;
-                
-                if (metric.metrics && metric.metrics[selectedMetric] !== undefined) {
-                  const value = metric.metrics[selectedMetric];
-                  
-                  // Handle different value types
-                  if (value === null) {
-                    metricValue = null;
-                  } else if (typeof value === 'number') {
-                    // If it's a numeric NaN, set to null
-                    metricValue = isNaN(value) ? null : value;
-                  } else if (typeof value === 'string') {
-                    // If it's a string 'NaN', set to null, otherwise try to parse it
-                    const strValue = value as string;
-                    if (strValue === 'NaN' || strValue === 'nan' || strValue.toLowerCase() === 'nan') {
-                      metricValue = null;
-                    } else {
-                      // Try to parse as number
-                      const parsed = parseFloat(strValue);
-                      metricValue = isNaN(parsed) ? null : parsed;
-                    }
-                  } else {
-                    // Any other type becomes null
-                    metricValue = null;
-                  }
-                }
-                
-                return {
-                  model_name: selectedModel,
-                  version: metric.version,
-                  stage: metric.stage,
-                  metric_name: selectedMetric,
-                  value: metricValue,
-                  timestamp: metric.created_at,
-                  run_id: metric.run_id
-                };
-              })}
+              models={[selectedModel]}
+              performanceData={performanceData}
               selectedMetric={selectedMetric}
               onMetricChange={(metric) => setSelectedMetric(metric)}
               ref={modelPerfChartRef}

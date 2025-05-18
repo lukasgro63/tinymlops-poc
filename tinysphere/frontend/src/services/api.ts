@@ -28,7 +28,8 @@ import {
   PredictionImage,
   PredictionImagesResponse,
   ImageUrlResponse,
-  DevicePerformanceData
+  DevicePerformanceData,
+  LogDeletionResponse
 } from '../types/api';
 
 const API_BASE_URL = '/api';
@@ -551,6 +552,20 @@ export const getOperationalLogs = async (
     };
   }
   
+  return response.data;
+};
+
+export const deleteDeviceLogs = async (deviceId: string): Promise<LogDeletionResponse> => {
+  const response = await axios.delete<LogDeletionResponse>(
+    `${API_BASE_URL}/operational-logs/device/${deviceId}`
+  );
+  return response.data;
+};
+
+export const deleteSessionLogs = async (deviceId: string, sessionId: string): Promise<LogDeletionResponse> => {
+  const response = await axios.delete<LogDeletionResponse>(
+    `${API_BASE_URL}/operational-logs/device/${deviceId}/session/${sessionId}`
+  );
   return response.data;
 };
 

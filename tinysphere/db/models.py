@@ -46,6 +46,9 @@ class Device(Base):
     hostname = Column(String(255))
     ip_address = Column(String(100))
     platform = Column(String(255))
+    # Added for OS version and device model
+    platform_version = Column(String(255), nullable=True)   # Added for OS version (e.g., "bookworm") 
+    device_model = Column(String(255), nullable=True)       # Added for device model (e.g., "Pi Zero")
     python_version = Column(String(50))
     tinylcm_version = Column(String(50))
     registration_time = Column(DateTime, default=lambda: datetime.now(timezone.utc))
