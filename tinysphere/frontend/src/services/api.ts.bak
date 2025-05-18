@@ -435,62 +435,6 @@ export const getDriftStatistics = async (
   return response.data;
 };
 
-// New Drift Dashboard endpoints
-export interface DeviceStatusData {
-  device_id: string;
-  name?: string;
-  total: number;
-  pending: number;
-  validated: number;
-  rejected: number;
-  resolved: number;
-  ignored: number;
-  [key: string]: any;
-}
-
-export interface DriftTimelineData {
-  date: string;
-  [key: string]: any; // Device IDs as keys with count values
-}
-
-export const getDriftStatisticsByDevice = async (
-  days: number = 30,
-  drift_type?: string,
-  limit: number = 10
-): Promise<DeviceStatusData[]> => {
-  const params = new URLSearchParams();
-  params.append('days', days.toString());
-  params.append('limit', limit.toString());
-  
-  if (drift_type) {
-    params.append('drift_type', drift_type.toLowerCase());
-  }
-
-  const response = await axios.get<DeviceStatusData[]>(
-    `${API_BASE_URL}/drift-dashboard/statistics/by-device?${params.toString()}`
-  );
-  return response.data;
-};
-
-export const getDriftTimelineByDevice = async (
-  period: 'day' | 'week' | 'month' = 'week',
-  drift_type?: string,
-  limit: number = 10
-): Promise<DriftTimelineData[]> => {
-  const params = new URLSearchParams();
-  params.append('period', period);
-  params.append('limit', limit.toString());
-  
-  if (drift_type) {
-    params.append('drift_type', drift_type.toLowerCase());
-  }
-
-  const response = await axios.get<DriftTimelineData[]>(
-    `${API_BASE_URL}/drift-dashboard/timeline/by-device?${params.toString()}`
-  );
-  return response.data;
-};
-
 // Drift Images API methods
 export const getDriftImageDevices = async (): Promise<string[]> => {
   const response = await axios.get<string[]>(`${API_BASE_URL}/drift-images/devices`);
