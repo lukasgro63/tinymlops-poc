@@ -91,8 +91,12 @@ class OperationalMonitor:
         metadata_file = self.storage_dir / f"session_{self.session_id}_metadata.json"
         
         # Collect system information
+        import platform as plt
         system_info = {
-            "platform": os.name,
+            "platform": plt.system(),
+            "platform_release": plt.release(),
+            "platform_version": plt.version(),
+            "platform_machine": plt.machine(),
             "python_version": os.sys.version,
             "start_time": time.time(),
             "start_time_iso": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
