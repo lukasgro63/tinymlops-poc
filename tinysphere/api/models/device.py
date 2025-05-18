@@ -72,7 +72,16 @@ class DeviceRegistrationResponse(BaseModel):
 class DeviceLocation(BaseModel):
     device_id: str
     name: str
+    location_name: str  # Added for frontend compatibility
     latitude: float
     longitude: float
     accuracy: Optional[float] = None
-    is_active: bool
+    geo_accuracy: Optional[float] = None  # Added for API consistency
+    is_active: bool = True
+    last_update: Optional[str] = None  # Added for frontend compatibility
+
+    class Config:
+        # Allow validating the JSON response from the backend
+        from_attributes = True
+        # Allow extra fields that might be in the database
+        extra = "allow"

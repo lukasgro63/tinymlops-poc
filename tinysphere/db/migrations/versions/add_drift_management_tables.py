@@ -17,12 +17,36 @@ depends_on = None
 
 
 def upgrade():
-    # Create enum types
-    drift_status = sa.Enum('pending', 'validated', 'rejected', 'resolved', 'ignored', name='driftstatus')
-    drift_status.create(op.get_bind())
+    # Check if enums already exist to handle idempotent migrations
+    conn = op.get_bind()
     
-    drift_type = sa.Enum('confidence', 'distribution', 'feature', 'outlier', 'custom', 'unknown', name='drifttype')
-    drift_type.create(op.get_bind())
+    # Check if driftstatus enum exists
+    result_status = conn.execute(sa.text(
+        "SELECT 1 FROM pg_type WHERE typname = 'driftstatus'"
+    ))
+    status_exists = bool(result_status.scalar())
+    
+    # Create drift_status enum if it doesn't exist
+    if not status_exists:
+        drift_status = sa.Enum('pending', 'validated', 'rejected', 'resolved', 'ignored', name='driftstatus')
+        drift_status.create(conn)
+    else:
+        # If it exists, just reference it
+        drift_status = sa.Enum('pending', 'validated', 'rejected', 'resolved', 'ignored', name='driftstatus', create_type=False)
+    
+    # Check if drifttype enum exists
+    result_type = conn.execute(sa.text(
+        "SELECT 1 FROM pg_type WHERE typname = 'drifttype'"
+    ))
+    type_exists = bool(result_type.scalar())
+    
+    # Create drift_type enum if it doesn't exist
+    if not type_exists:
+        drift_type = sa.Enum('confidence', 'distribution', 'feature', 'outlier', 'custom', 'unknown', name='drifttype')
+        drift_type.create(conn)
+    else:
+        # If it exists, just reference it
+        drift_type = sa.Enum('confidence', 'distribution', 'feature', 'outlier', 'custom', 'unknown', name='drifttype', create_type=False)
     
     # Create drift_events table
     op.create_table('drift_events',
@@ -127,6 +151,35 @@ def downgrade():
     op.drop_index(op.f('ix_drift_events_device_id'), table_name='drift_events')
     op.drop_table('drift_events')
     
-    # Drop enum types
-    sa.Enum(name='drifttype').drop(op.get_bind())
-    sa.Enum(name='driftstatus').drop(op.get_bind())
+    # Drop enum types - only if they exist
+    conn = op.get_bind()
+    
+    # Check if tables that use these enums are gone
+    try:
+        # Check if drifttype is still used
+        result_type = conn.execute(sa.text(
+            "SELECT 1 FROM pg_type WHERE typname = 'drifttype'"
+        ))
+        if result_type.scalar():
+            try:
+                sa.Enum(name='drifttype').drop(conn, checkfirst=True)
+            except Exception as e:
+                # Log the error but continue
+                import logging
+                logging.getLogger(__name__).warning(f"Could not drop drifttype enum: {e}")
+        
+        # Check if driftstatus is still used
+        result_status = conn.execute(sa.text(
+            "SELECT 1 FROM pg_type WHERE typname = 'driftstatus'"
+        ))
+        if result_status.scalar():
+            try:
+                sa.Enum(name='driftstatus').drop(conn, checkfirst=True)
+            except Exception as e:
+                # Log the error but continue
+                import logging
+                logging.getLogger(__name__).warning(f"Could not drop driftstatus enum: {e}")
+    except Exception as e:
+        # Log any other error but continue
+        import logging
+        logging.getLogger(__name__).warning(f"Error during enum cleanup: {e}")
