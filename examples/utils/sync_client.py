@@ -9,6 +9,7 @@ Extends the base SyncClient with application-specific functionality.
 import json
 import logging
 import os
+import platform
 import socket
 import tempfile
 import time
@@ -890,7 +891,8 @@ class ExtendedSyncClient:
         """
         import os
         import re
-        import platform as plt
+        # Use imported platform module instead of importing as plt
+        import platform
         
         # Initialize with defaults
         platform_info = {
@@ -901,7 +903,7 @@ class ExtendedSyncClient:
         
         try:
             # Get basic OS information
-            system = plt.system().lower()
+            system = platform.system().lower()
             platform_info["os_type"] = system
             
             if system == "linux":
@@ -944,11 +946,11 @@ class ExtendedSyncClient:
                         platform_info["os_version"] = output.split(':')[1].strip()
                     except Exception:
                         # Fallback to platform.release()
-                        platform_info["os_version"] = plt.release()
+                        platform_info["os_version"] = platform.release()
                         
             elif system == "darwin":  # macOS
                 platform_info["os_type"] = "macOS"
-                platform_info["os_version"] = plt.mac_ver()[0]
+                platform_info["os_version"] = platform.mac_ver()[0]
                 # For Mac, get model identifier
                 try:
                     import subprocess
@@ -959,7 +961,7 @@ class ExtendedSyncClient:
                     
             elif system == "windows":
                 platform_info["os_type"] = "Windows"
-                platform_info["os_version"] = plt.version()
+                platform_info["os_version"] = platform.version()
                 # For Windows, get detailed version and model
                 try:
                     import subprocess
@@ -975,17 +977,17 @@ class ExtendedSyncClient:
             
             # If we still don't have detailed info, use platform.platform()
             if platform_info["os_version"] == "unknown":
-                platform_info["os_version"] = plt.version()
+                platform_info["os_version"] = platform.version()
                 
             if platform_info["device_model"] == "unknown":
-                platform_info["device_model"] = plt.machine()
+                platform_info["device_model"] = platform.machine()
                 
         except Exception as e:
             logger.warning(f"Error getting detailed platform info: {e}")
             # Fallback to simple platform info
-            platform_info["os_type"] = plt.system()
-            platform_info["os_version"] = plt.release()
-            platform_info["device_model"] = plt.machine()
+            platform_info["os_type"] = platform.system()
+            platform_info["os_version"] = platform.release()
+            platform_info["device_model"] = platform.machine()
             
         return platform_info
         
@@ -1031,6 +1033,7 @@ class ExtendedSyncClient:
             # Get platform info with specific details
             platform_info = self._get_detailed_platform_info()
             
+            # Use the already imported platform module
             # Basic device info with enhanced platform details
             device_info = {
                 "device_id": self.device_id,
