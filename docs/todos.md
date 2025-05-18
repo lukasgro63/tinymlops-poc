@@ -50,7 +50,7 @@
 
 - TODO: Chatbot einbauen, der mir bei Fragen hilft. -> Siehe auch TODO zu Spinx und Quickstart guide. Dort kann ich dann auch die API ansprechen, und mir die Endpoints zeigen lassen.
 
-- TODO : Anziegen der Charts (dateb) für larning --Y PCA verteilung, loss usw. --> Siehe auch TODO zu retraining pipeline, diese baut dann hierauf auf.
+- TODO : Anziegen der Charts (daten) für larning --Y PCA verteilung, loss usw. --> Siehe auch TODO zu retraining pipeline, diese baut dann hierauf auf.
 
 - TODO: Mother Style für die components mit folter, bzw fpr alle anlegen, die wir haben. Also auch für die charts, und die tables. Diese sollen dann in der UI immer gleich aussehen.
 

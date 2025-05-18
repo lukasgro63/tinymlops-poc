@@ -48,16 +48,43 @@ class DriftServiceExtension:
             # Base query to filter by date range
             base_query = db.query(DriftEvent).filter(DriftEvent.timestamp >= start_date)
             
-            # Apply drift type filter if provided
+            # Apply drift type filter - simple approach without complex SQL
             if drift_type:
                 try:
-                    # Try to convert string to enum value
+                    # Import the DriftService module here to avoid circular imports
                     from tinysphere.api.services.drift_service import DriftService
-                    drift_type_enum = DriftService._get_drift_type_enum(drift_type)
-                    if drift_type_enum:
-                        base_query = base_query.filter(DriftEvent.drift_type == drift_type_enum)
+                    
+                    # Simply get all drift events for the period and filter them in Python
+                    all_events = db.query(DriftEvent.id, DriftEvent.drift_type).filter(
+                        DriftEvent.timestamp >= start_date
+                    ).all()
+                    
+                    # Filter events by drift type string comparison with extra KNN_DISTANCE handling
+                    drift_type_lower = drift_type.lower()
+                    matching_ids = []
+                    
+                    # Special handling for KNN_DISTANCE with alternative formats
+                    is_knn_search = drift_type_lower in ["knn_distance", "knn", "knndistance", "knn distance"]
+                    
+                    for event_id, event_drift_type in all_events:
+                        # Get value and convert to lowercase for comparison
+                        event_type_value = event_drift_type.value.lower() if hasattr(event_drift_type, 'value') else str(event_drift_type).lower()
+                        
+                        # First check exact match
+                        if event_type_value == drift_type_lower:
+                            matching_ids.append(event_id)
+                        # Special handling for KNN_DISTANCE to catch variations
+                        elif is_knn_search and ("knn" in event_type_value or "distance" in event_type_value):
+                            matching_ids.append(event_id)
+                    
+                    if matching_ids:
+                        # Filter base query to only include these IDs
+                        base_query = base_query.filter(DriftEvent.id.in_(matching_ids))
+                        logger.info(f"Found {len(matching_ids)} events with drift_type '{drift_type_lower}'")
+                    else:
+                        logger.warning(f"No events found with drift_type '{drift_type_lower}'")
                 except Exception as e:
-                    logger.error(f"Error applying drift type filter: {e}")
+                    logger.error(f"Error applying drift type filter (simple approach): {e}")
             
             # Step 1: Get all devices with drift events
             device_counts = {}
@@ -177,16 +204,43 @@ class DriftServiceExtension:
             # Base query to filter by date range
             base_query = db.query(DriftEvent).filter(DriftEvent.timestamp >= start_date)
             
-            # Apply drift type filter if provided
+            # Apply drift type filter - simple approach without complex SQL
             if drift_type:
                 try:
-                    # Try to convert string to enum value
+                    # Import the DriftService module here to avoid circular imports
                     from tinysphere.api.services.drift_service import DriftService
-                    drift_type_enum = DriftService._get_drift_type_enum(drift_type)
-                    if drift_type_enum:
-                        base_query = base_query.filter(DriftEvent.drift_type == drift_type_enum)
+                    
+                    # Simply get all drift events for the period and filter them in Python
+                    all_events = db.query(DriftEvent.id, DriftEvent.drift_type).filter(
+                        DriftEvent.timestamp >= start_date
+                    ).all()
+                    
+                    # Filter events by drift type string comparison with extra KNN_DISTANCE handling
+                    drift_type_lower = drift_type.lower()
+                    matching_ids = []
+                    
+                    # Special handling for KNN_DISTANCE with alternative formats
+                    is_knn_search = drift_type_lower in ["knn_distance", "knn", "knndistance", "knn distance"]
+                    
+                    for event_id, event_drift_type in all_events:
+                        # Get value and convert to lowercase for comparison
+                        event_type_value = event_drift_type.value.lower() if hasattr(event_drift_type, 'value') else str(event_drift_type).lower()
+                        
+                        # First check exact match
+                        if event_type_value == drift_type_lower:
+                            matching_ids.append(event_id)
+                        # Special handling for KNN_DISTANCE to catch variations
+                        elif is_knn_search and ("knn" in event_type_value or "distance" in event_type_value):
+                            matching_ids.append(event_id)
+                    
+                    if matching_ids:
+                        # Filter base query to only include these IDs
+                        base_query = base_query.filter(DriftEvent.id.in_(matching_ids))
+                        logger.info(f"Found {len(matching_ids)} events with drift_type '{drift_type_lower}'")
+                    else:
+                        logger.warning(f"No events found with drift_type '{drift_type_lower}'")
                 except Exception as e:
-                    logger.error(f"Error applying drift type filter: {e}")
+                    logger.error(f"Error applying drift type filter (simple approach): {e}")
             
             # Step 1: Get all devices with drift events and count
             device_counts = {}

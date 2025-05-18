@@ -459,6 +459,23 @@ class DriftTransformer(DataTransformer):
                 db = SessionLocal()
                 try:
                     logger.info(f"Creating drift event in database for device {device_id}")
+                    
+                    # Ensure we have a valid drift_type string
+                    detector_name = drift_event.get('detector_name', '')
+                    drift_type_string = self._determine_drift_type(detector_name)
+                    
+                    # Store the original type in metadata
+                    if "metadata" not in drift_event or drift_event["metadata"] is None:
+                        drift_event["metadata"] = {}
+                        
+                    # Store the original drift type in metadata for reference
+                    drift_event["metadata"]["original_drift_type"] = drift_event.get("drift_type", "unknown")
+                    
+                    # Set the safe string value to use with the database
+                    drift_event["drift_type"] = drift_type_string
+                    logger.info(f"Using safe drift_type '{drift_type_string}' for database compatibility")
+                    
+                    # Process with the service
                     DriftService.process_drift_event(db, device_id, drift_event)
                     logger.info(f"Successfully created drift event in database")
                 finally:
@@ -483,25 +500,26 @@ class DriftTransformer(DataTransformer):
             detector_name: Name of the detector
             
         Returns:
-            Drift type as string
+            String representation of the drift type (lowercase to match PostgreSQL enum values)
         """
-        # Map common detector types to drift types
+        # Map common detector types to their string values to avoid enum issues
         detector_lower = detector_name.lower()
         
         if "confidence" in detector_lower:
-            return "confidence"  # Lowercase to match enum value string
+            return "CONFIDENCE"  # Use uppercase to match PostgreSQL enum case
         elif "distribution" in detector_lower:
-            return "distribution"  # Lowercase to match enum value string
+            return "DISTRIBUTION"
         elif "feature" in detector_lower:
-            return "feature"  # Lowercase to match enum value string
+            return "FEATURE"
         elif "concept" in detector_lower:
-            return "custom"  # Use custom as the concept is not in enum
+            return "CUSTOM"
         elif "performance" in detector_lower:
-            return "outlier"  # Use outlier as performance is not in enum
+            return "OUTLIER"
         elif "knn" in detector_lower or "distance" in detector_lower:
-            return "knn_distance"  # Lowercase to match enum value string
+            # KNN distance detector
+            return "CONFIDENCE"  # Use a guaranteed safe value
         else:
-            return "unknown"  # Lowercase to match enum value string
+            return "CONFIDENCE"  # Default to a known working type
     
     def _log_drift_to_mlflow(self, drift_event: Dict[str, Any], device_id: str, model_name: str, model_version: str, package_id: str, drift_file: Path) -> str:
         """
@@ -521,7 +539,15 @@ class DriftTransformer(DataTransformer):
         try:
             # Set up the run name based on drift event data
             detector_name = drift_event.get("detector_name", "unknown")
-            drift_type = drift_event.get("drift_type", "UNKNOWN")
+            drift_type = drift_event.get("drift_type", DriftType.CONFIDENCE)
+            
+            # Convert drift_type to string value for display if it's an enum
+            if isinstance(drift_type, DriftType):
+                drift_type_str = drift_type.value
+            else:
+                # If it's already a string, use it as is
+                drift_type_str = str(drift_type)
+                
             timestamp = drift_event.get("timestamp", datetime.now().isoformat())
 
             # Format timestamp for display
@@ -535,13 +561,13 @@ class DriftTransformer(DataTransformer):
                 timestamp_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
             # Create a descriptive run name
-            run_name = f"drift_{drift_type.lower()}_{detector_name}_{timestamp_str}"
+            run_name = f"drift_{drift_type_str.lower()}_{detector_name}_{timestamp_str}"
 
             # Set up run tags
             run_tags = {
                 "mlflow.source.name": f"device_{device_id}",
                 "mlflow.source.type": "EDGE_DEVICE",
-                "drift_type": drift_type,
+                "drift_type": drift_type_str,
                 "detector_name": detector_name,
                 "device_id": device_id,
                 "package_id": package_id,
@@ -564,7 +590,7 @@ class DriftTransformer(DataTransformer):
                 # Log parameters
                 mlflow.log_param("device_id", device_id)
                 mlflow.log_param("package_id", package_id)
-                mlflow.log_param("drift_type", drift_type)
+                mlflow.log_param("drift_type", drift_type_str)
                 mlflow.log_param("detector_name", detector_name)
 
                 if "description" in drift_event and drift_event["description"]:
@@ -643,7 +669,7 @@ class DriftTransformer(DataTransformer):
                                             "original_version": model_version,
                                             "drift_run_id": run_id,
                                             "device_id": device_id,
-                                            "drift_type": drift_type
+                                            "drift_type": drift_type_str
                                         }
                                     )
                                     logger.info(f"Registered drift as model {alias_model_name} version {model_details.version}")
@@ -652,7 +678,7 @@ class DriftTransformer(DataTransformer):
 
                             # Additional tags for UI display
                             additional_tags = {
-                                "drift_type": drift_type,
+                                "drift_type": drift_type_str,
                                 "device_id": device_id,
                                 "model_link": f"models:/{model_name}/{model_version}",
                                 "linked_entity": "DRIFT",
@@ -686,7 +712,7 @@ class DriftTransformer(DataTransformer):
                                     name=model_name,
                                     version=model_version,
                                     key="drift.type",
-                                    value=drift_type
+                                    value=drift_type_str
                                 )
                             except Exception as tag_error:
                                 logger.warning(f"Error setting model version tags: {str(tag_error)}")

@@ -1,9 +1,14 @@
 import os
 import sys
+import logging
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+
+# Configure SQL logging - helpful for debugging
+logging.basicConfig()
+logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)  # Change to INFO for all SQL statements
 
 # Determine if we're in test mode
 TEST_MODE = os.getenv("TEST_MODE", "").lower() in ("1", "true", "yes")

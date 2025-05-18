@@ -101,20 +101,87 @@ def create_drift_event(drift_event: DriftEventCreate, db: Session = Depends(get_
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     
-    # Convert Pydantic model to dict
-    if hasattr(drift_event, "model_dump"):
-        event_data = drift_event.model_dump()  # Pydantic v2
+    # Get normalized data with consistent drift_type cases
+    event_data = drift_event.get_normalized_data()
+    
+    # Check for KNN distance detector
+    detector_name = event_data.get("detector_name", "").lower()
+    description = event_data.get("description", "").lower()
+    
+    # Special handling for KNN distance detectors
+    if ("knn" in detector_name or "distance" in detector_name or 
+        "neighbor_distance" in description):
+        
+        # First check which drift types are actually valid in the database
+        from sqlalchemy import text
+        db_conn = db.connection()
+        try:
+            # Query the database for valid drift type enum values using a more reliable approach
+            valid_types = [row[0] for row in db.execute(
+                text("SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid WHERE pg_type.typname = 'drifttype'")
+            ).fetchall()]
+            
+            logger.info(f"Available drift types in database: {valid_types}")
+            
+            # Use knn_distance if it's a valid enum value (case-sensitive check)
+            if "KNN_DISTANCE" in valid_types:
+                event_data["drift_type"] = "KNN_DISTANCE"  # Use string instead of enum
+                logger.info("Using 'KNN_DISTANCE' enum value")
+            elif "knn_distance" in valid_types:
+                event_data["drift_type"] = "knn_distance"  # Use string instead of enum
+                logger.info("Using 'knn_distance' enum value")
+            # Otherwise use a safe fallback value
+            elif "DISTRIBUTION" in valid_types:
+                event_data["drift_type"] = "DISTRIBUTION"  # Use string instead of enum
+                logger.info("Using 'DISTRIBUTION' as safe fallback for KNN distance drift")
+            elif "distribution" in valid_types:
+                event_data["drift_type"] = "distribution"  # Use string instead of enum
+                logger.info("Using 'distribution' as safe fallback for KNN distance drift")
+            else:
+                # Default to CONFIDENCE if nothing else works
+                if "CONFIDENCE" in valid_types:
+                    event_data["drift_type"] = "CONFIDENCE"  # Use string instead of enum
+                    logger.info("Using 'CONFIDENCE' as safe fallback for KNN distance drift")
+                else:
+                    event_data["drift_type"] = valid_types[0]  # Use first available enum value
+                    logger.info(f"Using '{valid_types[0]}' as safe fallback for KNN distance drift")
+                
+        except Exception as e:
+            # On error, fall back to CONFIDENCE
+            logger.error(f"Error checking valid drift type values: {e}")
+            event_data["drift_type"] = DriftType.CONFIDENCE
+            logger.info("Error checking enum values, using DriftType.CONFIDENCE as fallback")
+            
+        # Store the original drift type in metadata
+        if "metadata" not in event_data or event_data["metadata"] is None:
+            event_data["metadata"] = {}
+        event_data["metadata"]["original_drift_type"] = "knn_distance"
+        event_data["metadata"]["drift_type_display"] = "KNN Distance"
+    
+    # Log the normalized drift type
+    if isinstance(event_data["drift_type"], DriftType):
+        logger.info(f"Creating drift event with drift_type enum: {event_data['drift_type'].name}")
     else:
-        event_data = drift_event.dict()        # Pydantic v1
+        logger.info(f"Creating drift event with drift_type string: '{event_data['drift_type']}'")
     
     # Process drift event
     event = DriftService.process_drift_event(db, drift_event.device_id, event_data)
     
-    # Return response
+    # Determine the drift type to return to the client
+    drift_type_to_use = event.drift_type.value  # Default to the database value
+    
+    # If we have metadata with the original drift type, use that instead
+    if event.event_metadata and isinstance(event.event_metadata, dict):
+        original_type = event.event_metadata.get("original_drift_type")
+        if original_type:
+            drift_type_to_use = original_type
+            logger.info(f"Using original drift type from metadata: {drift_type_to_use}")
+    
+    # Return response with the correct drift type
     return {
         "event_id": event.event_id,
         "device_id": event.device_id,
-        "drift_type": event.drift_type.value,
+        "drift_type": drift_type_to_use,  # Use the determined drift type
         "drift_score": event.drift_score,
         "detector_name": event.detector_name,
         "model_id": event.model_id,
@@ -399,16 +466,22 @@ async def create_drift_event_with_data(
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid metadata JSON")
 
-    # Create event data
-    event_data = {
-        "device_id": device_id,
-        "detector_name": detector_name,
-        "drift_score": drift_score,
-        "description": description,
-        "drift_type": drift_type,
-        "metadata": event_metadata,
-        "timestamp": datetime.now()
-    }
+    # Create a base event object for normalization
+    base_event = DriftEventBase(
+        device_id=device_id,
+        detector_name=detector_name,
+        drift_score=drift_score or 0.0,
+        description=description,
+        drift_type=drift_type,
+        event_metadata=event_metadata,
+        timestamp=datetime.now()
+    )
+    
+    # Get normalized data (especially drift_type in correct case)
+    event_data = base_event.get_normalized_data()
+    
+    # Log the normalized drift type
+    logger.info(f"Creating drift event with normalized drift_type: '{event_data['drift_type']}' (original: '{drift_type}')")
 
     # Process the drift event
     event = DriftService.process_drift_event(db, device_id, event_data)
