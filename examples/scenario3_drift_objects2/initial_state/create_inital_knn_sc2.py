@@ -34,34 +34,35 @@ from tinylcm.utils.file_utils import ensure_directory_exists
 # --- KONFIGURATION ---
 # Pfade zu initialen Bilddaten
 INITIAL_IMAGE_DATA_DIR = root_dir / "examples/assets/training_images"  # Absoluter Pfad zum Training-Images Ordner
-# Update auf die neuen Klassen für Objekte
+# Update auf die neuen Klassen mit Einbeziehung der Ball-Klasse
 CLASSES = {
     "negative": INITIAL_IMAGE_DATA_DIR / "negative",
     "stone": INITIAL_IMAGE_DATA_DIR / "stone",
     "lego": INITIAL_IMAGE_DATA_DIR / "lego",
-    "leaf": INITIAL_IMAGE_DATA_DIR / "leaf"  # Aktualisiert von "tire" zu "leaf"
+    "leaf": INITIAL_IMAGE_DATA_DIR / "leaf",
+    "ball": INITIAL_IMAGE_DATA_DIR / "ball"  # Neue Ball-Klasse
 }
 
 # Pfad zum TFLite-Modell (das auch im Beispiel verwendet wird)
 # Verwenden wir einen absoluten Pfad, der vom Root-Verzeichnis ausgeht
-MODEL_PATH = str(root_dir / "examples/scenario2_drift_objects/model/model_object.tflite")  # Aktualisiert für Objects
-LABELS_PATH = str(root_dir / "examples/scenario2_drift_objects/model/labels_object.txt")  # Aktualisiert für Objects
+MODEL_PATH = str(root_dir / "examples/scenario3_drift_objects2/model/model_object.tflite")  # Aktualisiert für Scenario3
+LABELS_PATH = str(root_dir / "examples/scenario3_drift_objects2/model/labels_object.txt")  # Aktualisiert für Scenario3
 
 # Pfad zum Feature-Prozessor (StandardScaler + PCA)
-FEATURE_PROCESSOR_PATH = str(root_dir / "examples/scenario2_drift_objects/model/feature_processor.pkl")
+FEATURE_PROCESSOR_PATH = str(root_dir / "examples/scenario3_drift_objects2/model/feature_processor.pkl")
 
 # Konfiguration für den Feature Extractor
 TARGET_IMG_SIZE = (224, 224)  # Inferenzauflösung
 
 # Konfiguration für den LightweightKNN
-KNN_K = 5  # Angepasst für 4 Klassen (3 positive + 1 negative)
-KNN_MAX_SAMPLES = 200  # Erhöht für den größeren Datensatz (jede Klasse hat ~200 Bilder)
+KNN_K = 5  # Angepasst für 5 Klassen (4 positive + 1 negative)
+KNN_MAX_SAMPLES = 200  # Erhöht für den größeren Datensatz
 KNN_DISTANCE_METRIC = "euclidean"  # Metrik für den Abstandsvergleich
 KNN_USE_NUMPY = True  # Für die Offline-Erstellung können wir NumPy nutzen
 
 # Speicherort für den initialen k-NN Zustand
 OUTPUT_STATE_DIR = current_dir  # Das aktuelle Verzeichnis (initial_state)
-OUTPUT_STATE_FILENAME = "knn_initial_state_objects.json"  # Aktualisiert für Objects-Scenario
+OUTPUT_STATE_FILENAME = "knn_initial_state_objects.json"  # Zustandsdatei
 OUTPUT_REFERENCE_STATS_FILENAME = "knn_reference_stats.json"  # Datei für die Referenzstatistiken
 # --- ENDE KONFIGURATION ---
 
@@ -308,7 +309,7 @@ def calculate_knn_distance_statistics(knn_instance, all_features, all_labels):
         return {}
 
 def main():
-    print("Erstelle initialen k-NN Zustand für Scenario 2...")
+    print("Erstelle initialen k-NN Zustand für Scenario 3 mit Ball-Klasse...")
     ensure_directory_exists(OUTPUT_STATE_DIR)
 
     # 1. Initialisiere TFLite Interpreter
@@ -430,7 +431,7 @@ def main():
         use_numpy=KNN_USE_NUMPY
     )
 
-    # Balanciere die Klassen, damit beide gleichmäßig vertreten sind
+    # Balanciere die Klassen, damit alle gleichmäßig vertreten sind
     # Gruppiere Samples nach Klassen
     features_by_class = {}
     labels_by_class = {}
@@ -501,9 +502,8 @@ def main():
             )
     
     # Hole die Size und Klassen vom KNN
-    # Verwende die korrekten Methoden für LightweightKNN
     knn_state = knn.get_state()
-    training_size = len(knn_state['X_train'])  # Die korrigierte Zeile - X_train statt samples
+    training_size = len(knn_state['X_train'])
     classes = list(set(all_labels))
     
     print(f"Initialer k-NN trainiert mit {training_size} Samples für Klassen: {classes}.")
@@ -523,7 +523,7 @@ def main():
     state_to_save = {
         "classifier": knn_state_dict,
         "metadata": {
-            "description": f"Initial KNN state for Objects Scenario with 4 classes: {list(CLASSES.keys())}",
+            "description": f"Initial KNN state for Objects Scenario with 5 classes: {list(CLASSES.keys())}",
             "creation_date_iso": datetime.now().isoformat(),
             "feature_dimension": actual_feature_dimension,  # Verwende die tatsächliche Dimension nach Transformation
             "original_dimension": feature_dimension,  # Speichere auch die ursprüngliche Dimension

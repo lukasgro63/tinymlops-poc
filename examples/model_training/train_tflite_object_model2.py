@@ -10,7 +10,7 @@ images from examples/assets/training_images. It creates a model that:
 4. Exports to TFLite format with quantization
 5. Is compatible with the TinyLCM pipeline
 
-The model is saved in a format compatible with scenario2_drift_objects.
+The model is saved in a format compatible with scenario3_drift_objects2, including the new 'ball' class.
 """
 
 import os
@@ -88,18 +88,18 @@ VALIDATION_SPLIT = 0.2
 CLASS_MODE = 'categorical'  # One-hot encoded labels
 
 # Directories
-IMAGE_DIR = os.path.join(root_dir, "examples/assets/training_images")  # Aktualisiert zum neuen Pfad
-OUTPUT_DIR = os.path.join(root_dir, "examples/scenario2_drift_objects/model")  # Direkt ins Szenario-Verzeichnis
+IMAGE_DIR = os.path.join(root_dir, "examples/assets/training_images")  # Training images path
+OUTPUT_DIR = os.path.join(root_dir, "examples/scenario3_drift_objects2/model")  # Updated to scenario3
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Output file paths
-MODEL_KERAS_PATH = os.path.join(OUTPUT_DIR, "model_object.h5")  # Vereinfachte Namen
+MODEL_KERAS_PATH = os.path.join(OUTPUT_DIR, "model_object.h5")
 MODEL_TFLITE_PATH = os.path.join(OUTPUT_DIR, "model_object.tflite")
 LABELS_FILE_PATH = os.path.join(OUTPUT_DIR, "labels_object.txt")
 
-# Wir brauchen keine Custom-Pfade mehr, da wir direkt ins Szenario-Verzeichnis speichern
-TINYML_MODEL_PATH = MODEL_TFLITE_PATH  # Verwende den gleichen Pfad
-TINYML_LABELS_PATH = LABELS_FILE_PATH  # Verwende den gleichen Pfad
+# Use the same path for TinyLCM since we're saving directly to the scenario directory
+TINYML_MODEL_PATH = MODEL_TFLITE_PATH  
+TINYML_LABELS_PATH = LABELS_FILE_PATH  
 
 class JPGOnlyImageDataGenerator(ImageDataGenerator):
     """
@@ -108,14 +108,14 @@ class JPGOnlyImageDataGenerator(ImageDataGenerator):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Beschränke unterstützte Formate auf JPG/JPEG/PNG (kein HEIC)
+        # Restrict supported formats to JPG/JPEG/PNG (no HEIC)
         self.supported_extensions = {'.jpg', '.jpeg', '.png', '.bmp'}
     
     def flow_from_directory(self, directory, *args, **kwargs):
-        # Gib einen Hinweis aus, dass nur JPG/JPEG verwendet werden 
-        print("\nVerwendung von JPG/JPEG/PNG Bildern (HEIC-Unterstützung deaktiviert)")
+        # Log that we're only using JPG/JPEG 
+        print("\nUsing JPG/JPEG/PNG images (HEIC support disabled)")
         
-        # Stelle sicher, dass wir nur JPG/JPEG-Dateien zählen
+        # Count only JPG/JPEG files
         jpg_count = 0
         for root, _, files in os.walk(directory):
             for file in files:
@@ -123,9 +123,9 @@ class JPGOnlyImageDataGenerator(ImageDataGenerator):
                 if ext in ['.jpg', '.jpeg', '.png', '.bmp']:
                     jpg_count += 1
         
-        print(f"Gefunden: {jpg_count} JPG/JPEG/PNG/BMP Bilder im Verzeichnis")
+        print(f"Found: {jpg_count} JPG/JPEG/PNG/BMP images in directory")
         
-        # Dann rufen wir die Standard-Implementierung auf
+        # Call the standard implementation
         return super().flow_from_directory(directory, *args, **kwargs)
 
 
@@ -155,7 +155,7 @@ def create_data_generators():
     print(f"Saved class labels to {LABELS_FILE_PATH}")
     
     # Create data generators with augmentation for training
-    # Verwenden der JPGOnlyImageDataGenerator anstelle von HEICImageDataGenerator
+    # Use JPGOnlyImageDataGenerator instead of HEICImageDataGenerator
     train_datagen = JPGOnlyImageDataGenerator(
         rescale=1./255,
         validation_split=VALIDATION_SPLIT,
@@ -265,17 +265,17 @@ def train_model(model, train_generator, val_generator):
         metrics=['accuracy']
     )
     
-    # Set up callbacks - Patience erhöht für den größeren Datensatz
+    # Set up callbacks - patience increased for the larger dataset
     callbacks = [
         EarlyStopping(
             monitor='val_loss',
-            patience=15,  # Erhöht für bessere Konvergenz
+            patience=15,
             restore_best_weights=True
         ),
         ReduceLROnPlateau(
             monitor='val_loss',
             factor=0.2,
-            patience=7,  # Erhöht für bessere Konvergenz
+            patience=7,
             min_lr=1e-6
         )
     ]
@@ -297,7 +297,7 @@ def train_model(model, train_generator, val_generator):
         validation_data=val_generator,
         callbacks=callbacks,
         steps_per_epoch=steps_per_epoch,
-        validation_steps=max(1, validation_steps)  # Stelle sicher, dass mindestens 1 Step ausgeführt wird
+        validation_steps=max(1, validation_steps)  # Ensure at least 1 step is executed
     )
     
     return history
@@ -307,7 +307,7 @@ def fine_tune_model(model, train_generator, val_generator):
     # For a conservative approach, we only train the classification head
     # We keep the base model frozen to prevent overfitting
     
-    # Bei dem neuen größeren Datensatz können wir einen aggressiveren Fine-Tuning-Ansatz anwenden
+    # Apply a more aggressive fine-tuning approach for our larger dataset
     # Find the base model (MobileNetV2) layer
     for layer in model.layers:
         if isinstance(layer, tf.keras.Model):  # This is likely our base model
@@ -334,17 +334,17 @@ def fine_tune_model(model, train_generator, val_generator):
         metrics=['accuracy']
     )
     
-    # Set up callbacks - Patience erhöht für den größeren Datensatz
+    # Set up callbacks - patience increased for the larger dataset
     callbacks = [
         EarlyStopping(
             monitor='val_loss',
-            patience=15,  # Erhöht für bessere Konvergenz
+            patience=15,
             restore_best_weights=True
         ),
         ReduceLROnPlateau(
             monitor='val_loss',
             factor=0.2,
-            patience=7,  # Erhöht für bessere Konvergenz
+            patience=7,
             min_lr=1e-7
         )
     ]
@@ -366,7 +366,7 @@ def fine_tune_model(model, train_generator, val_generator):
         validation_data=val_generator,
         callbacks=callbacks,
         steps_per_epoch=steps_per_epoch,
-        validation_steps=max(1, validation_steps)  # Stelle sicher, dass mindestens 1 Step ausgeführt wird
+        validation_steps=max(1, validation_steps)  # Ensure at least 1 step is executed
     )
     
     return history
@@ -442,7 +442,7 @@ def convert_to_tflite(feature_extraction_model, raw_feature_model, quantize=True
     with open(MODEL_TFLITE_PATH, 'wb') as f:
         f.write(tflite_model)
     
-    # Since we're saving directly to the scenario directory, the path is the same
+    # Calculate model size
     model_size_mb = os.path.getsize(MODEL_TFLITE_PATH) / (1024 * 1024)
     print(f"✅ TFLite model saved to: {MODEL_TFLITE_PATH}")
     print(f"   Model size: {model_size_mb:.2f} MB")
@@ -463,19 +463,19 @@ def convert_to_tflite(feature_extraction_model, raw_feature_model, quantize=True
 
 def train_and_save_feature_processor(raw_feature_model, train_generator, output_dir, pca_components=256):
     """
-    Trainiert und speichert einen Feature-Prozessor, der StandardScaler und PCA kombiniert.
+    Train and save a feature processor that combines StandardScaler and PCA.
     
     Args:
-        raw_feature_model: Das Modell, das die Features extrahiert
-        train_generator: Der Daten-Generator für die Trainingsbilder
-        output_dir: Das Verzeichnis, in dem der Feature-Prozessor gespeichert wird
-        pca_components: Anzahl der PCA-Komponenten (Default: 256)
+        raw_feature_model: The model that extracts features
+        train_generator: The data generator for training images
+        output_dir: The directory where the feature processor is saved
+        pca_components: Number of PCA components (Default: 256)
         
     Returns:
-        Tuple aus (StandardScaler, PCA, Pfad zur gespeicherten Datei)
+        Tuple of (StandardScaler, PCA, path to saved file)
     """
     try:
-        # Import der benötigten Bibliotheken
+        # Import required libraries
         import pickle
         import time
 
@@ -494,27 +494,27 @@ def train_and_save_feature_processor(raw_feature_model, train_generator, output_
     
     print(f"\n==== Training Feature Processor (StandardScaler + PCA) ====")
     
-    # Sammle Features aus den Trainingsdaten
+    # Collect features from training data
     print("Collecting features from training data...")
     features_list = []
     sample_count = 0
     
-    # Setze den Generator zurück, falls möglich
+    # Reset the generator if possible
     if hasattr(train_generator, 'reset'):
         train_generator.reset()
     
-    # Durchlaufe den Generator komplett für alle verfügbaren Samples
-    # Da der Datensatz klein ist, nutzen wir alle verfügbaren Daten
+    # Process all available samples in the training data
+    # Since the dataset is small, we use all available data
     start_time = time.time()
     num_total_train_samples = train_generator.samples
-    samples_processed_in_loop = 0 # Zähler für tatsächlich verarbeitete Samples
+    samples_processed_in_loop = 0  # Counter for actual processed samples
 
-    # Iteriere über die Batches, aber stoppe nach train_generator.samples
+    # Iterate over batches, but stop after train_generator.samples
     for batch_idx in range((num_total_train_samples + train_generator.batch_size - 1) // train_generator.batch_size):
         if samples_processed_in_loop >= num_total_train_samples:
-            break # Stoppe, wenn alle Samples gesehen wurden
+            break  # Stop if all samples have been seen
 
-        inputs, _ = next(train_generator) # Hole nächsten Batch
+        inputs, _ = next(train_generator)  # Get next batch
         batch_features = raw_feature_model.predict(inputs, verbose=0)
 
         for feature_idx in range(batch_features.shape[0]):
@@ -523,21 +523,21 @@ def train_and_save_feature_processor(raw_feature_model, train_generator, output_
                 features_list.append(flat_feature)
                 samples_processed_in_loop += 1
             else:
-                break # Innerer Loop stoppen
+                break  # Stop inner loop
         
-        sample_count = samples_processed_in_loop # sample_count für Logging aktualisieren
+        sample_count = samples_processed_in_loop  # Update sample_count for logging
         if (batch_idx + 1) % 5 == 0 or batch_idx == 0 or sample_count == num_total_train_samples:
             print(f"  Processed {sample_count}/{num_total_train_samples} samples ({len(features_list)} features collected)")
     
     elapsed = time.time() - start_time
     print(f"Feature collection complete in {elapsed:.2f} seconds")
     
-    # Überprüfe, ob Features gesammelt wurden
+    # Check if features were collected
     if not features_list:
         print("❌ ERROR: No features collected! Check the train_generator and model.")
         return None, None, None
         
-    # Konvertiere zu NumPy-Array
+    # Convert to NumPy array
     try:
         features_array = np.array(features_list)
         print(f"Collected {len(features_list)} feature vectors of dimension {features_array.shape[1]}")
@@ -545,7 +545,7 @@ def train_and_save_feature_processor(raw_feature_model, train_generator, output_
         print(f"❌ ERROR converting features to array: {e}")
         return None, None, None
     
-    # 1. Standardisierung (Mittelwert 0, Std 1)
+    # 1. Standardization (mean 0, std 1)
     print("Standardizing features...")
     scaler = StandardScaler()
     try:
@@ -553,15 +553,15 @@ def train_and_save_feature_processor(raw_feature_model, train_generator, output_
         print(f"✓ Features standardized (mean ≈ 0, std ≈ 1)")
     except Exception as e:
         print(f"❌ ERROR in standardization: {e}")
-        # Speichere nur den Scaler als Fallback
+        # Save only the scaler as fallback
         processor_path = os.path.join(output_dir, "feature_processor.pkl")
         with open(processor_path, 'wb') as f:
             pickle.dump({'scaler': scaler, 'pca': None}, f)
         print(f"⚠️ Only StandardScaler saved (without PCA) to: {processor_path}")
         return scaler, None, processor_path
     
-    # 2. PCA-Anwendung mit Sicherheitsabfrage für die Komponentenanzahl
-    # Stelle sicher, dass nicht mehr Komponenten als Samples oder Features angefordert werden
+    # 2. Apply PCA with safety check for component count
+    # Make sure not to request more components than samples or features
     max_possible_components = min(scaled_features.shape[0], scaled_features.shape[1])
     actual_pca_components = min(pca_components, max_possible_components - 1)
     
@@ -574,11 +574,11 @@ def train_and_save_feature_processor(raw_feature_model, train_generator, output_
         pca = PCA(n_components=actual_pca_components)
         pca.fit(scaled_features)
         
-        # Test der Transformation
+        # Test the transformation
         test_features = scaled_features[:1]
         reduced_features = pca.transform(test_features)
         
-        # Erklärte Varianz berechnen
+        # Calculate explained variance
         explained_variance = sum(pca.explained_variance_ratio_) * 100
         print(f"✅ PCA successfully trained")
         print(f"   - Explains {explained_variance:.2f}% of total variance")
@@ -586,14 +586,14 @@ def train_and_save_feature_processor(raw_feature_model, train_generator, output_
         print(f"   - Test transform shape: {test_features.shape} → {reduced_features.shape}")
     except Exception as e:
         print(f"❌ ERROR in PCA fitting: {e}")
-        # Speichere nur den Scaler als Fallback
+        # Save only the scaler as fallback
         processor_path = os.path.join(output_dir, "feature_processor.pkl")
         with open(processor_path, 'wb') as f:
             pickle.dump({'scaler': scaler, 'pca': None}, f)
         print(f"⚠️ Only StandardScaler saved (without PCA) to: {processor_path}")
         return scaler, None, processor_path
     
-    # Beide Modelle (Scaler und PCA) speichern
+    # Save both models (scaler and PCA)
     processor_path = os.path.join(output_dir, "feature_processor.pkl")
     try:
         with open(processor_path, 'wb') as f:
@@ -612,20 +612,20 @@ def train_and_save_feature_processor(raw_feature_model, train_generator, output_
         print(f"❌ ERROR saving feature processor: {e}")
         return scaler, pca, None
     
-    # Zusätzliche Debug-Informationen
+    # Additional debug information
     print("\nFeature Statistics:")
     print(f"- Original features range: [{features_array.min():.4f}, {features_array.max():.4f}]")
     print(f"- Scaled features range: [{scaled_features.min():.4f}, {scaled_features.max():.4f}]")
     print(f"- Reduced features range: [{reduced_features.min():.4f}, {reduced_features.max():.4f}]")
     
-    # Erstelle Beispielcode für die Verwendung
+    # Create example code for usage
     example_code = f"""
-# Beispielcode zur Verwendung des Feature-Prozessors in TinyLCM:
+# Example code for using the feature processor in TinyLCM:
 
 import pickle
 import numpy as np
 
-# Feature-Prozessor laden
+# Load feature processor
 with open("{os.path.basename(processor_path)}", 'rb') as f:
     processor = pickle.load(f)
 
@@ -634,26 +634,26 @@ pca = processor['pca']
 input_dim = processor['input_dim']
 output_dim = processor['output_dim']
 
-# In der Pipeline nach Feature-Extraktion:
+# In the pipeline after feature extraction:
 def process_features(features):
-    # Flatten, falls nötig
+    # Flatten if needed
     if len(features.shape) > 1:
         features = features.flatten()
         
-    # Dimensionscheck
+    # Dimension check
     if len(features) != input_dim:
-        # Hier ggf. Fehlerbehandlung oder Anpassung
+        # Handle dimension mismatch if needed
         pass
         
-    # Standardisierung und PCA anwenden
+    # Apply standardization and PCA
     scaled = scaler.transform(features.reshape(1, -1))
     reduced = pca.transform(scaled)[0]
     
-    # Reduzierte Features (Dimension: {actual_pca_components}) zurückgeben
+    # Return reduced features (dimension: {actual_pca_components})
     return reduced
 """
     
-    # Speichere Beispielcode
+    # Save example code
     example_path = os.path.join(output_dir, "feature_processor_usage.py")
     with open(example_path, 'w') as f:
         f.write(example_code)
@@ -664,7 +664,7 @@ def test_tflite_compatibility():
     """Test that the TFLite model is compatible with TinyLCM preprocessors and provides rich features."""
     print("\n==== Testing TFLite Model Compatibility with TinyLCM ====")
     
-    # Load the TFLite model from the correct path
+    # Load the TFLite model
     print(f"Loading TFLite model from: {MODEL_TFLITE_PATH}")
     interpreter = tf.lite.Interpreter(model_path=MODEL_TFLITE_PATH)
     interpreter.allocate_tensors()
@@ -744,7 +744,7 @@ def test_tflite_compatibility():
 
         from tinylcm.core.classifiers.knn import LightweightKNN
 
-        # Instantiate a KNN with 4 classes
+        # Instantiate a KNN with 5 classes (including the new ball class)
         knn = LightweightKNN(
             k=5, 
             max_samples=160, 
@@ -754,14 +754,14 @@ def test_tflite_compatibility():
         
         # Test feature extraction and state saving
         print("Testing KNN state creation...")
-        num_samples = 4  # Just for testing
+        num_samples = 5  # Use 5 samples for 5 classes
         
-        # Bestimme ob die Features mehr als nur 4 Dimensionen haben (ideal wäre > 100)
+        # Determine if the features have more than 4 dimensions (ideally > 100)
         num_features = output.flatten().shape[0]  # Use the actual feature dimension
         
-        if num_features <= 4:
-            # Zeige eine deutliche Warnung an
-            print("\n⚠️ WARNING: Feature dimension is only 4! ⚠️")
+        if num_features <= 5:
+            # Show a clear warning
+            print("\n⚠️ WARNING: Feature dimension is only 5! ⚠️")
             print("This will severely limit drift detection capability.")
             print("Try with a different feature layer index (e.g., -2, -3, or -4)")
             print("Using feature_layer_index=-3 in the config file is recommended.\n")
@@ -772,7 +772,7 @@ def test_tflite_compatibility():
         
         # Create synthetic features and labels
         features = np.random.rand(num_samples, num_features)
-        labels = ["negative", "lego", "stone", "tire"]
+        labels = ["negative", "lego", "stone", "leaf", "ball"]  # Updated with 'ball' class
         timestamps = [time.time() - i*10 for i in range(num_samples)]
         
         # Fit the KNN
@@ -781,7 +781,7 @@ def test_tflite_compatibility():
         # Get state
         state = knn.get_state()
         
-        # Speichere den KNN-Zustand für Tests in einer temporären Datei
+        # Save the KNN state for testing in a temporary file
         initial_state_path = os.path.join(OUTPUT_DIR, "test_knn_state.json")
         with open(initial_state_path, 'w') as f:
             import json
@@ -805,17 +805,17 @@ def test_tflite_compatibility():
 
 def update_config_files():
     """Update the config files to use the new TFLite model."""
-    # Update config_scenario2.json to use the new model
+    # Update config_scenario3.json to use the new model
     config_file = os.path.join(
         root_dir, 
-        "examples/scenario2_drift_objects/config_scenario2.json"
+        "examples/scenario3_drift_objects2/config_scenario3.json"
     )
     
     if os.path.exists(config_file):
         import json
 
         # Relative paths from the config file to the model files
-        # Da wir jetzt direkt ins scenario2/model Verzeichnis speichern, können wir relative Pfade verwenden
+        # Since we save directly to the scenario3/model directory, we can use relative paths
         rel_model_path = "./model/model_object.tflite"
         rel_labels_path = "./model/labels_object.txt"
         
@@ -828,15 +828,23 @@ def update_config_files():
         config["model"]["labels_path"] = rel_labels_path
         config["tinylcm"]["feature_extractor"]["model_path"] = rel_model_path
         
-        # Using layer_index 0 to access the properly pooled MobileNetV2 features
-        # This gives us a 1280-dimensional feature vector (similar to EfficientNet-Lite0)
+        # Use layer_index 0 to access the properly pooled MobileNetV2 features
+        # This gives us a 1280-dimensional feature vector
         config["tinylcm"]["feature_extractor"]["feature_layer_index"] = 0
         
-        # Erhöhe die maximale Anzahl an Samples im KNN für bessere Genauigkeit
+        # Increase KNN max_samples for better accuracy
         if "adaptive_classifier" in config["tinylcm"]:
             config["tinylcm"]["adaptive_classifier"]["max_samples"] = 200
         
-        # Schreibe die aktualisierte Konfiguration
+        # Ensure the stable_known_classes includes the ball class in KNNDistanceMonitor
+        for i, detector in enumerate(config["tinylcm"]["drift_detectors"]):
+            if detector.get("type") == "KNNDistanceMonitor":
+                stable_classes = detector.get("stable_known_classes", [])
+                if "ball" not in stable_classes:
+                    stable_classes.append("ball")
+                    config["tinylcm"]["drift_detectors"][i]["stable_known_classes"] = stable_classes
+        
+        # Write the updated configuration
         with open(config_file, 'w') as f:
             json.dump(config, f, indent=2)
         
@@ -845,11 +853,12 @@ def update_config_files():
         print(f"   - Set labels_path to {rel_labels_path}")
         print(f"   - Set feature_layer_index to 0 (MobileNetV2 Feature Vector)")
         print(f"   - Increased KNN max_samples to 200 for better accuracy")
+        print(f"   - Added 'ball' to stable_known_classes")
     else:
         print(f"\n⚠️ Config file not found: {config_file}")
 
 if __name__ == "__main__":
-    print("Starting transfer learning for TinyLCM Object Classification")
+    print("Starting transfer learning for TinyLCM Object Classification with ball class")
     print(f"Using images from: {IMAGE_DIR}")
     print(f"Output directory: {OUTPUT_DIR}")
     
@@ -893,29 +902,30 @@ if __name__ == "__main__":
     try:
         scaler, pca, processor_path = train_and_save_feature_processor(
             raw_feature_model, 
-            train_generator,  # Immer die Trainingsdaten verwenden, um Data Leakage zu vermeiden
+            train_generator,  # Always use training data to avoid data leakage
             OUTPUT_DIR, 
-            pca_components=256  # Reduziere auf 256 Dimensionen für eine gute Balance
+            pca_components=256  # Reduce to 256 dimensions for a good balance
         )
         
-        # Aktualisiere die Konfigurationsdatei, um den Feature-Prozessor zu verwenden
+        # Update the configuration file to use the feature processor
         if processor_path:
-            # Füge Feature-Prozessor zur Konfiguration hinzu
-            config_file = os.path.join(root_dir, "examples/scenario2_drift_objects/config_scenario2.json")
+            # Add feature processor to configuration
+            config_file = os.path.join(root_dir, "examples/scenario3_drift_objects2/config_scenario3.json")
             if os.path.exists(config_file):
                 import json
 
-                # Lese bestehende Konfiguration
+                # Read existing configuration
                 with open(config_file, 'r') as f:
                     config = json.load(f)
                 
-                # Füge Feature-Prozessor-Konfiguration hinzu
-                config["tinylcm"]["feature_processor"] = {
-                    "enabled": True,
-                    "model_path": "./model/feature_processor.pkl"
+                # Add feature processor configuration
+                config["tinylcm"]["feature_transformation"] = {
+                    "type": "StandardScalerPCA",
+                    "model_path": "./model/feature_processor.pkl",
+                    "enabled": True
                 }
                 
-                # Schreibe aktualisierte Konfiguration
+                # Write updated configuration
                 with open(config_file, 'w') as f:
                     json.dump(config, f, indent=2)
                 
@@ -940,16 +950,17 @@ if __name__ == "__main__":
     print("✓ StandardScaler + PCA dimension reduction to 256D for faster KNN calculations")
     print("✓ Int8 quantized for efficient inference")
     print("✓ Directly compatible with TinyLCM")
+    print("✓ Added 'ball' class to the model")
     
     print("\nTo use the model:")
     print("1. Run the initial state creation script:")
-    print("   cd examples/scenario2_drift_objects/initial_state")
+    print("   cd examples/scenario3_drift_objects2/initial_state")
     print("   python create_inital_knn_sc2.py")
     
     print("\n2. Run the main scenario script:")
     print("   cd ..")
-    print("   python main_scenario2.py")
+    print("   python main_scenario3.py")
     
     print("\nThis optimized MobileNetV2 model with StandardScaler + PCA dimension reduction")
     print("will significantly improve both drift detection quality and performance")
-    print("compared to the previous 4-dimensional model output.")
+    print("compared to the previous model output.")
