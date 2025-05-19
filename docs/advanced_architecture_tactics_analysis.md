@@ -10,6 +10,7 @@ Diese vertiefte Analyse untersucht die spezifischen Architekturtaktiken, die in 
 
 **Implementierung:** TinyLCM verwendet ein inkrementelles State-Management-System, das atomare Zustandsänderungen speichert, anstatt den gesamten Zustand zu jedem Zeitpunkt zu persistieren.
 
+```python
 # In tinylcm/core/state_manager.py
 def save_state_increment(self, component_id: str, state: Dict[str, Any]) -> bool:
     """Speichert nur die Differenz zum vorherigen Zustand"""

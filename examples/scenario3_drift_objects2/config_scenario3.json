@@ -45,11 +45,17 @@
     "drift_detectors": [
       {
         "type": "KNNDistanceMonitor",
-        "delta":2, 
+        "delta": 2,
         "lambda_threshold": 10,
         "exit_threshold_factor": 0.7,
         "high_confidence_threshold": 0.85,
-        "stable_known_classes": ["lego", "stone", "leaf", "negative"],
+        "stable_known_classes": [
+          "lego",
+          "stone",
+          "leaf",
+          "negative",
+          "coin"
+        ],
         "reference_stats_path": "./initial_state/knn_reference_stats.json",
         "warm_up_samples": 0,
         "reference_update_interval": 50,
@@ -97,7 +103,10 @@
       "api_key": null,
       "cache_ttl": 86400,
       "update_interval_seconds": 3600,
-      "fallback_coordinates": [0.0, 0.0]
+      "fallback_coordinates": [
+        0.0,
+        0.0
+      ]
     }
   },
   "application": {
