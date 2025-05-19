@@ -143,3 +143,8 @@ app.include_router(drift_images_router, prefix="/api/drift-images", tags=["drift
 from tinysphere.api.routes.operational_logs import router as operational_logs_router
 
 app.include_router(operational_logs_router, prefix="/api/operational-logs", tags=["operational-logs"])
+
+# Add drift dashboard router
+from tinysphere.api.routes.drift_dashboard import router as drift_dashboard_router
+
+app.include_router(drift_dashboard_router, prefix="/api/drift-dashboard", tags=["drift-dashboard"])

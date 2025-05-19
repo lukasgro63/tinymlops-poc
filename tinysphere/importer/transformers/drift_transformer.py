@@ -449,18 +449,120 @@ class DriftTransformer(DataTransformer):
 
             logger.info(f"Successfully processed drift event from detector {detector_name}")
 
-            # Create a drift event in the database via the DriftService API
+            # Create a drift event in the database using direct SQL with proper enum casting
             try:
-                from tinysphere.api.services.drift_service import DriftService
-                from sqlalchemy.orm import Session
+                from sqlalchemy import text
                 from tinysphere.api.dependencies.db import SessionLocal
+                import uuid
+                from datetime import datetime, timezone
 
                 # Create a new DB session
                 db = SessionLocal()
                 try:
                     logger.info(f"Creating drift event in database for device {device_id}")
-                    DriftService.process_drift_event(db, device_id, drift_event)
-                    logger.info(f"Successfully created drift event in database")
+                    
+                    # Ensure we have a valid drift_type string
+                    detector_name = drift_event.get('detector_name', '')
+                    drift_type_string = self._determine_drift_type(detector_name)
+                    
+                    # Store the original type in metadata
+                    if "metadata" not in drift_event or drift_event["metadata"] is None:
+                        drift_event["metadata"] = {}
+                        
+                    # For KNN distance detectors, always make sure we save the correct metadata
+                    if "knn" in detector_name.lower() or "distance" in detector_name.lower():
+                        drift_event["metadata"]["original_drift_type"] = "knn_distance"
+                        drift_event["metadata"]["drift_type_display"] = "KNN Distance"
+                    else:
+                        # Store the original drift type in metadata for reference
+                        drift_event["metadata"]["original_drift_type"] = drift_event.get("drift_type", "unknown")
+                    
+                    # Prepare the event ID and metadata as JSON
+                    event_id = drift_event.get("event_id", str(uuid.uuid4()))
+                    import json
+                    metadata_json = json.dumps(drift_event.get("metadata", {}))
+                    
+                    # Get timestamp values, defaulting to current time if not provided
+                    timestamp = drift_event.get("timestamp", datetime.now(timezone.utc).isoformat())
+                    received_at = datetime.now(timezone.utc).isoformat()
+                    
+                    # Build a query that properly casts enum values
+                    # First, query to check what enum values actually exist in the database
+                    enum_query = """
+                    SELECT enumlabel FROM pg_enum 
+                    JOIN pg_type ON pg_enum.enumtypid = pg_type.oid 
+                    WHERE pg_type.typname = 'drifttype'
+                    """
+                    
+                    available_enum_values = []
+                    try:
+                        enum_result = db.execute(text(enum_query)).fetchall()
+                        available_enum_values = [row[0] for row in enum_result]
+                        logger.info(f"Available drift type enum values in database: {available_enum_values}")
+                    except Exception as e:
+                        logger.error(f"Error checking available enum values: {e}")
+                    
+                    # Determine the best enum value to use
+                    enum_to_use = 'confidence'  # Default fallback
+                    
+                    if 'knn_distance' in available_enum_values:
+                        enum_to_use = 'knn_distance'
+                        logger.info(f"Using 'knn_distance' enum value which exists in database")
+                    elif drift_type_string in available_enum_values:
+                        enum_to_use = drift_type_string
+                        logger.info(f"Using '{drift_type_string}' enum value which exists in database")
+                    elif available_enum_values:
+                        # Use the first available value if our preferred ones aren't found
+                        enum_to_use = available_enum_values[0]
+                        logger.info(f"Using first available enum value: {enum_to_use}")
+                    else:
+                        logger.info(f"No enum values found, using hardcoded 'confidence' as fallback")
+                    
+                    # Use a direct value assignment rather than a potentially empty subquery
+                    insert_query = """
+                    INSERT INTO drift_events 
+                    (event_id, device_id, model_id, drift_score, detector_name, drift_type, timestamp, received_at, status, description, event_metadata) 
+                    VALUES 
+                    (:event_id, :device_id, :model_id, :drift_score, :detector_name, 
+                     :drift_type::drifttype,
+                     :timestamp, :received_at, 
+                     (
+                         COALESCE(
+                             (SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid 
+                              WHERE pg_type.typname = 'driftstatus' AND enumlabel = 'pending' LIMIT 1),
+                             (SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid 
+                              WHERE pg_type.typname = 'driftstatus' LIMIT 1),
+                             'pending'
+                         )::driftstatus
+                     ),
+                     :description, :metadata)
+                    """
+                    
+                    # Prepare parameters with proper escaping
+                    params = {
+                        "event_id": event_id,
+                        "device_id": device_id,
+                        "model_id": drift_event.get("model_id"),
+                        "drift_score": drift_event.get('drift_score', 0.0),
+                        "detector_name": detector_name,
+                        "drift_type": enum_to_use,  # Use the validated enum value that exists in database
+                        "timestamp": timestamp,
+                        "received_at": received_at,
+                        "description": drift_event.get("description", ""),
+                        "metadata": metadata_json
+                    }
+                    
+                    # Execute with parameterized query for safety
+                    db.execute(text(insert_query), params)
+                    db.commit()
+                    
+                    logger.info(f"Successfully inserted drift event {event_id} using direct SQL with enum casting")
+                    
+                    # If we have samples, insert them as well
+                    if "samples" in drift_event and drift_event["samples"]:
+                        for sample_data in drift_event["samples"]:
+                            self._insert_drift_sample(db, event_id, sample_data)
+                    
                 finally:
                     db.close()
             except Exception as db_error:
@@ -474,6 +576,62 @@ class DriftTransformer(DataTransformer):
             logger.error(traceback.format_exc())
             result["errors"] = result.get("errors", [])
             result["errors"].append(f"Failed to process drift event: {str(e)}")
+            
+    def _insert_drift_sample(self, db, event_id, sample_data):
+        """
+        Insert a drift sample into the database using direct SQL.
+        
+        Args:
+            db: SQLAlchemy database session
+            event_id: ID of the parent drift event
+            sample_data: Dictionary with sample data
+        """
+        try:
+            from sqlalchemy import text
+            import json
+            import uuid
+            from datetime import datetime, timezone
+            
+            # Generate a sample ID if not provided
+            sample_id = sample_data.get("sample_id", str(uuid.uuid4()))
+            
+            # Parse timestamp or use current time
+            timestamp = sample_data.get("timestamp", datetime.now(timezone.utc).isoformat())
+            
+            # Convert metadata to JSON if present
+            metadata = sample_data.get("metadata", {})
+            metadata_json = json.dumps(metadata)
+            
+            # Build the INSERT statement for the sample
+            insert_query = """
+            INSERT INTO drift_samples
+            (sample_id, drift_event_id, prediction, confidence, drift_score, feature_path, raw_data_path, timestamp, sample_metadata)
+            VALUES
+            (:sample_id, :drift_event_id, :prediction, :confidence, :drift_score, :feature_path, :raw_data_path, :timestamp, :metadata)
+            """
+            
+            # Prepare parameters
+            params = {
+                "sample_id": sample_id,
+                "drift_event_id": event_id,
+                "prediction": sample_data.get("prediction"),
+                "confidence": sample_data.get("confidence"),
+                "drift_score": sample_data.get("drift_score"),
+                "feature_path": sample_data.get("feature_path"),
+                "raw_data_path": sample_data.get("raw_data_path"),
+                "timestamp": timestamp,
+                "metadata": metadata_json
+            }
+            
+            # Execute the query
+            db.execute(text(insert_query), params)
+            db.commit()
+            
+            logger.info(f"Successfully inserted drift sample {sample_id} for event {event_id}")
+            
+        except Exception as e:
+            logger.error(f"Error inserting drift sample: {e}")
+            db.rollback()
     
     def _determine_drift_type(self, detector_name: str) -> str:
         """
@@ -483,25 +641,52 @@ class DriftTransformer(DataTransformer):
             detector_name: Name of the detector
             
         Returns:
-            Drift type as string
+            String representation of the drift type that matches PostgreSQL enum values
         """
-        # Map common detector types to drift types
+        # Map common detector types to their string values to avoid enum issues
         detector_lower = detector_name.lower()
         
+        # Try to detect drift type and return consistent case
+        # (We use lowercase to match PostgreSQL enum values in the database)
         if "confidence" in detector_lower:
-            return "confidence"  # Lowercase to match enum value string
+            return "confidence"  
         elif "distribution" in detector_lower:
-            return "distribution"  # Lowercase to match enum value string
+            return "distribution"
         elif "feature" in detector_lower:
-            return "feature"  # Lowercase to match enum value string
+            return "feature"
         elif "concept" in detector_lower:
-            return "custom"  # Use custom as the concept is not in enum
+            return "custom"
         elif "performance" in detector_lower:
-            return "outlier"  # Use outlier as performance is not in enum
+            return "outlier"
         elif "knn" in detector_lower or "distance" in detector_lower:
-            return "knn_distance"  # Lowercase to match enum value string
+            return "knn_distance"
         else:
-            return "unknown"  # Lowercase to match enum value string
+            # Default to a known working type
+            # First check the database for available enum values
+            try:
+                from sqlalchemy import text
+                from tinysphere.api.dependencies.db import SessionLocal
+                
+                db = SessionLocal()
+                try:
+                    # Query available values
+                    result = db.execute(text(
+                        "SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_enum.enumtypid = pg_type.oid WHERE pg_type.typname = 'drifttype' LIMIT 1"
+                    )).fetchone()
+                    
+                    if result:
+                        # Use the first available enum value
+                        logger.info(f"Using first available enum value: {result[0]}")
+                        return result[0]
+                    else:
+                        logger.info("No enum values found, using 'confidence' as fallback")
+                        return "confidence"
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.error(f"Error checking enum values: {e}")
+                logger.info("Using 'confidence' as fallback due to error")
+                return "confidence"
     
     def _log_drift_to_mlflow(self, drift_event: Dict[str, Any], device_id: str, model_name: str, model_version: str, package_id: str, drift_file: Path) -> str:
         """
@@ -521,7 +706,15 @@ class DriftTransformer(DataTransformer):
         try:
             # Set up the run name based on drift event data
             detector_name = drift_event.get("detector_name", "unknown")
-            drift_type = drift_event.get("drift_type", "UNKNOWN")
+            drift_type = drift_event.get("drift_type", DriftType.CONFIDENCE)
+            
+            # Convert drift_type to string value for display if it's an enum
+            if isinstance(drift_type, DriftType):
+                drift_type_str = drift_type.value
+            else:
+                # If it's already a string, use it as is
+                drift_type_str = str(drift_type)
+                
             timestamp = drift_event.get("timestamp", datetime.now().isoformat())
 
             # Format timestamp for display
@@ -535,13 +728,13 @@ class DriftTransformer(DataTransformer):
                 timestamp_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
             # Create a descriptive run name
-            run_name = f"drift_{drift_type.lower()}_{detector_name}_{timestamp_str}"
+            run_name = f"drift_{drift_type_str.lower()}_{detector_name}_{timestamp_str}"
 
             # Set up run tags
             run_tags = {
                 "mlflow.source.name": f"device_{device_id}",
                 "mlflow.source.type": "EDGE_DEVICE",
-                "drift_type": drift_type,
+                "drift_type": drift_type_str,
                 "detector_name": detector_name,
                 "device_id": device_id,
                 "package_id": package_id,
@@ -564,7 +757,7 @@ class DriftTransformer(DataTransformer):
                 # Log parameters
                 mlflow.log_param("device_id", device_id)
                 mlflow.log_param("package_id", package_id)
-                mlflow.log_param("drift_type", drift_type)
+                mlflow.log_param("drift_type", drift_type_str)
                 mlflow.log_param("detector_name", detector_name)
 
                 if "description" in drift_event and drift_event["description"]:
@@ -643,7 +836,7 @@ class DriftTransformer(DataTransformer):
                                             "original_version": model_version,
                                             "drift_run_id": run_id,
                                             "device_id": device_id,
-                                            "drift_type": drift_type
+                                            "drift_type": drift_type_str
                                         }
                                     )
                                     logger.info(f"Registered drift as model {alias_model_name} version {model_details.version}")
@@ -652,7 +845,7 @@ class DriftTransformer(DataTransformer):
 
                             # Additional tags for UI display
                             additional_tags = {
-                                "drift_type": drift_type,
+                                "drift_type": drift_type_str,
                                 "device_id": device_id,
                                 "model_link": f"models:/{model_name}/{model_version}",
                                 "linked_entity": "DRIFT",
@@ -686,7 +879,7 @@ class DriftTransformer(DataTransformer):
                                     name=model_name,
                                     version=model_version,
                                     key="drift.type",
-                                    value=drift_type
+                                    value=drift_type_str
                                 )
                             except Exception as tag_error:
                                 logger.warning(f"Error setting model version tags: {str(tag_error)}")

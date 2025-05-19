@@ -278,6 +278,33 @@ class DriftProcessor:
             db = SessionLocal()
             try:
                 self.logger.info(f"Creating drift event with data: {event_data}")
+                # Make sure drift_type is always a valid string value
+                if not isinstance(event_data["drift_type"], str):
+                    # Convert to string if it's not already
+                    self.logger.info(f"Converting drift_type {event_data['drift_type']} to string")
+                    event_data["drift_type"] = str(event_data["drift_type"]).lower()
+                    
+                # Store original drift_type in metadata for reference
+                if "metadata" not in event_data or event_data["metadata"] is None:
+                    event_data["metadata"] = {}
+                    
+                event_data["metadata"]["original_drift_type"] = event_data["drift_type"]
+                
+                # Use a known safe drift_type value with case-sensitive matching
+                valid_types = ["CONFIDENCE", "DISTRIBUTION", "FEATURE", "OUTLIER", "CUSTOM", "UNKNOWN", "KNN_DISTANCE"]
+                
+                # Convert to uppercase to match PostgreSQL enum case
+                drift_type_upper = event_data["drift_type"].upper() if isinstance(event_data["drift_type"], str) else None
+                
+                if drift_type_upper in valid_types:
+                    # Use the uppercase version of the value
+                    event_data["drift_type"] = drift_type_upper
+                    self.logger.info(f"Using case-corrected drift_type: {event_data['drift_type']}")
+                else:
+                    # Use 'CONFIDENCE' as a fallback for any unrecognized drift type
+                    self.logger.info(f"Converting drift_type {event_data['drift_type']} to 'CONFIDENCE' for database compatibility")
+                    event_data["drift_type"] = "CONFIDENCE"
+                    
                 DriftService.process_drift_event(db, device_id, event_data)
                 self.logger.info(f"Successfully created drift event in database")
 

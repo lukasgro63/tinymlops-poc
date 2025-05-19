@@ -1,13 +1,13 @@
-from typing import Dict, Any, List, Optional, Tuple, Union, Callable
-import time
 import math
-from collections import deque, Counter
 import random
+import time
+from collections import Counter, deque
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
-from tinylcm.utils.logging import setup_logger
 from tinylcm.core.drift_detection.base import AutonomousDriftDetector
+from tinylcm.utils.logging import setup_logger
 
 logger = setup_logger(__name__)
 
@@ -1058,11 +1058,11 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         exit_threshold_factor: float = 0.7,
         high_confidence_threshold: float = 0.9,
         stable_known_classes: List[str] = None,
-        warm_up_samples: int = 100,
+        warm_up_samples: int = 5,
         reference_update_interval: int = 50,
         reference_update_factor: float = 0.05,
         pause_reference_update_during_drift: bool = True,
-        drift_cooldown_period: int = 30,
+        drift_cooldown_period: int = 10,
         initial_reference_mean: float = None,
         initial_reference_std: float = None,
         reference_stats_path: str = None,
@@ -1405,7 +1405,8 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
                                       f"lambda={original_lambda:.4f}->{self.lambda_threshold:.4f}")
             
             self.samples_since_last_update = 0
-            logger.debug(f"KNNDistanceMonitor: Updated reference mean to {self.reference_mean:.4f}, std to {self.reference_std:.4f if self.reference_std is not None else 'None'}")
+            std_value = f"{self.reference_std:.4f}" if self.reference_std is not None else "None"
+            logger.debug(f"KNNDistanceMonitor: Updated reference mean to {self.reference_mean:.4f}, std to {std_value}")
         
         return self.drift_detected, drift_info
     

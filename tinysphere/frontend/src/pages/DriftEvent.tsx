@@ -85,7 +85,10 @@ const statusOptions = [
 
 // Drift type icon mapping
 const DriftTypeIcon: React.FC<{ type: string }> = ({ type }) => {
-  switch (type) {
+  // Normalize the drift type to lowercase for consistent handling
+  const normalizedType = type.toLowerCase();
+  
+  switch (normalizedType) {
     case 'confidence':
       return <PsychologyIcon />;
     case 'distribution':
@@ -94,6 +97,8 @@ const DriftTypeIcon: React.FC<{ type: string }> = ({ type }) => {
       return <FeatureIcon />;
     case 'outlier':
       return <OutlierIcon />;
+    case 'knn_distance':
+      return <DistributionIcon />; // Use distribution icon for KNN distance
     default:
       return <UnknownIcon />;
   }
@@ -570,7 +575,9 @@ const DriftEventPage: React.FC = () => {
             <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
               <DriftTypeIcon type={event.drift_type} />
               <Typography variant="h6" component="h2">
-                {event.drift_type.charAt(0).toUpperCase() + event.drift_type.slice(1)} Drift
+                {event.drift_type.split('_')
+                  .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                  .join(' ')} Drift
               </Typography>
               <Chip
                 label={event.status.charAt(0).toUpperCase() + event.status.slice(1)}

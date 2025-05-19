@@ -36,6 +36,41 @@ class DriftType(str, PyEnum):
     CUSTOM = "custom"
     KNN_DISTANCE = "knn_distance"
     UNKNOWN = "unknown"
+    
+    def __str__(self) -> str:
+        """Ensure the string representation is always the value, not the name"""
+        return self.value
+        
+    def __repr__(self) -> str:
+        """Ensure proper representation for debugging"""
+        return f"{self.__class__.__name__}.{self.name} [value='{self.value}']"
+    
+    @classmethod
+    def match_value(cls, value_str: str) -> 'DriftType':
+        """Match a string to an enum value, case-insensitive
+        
+        Args:
+            value_str: String to match against enum values
+            
+        Returns:
+            The matching enum, or UNKNOWN if no match found
+        """
+        if not value_str:
+            return cls.UNKNOWN
+            
+        value_lower = value_str.lower()
+        
+        # Direct match with lowercase values
+        for enum_value in cls:
+            if enum_value.value.lower() == value_lower:
+                return enum_value
+                
+        # Special handling for knn variations
+        if "knn" in value_lower or "distance" in value_lower:
+            return cls.KNN_DISTANCE
+            
+        # Default
+        return cls.UNKNOWN
 
 
 class Device(Base):
@@ -117,7 +152,9 @@ class DriftEvent(Base):
     event_id = Column(String(255), unique=True, index=True, nullable=False)
     device_id = Column(String(255), ForeignKey("devices.device_id"), nullable=False)
     model_id = Column(String(255), nullable=True)
-    drift_type = Column(Enum(DriftType), default=DriftType.UNKNOWN, nullable=False)
+    # Explicitly use a string name for the enum type to avoid SQLAlchemy issues
+    drift_type = Column(Enum(DriftType, name="drifttype", values_callable=lambda obj: [e.value for e in obj]), 
+                      default=DriftType.UNKNOWN, nullable=False)
     drift_score = Column(Float, nullable=True)
     detector_name = Column(String(255), nullable=True)
     

@@ -350,27 +350,9 @@ export const getDriftEvents = async (params?: {
     `${API_BASE_URL}/drift/events?${queryParams.toString()}`
   );
   
-  // Process the events to check for original_drift_type in metadata
-  const processedEvents = response.data.map(event => {
-    // Create a shallow copy of the event
-    const processedEvent = { ...event };
-    
-    try {
-      // Check if there's metadata with an original_drift_type field
-      if (event.metadata && typeof event.metadata === 'object' && 'original_drift_type' in event.metadata) {
-        // Override the drift_type with the original one from metadata
-        processedEvent.drift_type = event.metadata.original_drift_type as any;
-      }
-    } catch (error) {
-      console.error('Error processing drift event metadata:', error);
-    }
-    
-    return processedEvent;
-  });
-  
   // Client-seitige Sortierung als Fallback, falls Backend-API keine Sortierung unterstützt
   if (params?.sort_order) {
-    const sortedData = [...processedEvents].sort((a, b) => {
+    const sortedData = [...response.data].sort((a, b) => {
       const dateA = new Date(a.timestamp).getTime();
       const dateB = new Date(b.timestamp).getTime();
       
@@ -381,7 +363,7 @@ export const getDriftEvents = async (params?: {
     return sortedData;
   }
   
-  return processedEvents;
+  return response.data;
 };
 
 export const getDriftEvent = async (eventId: string): Promise<DriftEvent> => {
@@ -449,62 +431,6 @@ export const getDriftStatistics = async (
 
   const response = await axios.get<DriftStatistics>(
     `${API_BASE_URL}/drift/statistics?${params.toString()}`
-  );
-  return response.data;
-};
-
-// New Drift Dashboard endpoints
-export interface DeviceStatusData {
-  device_id: string;
-  name?: string;
-  total: number;
-  pending: number;
-  validated: number;
-  rejected: number;
-  resolved: number;
-  ignored: number;
-  [key: string]: any;
-}
-
-export interface DriftTimelineData {
-  date: string;
-  [key: string]: any; // Device IDs as keys with count values
-}
-
-export const getDriftStatisticsByDevice = async (
-  days: number = 30,
-  drift_type?: string,
-  limit: number = 10
-): Promise<DeviceStatusData[]> => {
-  const params = new URLSearchParams();
-  params.append('days', days.toString());
-  params.append('limit', limit.toString());
-  
-  if (drift_type) {
-    params.append('drift_type', drift_type.toLowerCase());
-  }
-
-  const response = await axios.get<DeviceStatusData[]>(
-    `${API_BASE_URL}/drift-dashboard/statistics/by-device?${params.toString()}`
-  );
-  return response.data;
-};
-
-export const getDriftTimelineByDevice = async (
-  period: 'day' | 'week' | 'month' = 'week',
-  drift_type?: string,
-  limit: number = 10
-): Promise<DriftTimelineData[]> => {
-  const params = new URLSearchParams();
-  params.append('period', period);
-  params.append('limit', limit.toString());
-  
-  if (drift_type) {
-    params.append('drift_type', drift_type.toLowerCase());
-  }
-
-  const response = await axios.get<DriftTimelineData[]>(
-    `${API_BASE_URL}/drift-dashboard/timeline/by-device?${params.toString()}`
   );
   return response.data;
 };

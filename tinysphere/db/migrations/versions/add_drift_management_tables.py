@@ -42,11 +42,11 @@ def upgrade():
     
     # Create drift_type enum if it doesn't exist
     if not type_exists:
-        drift_type = sa.Enum('confidence', 'distribution', 'feature', 'outlier', 'custom', 'unknown', name='drifttype')
+        drift_type = sa.Enum('confidence', 'distribution', 'feature', 'outlier', 'custom', 'unknown', 'knn_distance', name='drifttype')
         drift_type.create(conn)
     else:
         # If it exists, just reference it
-        drift_type = sa.Enum('confidence', 'distribution', 'feature', 'outlier', 'custom', 'unknown', name='drifttype', create_type=False)
+        drift_type = sa.Enum('confidence', 'distribution', 'feature', 'outlier', 'custom', 'unknown', 'knn_distance', name='drifttype', create_type=False)
     
     # Create drift_events table
     op.create_table('drift_events',

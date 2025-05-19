@@ -74,7 +74,10 @@ const StatusIcon: React.FC<{ status: DriftStatus }> = ({ status }) => {
 
 // Drift type icon mapping
 const DriftTypeIcon: React.FC<{ type: DriftType }> = ({ type }) => {
-  switch (type) {
+  // Normalize the drift type to lowercase for consistent handling
+  const normalizedType = type.toLowerCase();
+  
+  switch (normalizedType) {
     case 'confidence':
       return <ConfidenceIcon fontSize="small" />;
     case 'distribution':
@@ -211,7 +214,9 @@ const RecentDriftEventsTable: React.FC<RecentDriftEventsTableProps> = ({
                 <TableCell>
                   <Chip
                     icon={<DriftTypeIcon type={event.drift_type} />}
-                    label={event.drift_type.charAt(0).toUpperCase() + event.drift_type.slice(1)}
+                    label={event.drift_type.split('_')
+                      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                      .join(' ')}
                     size="small"
                     variant="outlined"
                   />
