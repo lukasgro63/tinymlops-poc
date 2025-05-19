@@ -19,7 +19,7 @@
   "model": {
     "model_path": "./model/model_object.tflite",
     "labels_path": "./model/labels_object.txt",
-    "threshold": 0.78
+    "threshold": 0.79
   },
   "tinylcm": {
     "feature_extractor": {
@@ -45,17 +45,17 @@
     "drift_detectors": [
       {
         "type": "KNNDistanceMonitor",
-        "delta":2, 
-        "lambda_threshold": 10,
-        "exit_threshold_factor": 0.65,
-        "high_confidence_threshold": 0.78,
+        "delta":1, 
+        "lambda_threshold": 5,
+        "exit_threshold_factor": 0.60,
+        "high_confidence_threshold": 0.79,
         "stable_known_classes": ["lego", "stone", "leaf", "negative"],
         "reference_stats_path": "./initial_state/knn_reference_stats.json",
         "warm_up_samples": 0,
         "reference_update_interval": 10,
         "reference_update_factor": 0.05,
         "pause_reference_update_during_drift": true,
-        "drift_cooldown_period": 10,
+        "drift_cooldown_period": 2,
         "use_adaptive_thresholds": false,
         "allow_runtime_threshold_adaptation": false,
         "adaptive_delta_std_multiplier": 1.5,
