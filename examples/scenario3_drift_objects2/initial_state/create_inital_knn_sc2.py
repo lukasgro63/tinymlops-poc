@@ -40,7 +40,7 @@ CLASSES = {
     "stone": INITIAL_IMAGE_DATA_DIR / "stone",
     "lego": INITIAL_IMAGE_DATA_DIR / "lego",
     "leaf": INITIAL_IMAGE_DATA_DIR / "leaf",
-    "ball": INITIAL_IMAGE_DATA_DIR / "ball"  # Neue Ball-Klasse
+    "coin": INITIAL_IMAGE_DATA_DIR / "coin"  # Neue Ball-Klasse
 }
 
 # Pfad zum TFLite-Modell (das auch im Beispiel verwendet wird)
@@ -124,7 +124,7 @@ def extract_features_manually(image, interpreter, input_details, output_details,
     if feature_processor_path and os.path.exists(feature_processor_path):
         try:
             import pickle
-            
+
             # Lade den Feature-Prozessor
             print(f"Lade Feature-Prozessor von: {feature_processor_path}")
             with open(feature_processor_path, 'rb') as f:
