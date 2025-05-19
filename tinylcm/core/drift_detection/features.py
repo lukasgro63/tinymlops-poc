@@ -1,13 +1,13 @@
-from typing import Dict, Any, List, Optional, Tuple, Union, Callable
-import time
 import math
-from collections import deque, Counter
 import random
+import time
+from collections import Counter, deque
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
-from tinylcm.utils.logging import setup_logger
 from tinylcm.core.drift_detection.base import AutonomousDriftDetector
+from tinylcm.utils.logging import setup_logger
 
 logger = setup_logger(__name__)
 
@@ -1058,11 +1058,11 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
         exit_threshold_factor: float = 0.7,
         high_confidence_threshold: float = 0.9,
         stable_known_classes: List[str] = None,
-        warm_up_samples: int = 100,
+        warm_up_samples: int = 5,
         reference_update_interval: int = 50,
         reference_update_factor: float = 0.05,
         pause_reference_update_during_drift: bool = True,
-        drift_cooldown_period: int = 30,
+        drift_cooldown_period: int = 10,
         initial_reference_mean: float = None,
         initial_reference_std: float = None,
         reference_stats_path: str = None,
