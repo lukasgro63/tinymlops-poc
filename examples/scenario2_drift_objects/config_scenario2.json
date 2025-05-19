@@ -19,7 +19,7 @@
   "model": {
     "model_path": "./model/model_object.tflite",
     "labels_path": "./model/labels_object.txt",
-    "threshold": 0.75
+    "threshold": 0.78
   },
   "tinylcm": {
     "feature_extractor": {
@@ -47,8 +47,8 @@
         "type": "KNNDistanceMonitor",
         "delta":2, 
         "lambda_threshold": 10,
-        "exit_threshold_factor": 0.6,
-        "high_confidence_threshold": 0.75,
+        "exit_threshold_factor": 0.65,
+        "high_confidence_threshold": 0.78,
         "stable_known_classes": ["lego", "stone", "leaf", "negative"],
         "reference_stats_path": "./initial_state/knn_reference_stats.json",
         "warm_up_samples": 0,

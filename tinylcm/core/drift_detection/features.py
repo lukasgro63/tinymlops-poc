@@ -1405,7 +1405,8 @@ class KNNDistanceMonitor(AutonomousDriftDetector):
                                       f"lambda={original_lambda:.4f}->{self.lambda_threshold:.4f}")
             
             self.samples_since_last_update = 0
-            logger.debug(f"KNNDistanceMonitor: Updated reference mean to {self.reference_mean:.4f}, std to {self.reference_std:.4f if self.reference_std is not None else 'None'}")
+            std_value = f"{self.reference_std:.4f}" if self.reference_std is not None else "None"
+            logger.debug(f"KNNDistanceMonitor: Updated reference mean to {self.reference_mean:.4f}, std to {std_value}")
         
         return self.drift_detected, drift_info
     
