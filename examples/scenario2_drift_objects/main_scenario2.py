@@ -1234,7 +1234,9 @@ def main():
                         "check_timestamp": time.time(),
                         "frame_count": frame_count,
                         "results_count": len(drift_results) if drift_results else 0,
-                        "drift_details": drift_results if drift_results else []
+                        "drift_details": drift_results if drift_results else [],
+                        "prediction_confidence": confidence,
+                        "prediction_class": prediction
                     }
                     
                     # Record drift check operation in operational logs
