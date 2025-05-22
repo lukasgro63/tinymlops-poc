@@ -1,0 +1,73 @@
+@startuml TinyLCM-TinySphere Integration Sequence
+!theme plain
+skinparam backgroundColor white
+skinparam participantBackgroundColor white
+skinparam participantBorderColor black
+skinparam sequenceArrowColor black
+
+participant "Edge Device\n(TinyLCM)" as Edge
+participant "SyncClient" as Sync
+participant "TinySphere API" as API
+participant "Data Hub" as DataHub
+participant "Drift Hub" as DriftHub
+participant "MLflow" as MLflow
+participant "MinIO Storage" as MinIO
+participant "Human Operator" as Human
+
+== Phase 1: Autonomous Edge Operation ==
+Edge -> Edge: Autonomous inference & drift detection
+Edge -> Edge: Local quarantine buffer management
+Edge -> Edge: Heuristic adaptation (pseudo-labeling)
+Edge -> Edge: Local state snapshots & versioning
+
+note over Edge: Device operates completely\nautonomously - no server needed
+
+== Phase 2: Optional TinySphere Integration ==
+Edge -> Sync: create_sync_package() with logs/metrics/drift_data
+Sync -> Sync: Package data into TAR archive
+Sync -> API: POST /upload/package (with retry logic)
+
+alt Network Available
+    API -> API: Extract package contents
+    API -> DataHub: Process operational logs & metrics
+    API -> DriftHub: Process drift events & samples
+    API -> MLflow: Register models & experiments
+    API -> MinIO: Store artifacts & features
+    API -> Edge: Upload success confirmation
+else Network Unavailable
+    Sync -> Sync: Queue package for later upload
+    Edge -> Edge: Continue autonomous operation
+    note over Edge: Graceful degradation -\nfull functionality maintained
+end
+
+== Phase 3: Data Hub Analytics ==
+DataHub -> MinIO: Store prediction images & features
+DataHub -> DataHub: Generate device performance metrics
+DataHub -> API: Update device status & analytics
+
+== Phase 4: MLflow Model Tracking ==
+MLflow -> MLflow: Create experiment for device
+MLflow -> MLflow: Log model parameters & metrics
+MLflow -> MinIO: Store model artifacts
+MLflow -> MLflow: Register model version
+
+== Phase 5: Drift Hub Ground Truth Validation ==
+DriftHub -> Human: Present drift events for validation
+Human -> DriftHub: Provide ground truth labels
+DriftHub -> DriftHub: Update validation status
+DriftHub -> API: Create feedback for device
+
+== Phase 6: Feedback Loop ==
+API -> MinIO: Store validated ground truth
+API -> Edge: Send feedback package (when connected)
+Edge -> Edge: Update local models with feedback
+Edge -> Edge: Improve drift detection accuracy
+
+== Phase 7: Enterprise Dashboard ==
+API -> API: Aggregate fleet analytics
+API -> Human: Real-time dashboard updates
+Human -> API: Fleet management operations
+
+note over Edge, Human: TinyLCM maintains autonomy\nwhile TinySphere provides\nenterprise MLOps capabilities
+
+@enduml

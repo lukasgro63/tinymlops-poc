@@ -1,0 +1,40 @@
+@startuml Autonomous On-Device Adaptation Sequence
+!theme plain
+skinparam backgroundColor white
+skinparam sequenceParticipantBackgroundColor white
+skinparam sequenceParticipantBorderColor black
+skinparam sequenceArrowColor black
+
+participant "Pipeline" as Pipeline
+participant "DriftDetector" as Monitor  
+participant "QuarantineBuffer" as Buffer
+participant "HeuristicAdapter" as Adapter
+participant "Classifier" as Classifier
+
+== Drift Detection ==
+Pipeline -> Monitor: update(sample)
+Monitor -> Monitor: Page-Hinkley Test
+Monitor -> Pipeline: drift_detected
+
+== Quarantine ==
+Pipeline -> Buffer: add_sample(features, prediction)
+
+== Heuristic Analysis ==
+note over Pipeline: Periodic Analysis
+Pipeline -> Adapter: analyze_quarantine()
+Adapter -> Buffer: get_samples()
+Adapter -> Adapter: cluster_samples()
+Adapter -> Adapter: generate_pseudo_labels()
+Adapter -> Pipeline: pseudo_labeled_samples
+
+== Adaptation ==
+Pipeline -> Classifier: add_training_samples(pseudo_labels)
+Pipeline -> Classifier: retrain()
+
+alt performance_check
+    Pipeline -> Pipeline: rollback()
+else
+    Pipeline -> Pipeline: adaptation_success
+end
+
+@enduml

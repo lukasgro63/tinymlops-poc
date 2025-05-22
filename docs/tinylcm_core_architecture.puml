@@ -1,0 +1,118 @@
+@startuml TinyLCM_Core_Architecture
+
+' Define component styles
+skinparam component {
+    BackgroundColor White
+    BorderColor Black
+    ArrowColor Black
+    FontColor Black
+}
+
+skinparam interface {
+    BackgroundColor LightGray
+    BorderColor Black
+}
+
+package "TinyLCM Core Library" as Core {
+    
+    ' Central Pipelines
+    component "InferencePipeline" as IP
+    component "AdaptivePipeline" as AP
+    
+    ' Feature Processing
+    package "Feature Processing" as FP {
+        component "FeatureExtractors" as FE
+        component "FeatureTransformers" as FT
+    }
+    
+    ' Classification
+    package "Classification" as CL {
+        component "LightweightKNN" as KNN
+        interface "AdaptiveClassifier" as AC
+    }
+    
+    ' Drift Detection
+    package "Drift Detection" as DD {
+        component "AutonomousDriftDetectors" as ADD
+        interface "DriftDetector" as DDI
+        interface "AutonomousDriftDetector" as ADDI
+    }
+    
+    ' Adaptation System
+    package "Adaptation System" as AS {
+        component "HeuristicAdapter" as HA
+        component "AdaptiveHandlers" as AH
+        component "QuarantineBuffer" as QB
+    }
+    
+    ' State Management
+    package "State Management" as SM {
+        component "AdaptiveStateManager" as ASM
+        component "AdaptationTracker" as AT
+    }
+    
+    ' Monitoring
+    package "Monitoring" as MON {
+        component "OperationalMonitor" as OM
+        component "MetricsCollector" as MC
+    }
+    
+    ' Storage
+    package "On-Device Storage" as ODS {
+        component "DataLogger" as DL
+        component "StorageFactory" as SF
+    }
+}
+
+' External Interfaces
+interface "TinySphere Server" as TS
+component "SyncClient" as SC
+
+' Define relationships with proper UML notation
+
+' Main Pipeline Flow (primary)
+IP --> FE : uses
+FE ..> FT : transforms
+FT ..> KNN : feeds
+KNN ..> ADD : monitors
+
+' Pipeline Extension 
+AP --> IP : extends
+
+' Drift & Adaptation Flow (secondary)
+ADD ..> QB : quarantines
+QB --> HA : analyzes  
+HA ..> AH : guides
+AH --> KNN : adapts
+
+' Monitoring & Tracking (tertiary)
+IP ..> OM : tracks
+OM --> MC : collects
+OM ..> DL : logs
+
+' State Management (quaternary)
+AP --> ASM : manages
+ASM --> AT : tracks
+
+' Storage
+DL --> SF : stores
+
+' External Sync
+AP ..> SC : syncs
+SC ..> TS : communicates
+
+' Interface Implementations
+KNN ..|> AC : implements
+ADD ..|> DDI : implements  
+ADD ..|> ADDI : extends
+
+' Layout optimization
+IP -[hidden]-> AP
+FE -[hidden]-> FT
+QB -[hidden]-> HA
+HA -[hidden]-> AH
+ASM -[hidden]-> AT
+OM -[hidden]-> MC
+DL -[hidden]-> SF
+
+@enduml
