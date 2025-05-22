@@ -9,7 +9,7 @@
       640,
       480
     ],
-    "framerate": 5,
+    "framerate": 1,
     "rotation": 0,
     "inference_resolution": [
       224,
@@ -19,9 +19,12 @@
   "model": {
     "model_path": "./model/model_object.tflite",
     "labels_path": "./model/labels_object.txt",
-    "threshold": 0.79
+    "threshold": 0.75
   },
   "tinylcm": {
+    "pipeline": {
+      "autonomous_monitor_warmup_samples": 0
+    },
     "feature_extractor": {
       "type": "TFLiteFeatureExtractor",
       "model_path": "./model/model_object.tflite",
@@ -40,6 +43,7 @@
       "max_samples": 200,
       "distance_metric": "euclidean",
       "use_numpy": true,
+      "simple_confidence": true,
       "initial_state_path": "./initial_state/knn_initial_state_objects.json"
     },
     "drift_detectors": [
@@ -47,15 +51,15 @@
         "type": "KNNDistanceMonitor",
         "delta":2, 
         "lambda_threshold": 10,
-        "exit_threshold_factor": 0.6,
-        "high_confidence_threshold": 0.78,
+        "exit_threshold_factor": 0.7,
+        "high_confidence_threshold": 0.75,
         "stable_known_classes": ["lego", "stone", "leaf", "negative"],
         "reference_stats_path": "./initial_state/knn_reference_stats.json",
         "warm_up_samples": 0,
         "reference_update_interval": 10,
         "reference_update_factor": 0.05,
         "pause_reference_update_during_drift": true,
-        "drift_cooldown_period": 2,
+        "drift_cooldown_period": 0,
         "use_adaptive_thresholds": false,
         "allow_runtime_threshold_adaptation": false,
         "adaptive_delta_std_multiplier": 1.5,
@@ -69,7 +73,7 @@
       "report_interval_seconds": 60
     },
     "sync_client": {
-      "server_url": "http://192.168.188.54:8000",
+      "server_url": "http://192.168.0.67:8000",
       "api_key": "tinylcm-demo-key",
       "sync_interval_seconds": 60,
       "max_retries": 3,
@@ -101,7 +105,7 @@
     }
   },
   "application": {
-    "inference_interval_ms": 500,
+    "inference_interval_ms": 2000,
     "display_frames": false,
     "save_debug_frames": false,
     "debug_output_dir": "./debug"

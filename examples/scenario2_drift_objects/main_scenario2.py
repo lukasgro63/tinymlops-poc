@@ -1215,8 +1215,8 @@ def main():
             # Check for drift only periodically to reduce frequency of drift events
             current_time = time.time()
 
-            # Only check for drift every 10 frames to reduce processing overhead and event frequency
-            if frame_count % 5 == 0:
+            # Check for drift every frame for controlled experiment
+            if True:
                 # The updated pipeline.check_autonomous_drifts() method now handles cooldown internally,
                 # so we don't need to manually call callbacks anymore. If drift is detected,
                 # and the detector is not in cooldown, it will automatically call our registered
@@ -1234,7 +1234,9 @@ def main():
                         "check_timestamp": time.time(),
                         "frame_count": frame_count,
                         "results_count": len(drift_results) if drift_results else 0,
-                        "drift_details": drift_results if drift_results else []
+                        "drift_details": drift_results if drift_results else [],
+                        "prediction_confidence": confidence,
+                        "prediction_class": prediction
                     }
                     
                     # Record drift check operation in operational logs
