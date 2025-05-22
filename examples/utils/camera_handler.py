@@ -72,7 +72,16 @@ class CameraHandler:
     def _init_picamera(self) -> bool:
         """Initialize the picamera2 camera."""
         try:
+            # Check if camera is available first
             self._camera = Picamera2()
+            
+            # Try to detect available cameras
+            cameras = Picamera2.global_camera_info()
+            if not cameras:
+                logger.warning("No cameras detected by picamera2")
+                self._use_picamera = False
+                return False
+            
             width, height = self.resolution
             
             # Configure the camera
@@ -115,15 +124,26 @@ class CameraHandler:
         """Continuously capture frames in a loop (runs in a separate thread)."""
         logger.info("Starting frame capture thread")
         
+        success = False
+        
+        # Try picamera2 first if available and not forced to use CV2
         if self._use_picamera:
             success = self._init_picamera()
             if success:
                 self._camera.start()
-        else:
+                logger.info("Successfully initialized picamera2")
+            else:
+                logger.warning("picamera2 initialization failed, trying OpenCV fallback")
+                self._use_picamera = False
+        
+        # Fallback to OpenCV if picamera2 failed or not available
+        if not success:
             success = self._init_cv2_camera()
+            if success:
+                logger.info("Successfully initialized OpenCV camera")
         
         if not success:
-            logger.error("Camera initialization failed, stopping capture thread")
+            logger.error("Camera initialization failed for both picamera2 and OpenCV, stopping capture thread")
             return
         
         logger.info("Camera initialized successfully, beginning capture loop")
