@@ -1,12 +1,13 @@
-from typing import Any, Dict, List, Optional, Tuple, Union, Callable
-import numpy as np
-from collections import Counter, deque
-import time
 import math
+import time
+from collections import Counter, deque
 from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from tinylcm.core.classifiers.base import BaseAdaptiveClassifier
+import numpy as np
+
 from tinylcm.core.base import AdaptiveComponent
+from tinylcm.core.classifiers.base import BaseAdaptiveClassifier
 from tinylcm.utils.logging import setup_logger
 
 logger = setup_logger(__name__)
@@ -370,7 +371,7 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
         # Distance-based confidence scaling factor
         # - Higher values make confidence drop more quickly with distance
         # - Lower values make confidence more resilient to distance changes
-        confidence_scaling = 100.0  # Dramatically increased to make confidence more sensitive to distance with small feature dimensions
+        confidence_scaling = 10  # Dramatically increased to make confidence more sensitive to distance with small feature dimensions
 
         # Track stats for logging
         prediction_stats = {
@@ -643,7 +644,7 @@ class LightweightKNN(BaseAdaptiveClassifier, AdaptiveComponent):
         # Distance-based confidence scaling factor
         # - Higher values make confidence drop more quickly with distance
         # - Lower values make confidence more resilient to distance changes
-        confidence_scaling = 100.0  # Dramatically increased to make confidence more sensitive to distance with small feature dimensions
+        confidence_scaling = 10  # Dramatically increased to make confidence more sensitive to distance with small feature dimensions
 
         # Track stats for logging
         prediction_stats = {
