@@ -9,7 +9,7 @@
       640,
       480
     ],
-    "framerate": 5,
+    "framerate": 1,
     "rotation": 0,
     "inference_resolution": [
       224,
