@@ -772,7 +772,7 @@ def test_tflite_compatibility():
         
         # Create synthetic features and labels
         features = np.random.rand(num_samples, num_features)
-        labels = ["negative", "lego", "stone", "leaf", "ball"]  # Updated with 'ball' class
+        labels = ["negative", "lego", "stone", "leaf", "coin"]  # Updated with 'ball' class
         timestamps = [time.time() - i*10 for i in range(num_samples)]
         
         # Fit the KNN
@@ -840,8 +840,8 @@ def update_config_files():
         for i, detector in enumerate(config["tinylcm"]["drift_detectors"]):
             if detector.get("type") == "KNNDistanceMonitor":
                 stable_classes = detector.get("stable_known_classes", [])
-                if "ball" not in stable_classes:
-                    stable_classes.append("ball")
+                if "coin" not in stable_classes:
+                    stable_classes.append("coin")
                     config["tinylcm"]["drift_detectors"][i]["stable_known_classes"] = stable_classes
         
         # Write the updated configuration
@@ -853,7 +853,7 @@ def update_config_files():
         print(f"   - Set labels_path to {rel_labels_path}")
         print(f"   - Set feature_layer_index to 0 (MobileNetV2 Feature Vector)")
         print(f"   - Increased KNN max_samples to 200 for better accuracy")
-        print(f"   - Added 'ball' to stable_known_classes")
+        print(f"   - Added 'coin' to stable_known_classes")
     else:
         print(f"\n⚠️ Config file not found: {config_file}")
 

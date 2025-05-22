@@ -1,0 +1,78 @@
+@startuml KNN Distance Monitor Class Diagram
+!theme plain
+skinparam backgroundColor white
+skinparam classBackgroundColor white
+skinparam classBorderColor black
+skinparam direction left to right
+
+' Feature Processing Classes
+class TFLiteFeatureExtractor {
+    +extract_features(image)
+    +model_path: str
+}
+
+class StandardScalerPCATransformer {
+    +transform(features)
+    +model_path: str
+}
+
+' Classification Class
+class LightweightKNN {
+    +predict_proba(features)
+    +_last_distances: List[float]
+    +k: int
+}
+
+' Drift Detection Classes
+abstract class AutonomousDriftDetector {
+    +update(record): bool
+    +drift_detected: bool
+}
+
+class KNNDistanceMonitor {
+    +delta: float
+    +lambda_threshold: float
+    +reference_mean: float
+    +cumulative_sum: float
+    +minimum_sum: float
+    +update(record): Tuple[bool, Dict]
+}
+
+' Adaptation System Classes
+class QuarantineBuffer {
+    +buffer: deque
+    +max_size: int
+    +add_sample(sample): void
+    +get_samples(): List[QuarantinedSample]
+}
+
+class HeuristicAdapter {
+    +min_cluster_size: int
+    +variance_threshold: float
+    +analyze_quarantine(): List[AdaptationAction]
+    +generate_pseudo_labels(): Dict
+}
+
+' True class relationships from code
+AutonomousDriftDetector <|-- KNNDistanceMonitor
+KNNDistanceMonitor ..> LightweightKNN : depends on
+HeuristicAdapter --> QuarantineBuffer : uses
+KNNDistanceMonitor ..> QuarantineBuffer : sends samples to
+
+note bottom of KNNDistanceMonitor
+**Page-Hinkley Test:**
+deviation = avg_distance - (reference_mean + delta)
+cumulative_sum += deviation
+ph_value = cumulative_sum - minimum_sum
+drift_detected = (ph_value > lambda_threshold)
+end note
+
+note bottom of HeuristicAdapter
+**Clustering Heuristic:**
+1. Group quarantined samples by prediction
+2. Calculate intra-group feature dispersion
+3. Assign pseudo-labels to coherent clusters
+4. Select representative samples
+end note
+
+@enduml

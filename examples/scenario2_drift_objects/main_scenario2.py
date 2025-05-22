@@ -39,19 +39,25 @@ except ImportError:
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.camera_handler import CameraHandler
 from utils.device_id_manager import DeviceIDManager
+from utils.geolocation import \
+    SimpleGeolocator  # Import the simple geolocation utility
 from utils.preprocessors import resize_image
-from utils.sync_client import ExtendedSyncClient  # Use the extended version with additional features
-from utils.geolocation import SimpleGeolocator  # Import the simple geolocation utility
+from utils.sync_client import \
+    ExtendedSyncClient  # Use the extended version with additional features
 
 from tinylcm.core.classifiers.knn import LightweightKNN
 from tinylcm.core.data_logger.logger import DataLogger
 from tinylcm.core.data_structures import FeatureSample
-from tinylcm.core.drift_detection.features import PageHinkleyFeatureMonitor, FeatureMonitor, KNNDistanceMonitor
-from tinylcm.core.drift_detection.confidence import EWMAConfidenceMonitor, PageHinkleyConfidenceMonitor
+from tinylcm.core.drift_detection.confidence import (
+    EWMAConfidenceMonitor, PageHinkleyConfidenceMonitor)
+from tinylcm.core.drift_detection.features import (FeatureMonitor,
+                                                   KNNDistanceMonitor,
+                                                   PageHinkleyFeatureMonitor)
 # Import tinylcm components
 from tinylcm.core.feature_extractors.tflite import TFLiteFeatureExtractor
 from tinylcm.core.feature_transformers.pca import PCATransformer
-from tinylcm.core.feature_transformers.standard_scaler_pca import StandardScalerPCATransformer
+from tinylcm.core.feature_transformers.standard_scaler_pca import \
+    StandardScalerPCATransformer
 from tinylcm.core.operational_monitor.monitor import OperationalMonitor
 from tinylcm.core.pipeline import InferencePipeline
 from tinylcm.utils.logging import setup_logger
@@ -1070,7 +1076,7 @@ def main():
             timestamp = time.time()
 
             # Extract features manually to verify they're correct
-            if frame_count % 20 == 0:  # Only do this occasionally to avoid log spam
+            if frame_count % 5 == 0:  # Only do this occasionally to avoid log spam
                 try:
                     # Extract raw features
                     test_features = feature_extractor.extract_features(resized_frame)
@@ -1210,7 +1216,7 @@ def main():
             current_time = time.time()
 
             # Only check for drift every 10 frames to reduce processing overhead and event frequency
-            if frame_count % 10 == 0:
+            if frame_count % 5 == 0:
                 # The updated pipeline.check_autonomous_drifts() method now handles cooldown internally,
                 # so we don't need to manually call callbacks anymore. If drift is detected,
                 # and the detector is not in cooldown, it will automatically call our registered

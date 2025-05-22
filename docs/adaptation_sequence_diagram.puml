@@ -1,0 +1,71 @@
+@startuml Autonomous On-Device Adaptation Sequence
+!theme plain
+skinparam backgroundColor white
+skinparam sequenceParticipantBackgroundColor white
+skinparam sequenceParticipantBorderColor black
+skinparam sequenceArrowColor black
+
+participant "AdaptivePipeline" as Pipeline
+participant "KNNDistanceMonitor" as Monitor  
+participant "QuarantineBuffer" as Buffer
+participant "HeuristicAdapter" as Adapter
+participant "LightweightKNN" as Classifier
+participant "StateManager" as State
+participant "AdaptationTracker" as Tracker
+
+== Drift Detection Phase ==
+Pipeline -> Pipeline: process(image)
+Pipeline -> Monitor: update(record)
+Monitor -> Monitor: _calculate_ph_statistics()
+Monitor -> Monitor: drift_detected = True
+Monitor -> Pipeline: _notify_callbacks(drift_info)
+
+== Quarantine Phase ==
+Pipeline -> Buffer: should_quarantine(drift_info)
+Buffer -> Pipeline: True
+Pipeline -> Buffer: add_sample(features, prediction, drift_info)
+Buffer -> Buffer: buffer.append(entry)
+Pipeline -> Tracker: log_quarantine(sample_id, reason)
+
+== Periodic Heuristic Analysis ==
+note over Pipeline: samples_since_quarantine_check >= interval
+Pipeline -> Pipeline: run_heuristic_adaptation_cycle()
+Pipeline -> State: create_snapshot("before_adaptation")
+State -> Classifier: get_state()
+State -> State: _save_snapshot(states)
+
+== Pseudo-Label Generation ==
+Pipeline -> Adapter: apply_pseudo_labels(min_confidence)
+Adapter -> Buffer: get_data()
+Buffer -> Adapter: quarantined_samples[]
+Adapter -> Adapter: _group_by_prediction(samples)
+loop for each prediction_group
+    Adapter -> Adapter: _calculate_dispersion(group)
+    alt dispersion <= variance_threshold
+        Adapter -> Adapter: _generate_potential_label()
+        Adapter -> Adapter: _select_representatives()
+    end
+end
+Adapter -> Buffer: mark_as_processed(sample_ids)
+Adapter -> Pipeline: adaptation_samples[]
+
+== Classifier Update ==
+loop for each adaptation_sample
+    Pipeline -> Classifier: add_training_sample(features, pseudo_label)
+    Pipeline -> Classifier: retrain()
+    Pipeline -> Tracker: log_adaptation_event(sample, old_label, new_label)
+end
+
+== Performance Check & Rollback ==
+Pipeline -> Adapter: rollback_needed()
+alt performance_degraded
+    Adapter -> Pipeline: True
+    Pipeline -> State: load_snapshot(snapshot_id)
+    State -> Classifier: set_state(saved_state)
+    Pipeline -> Tracker: log_rollback(reason)
+else
+    Adapter -> Pipeline: False
+    Pipeline -> Tracker: log_successful_adaptation()
+end
+
+@enduml

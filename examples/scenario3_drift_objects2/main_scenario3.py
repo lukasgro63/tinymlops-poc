@@ -548,7 +548,7 @@ def main():
     global running, current_frame, config, sync_client, feature_transformer
     
     parser = argparse.ArgumentParser(description="TinyLCM Autonomous Monitoring Example (Scenario 2)")
-    parser.add_argument("--config", type=str, default="config_scenario2.json",
+    parser.add_argument("--config", type=str, default="config_scenario3.json",
                         help="Path to the configuration file")
     args = parser.parse_args()
     

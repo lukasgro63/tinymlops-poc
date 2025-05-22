@@ -1,0 +1,60 @@
+@startuml Complete TinyLCM Workflow
+!theme plain
+skinparam backgroundColor white
+skinparam actorBackgroundColor white
+skinparam participantBackgroundColor white
+skinparam participantBorderColor black
+skinparam sequenceArrowColor black
+
+actor "Developer" as Dev
+participant "Local Machine" as Local
+participant "GitHub Repo" as GitHub
+participant "Pi Zero 2W" as Device
+participant "TinySphere API" as TinySphere
+participant "MLflow Server" as MLflow
+participant "MinIO Storage" as MinIO
+participant "PostgreSQL" as DB
+
+== Phase 1: Development & Training ==
+Dev -> Local: train_tflite_object_model.py
+Local -> Local: Create MobileNetV2 model
+Local -> Local: Generate feature_processor.pkl
+Local -> Local: Create config_scenario2.json
+Dev -> GitHub: git push (models + configs)
+
+== Phase 2: Device Deployment ==
+Device -> GitHub: curl one_line_install.sh
+GitHub -> Device: Download install script
+Device -> Device: git clone --depth=1
+Device -> Device: Install tinylcm library
+Device -> Device: Setup model files
+Device -> Device: python3 main_scenario2.py
+
+== Phase 3: Production Operation ==
+loop Continuous Operation
+    Device -> Device: Inference with drift detection
+    Device -> Device: Collect monitoring data
+    Device -> Device: Package logs/metrics/images
+    note over Device: Periodic upload every N samples
+    Device -> TinySphere: POST /upload/package
+    TinySphere -> TinySphere: Extract and process package
+    TinySphere -> DB: Store drift events/logs
+    TinySphere -> MinIO: Store images/artifacts
+end
+
+== Phase 4: MLOps Management ==
+TinySphere -> MLflow: Register model
+MLflow -> DB: Store experiment data
+MLflow -> MinIO: Store model artifacts
+TinySphere -> TinySphere: Update model registry
+TinySphere -> TinySphere: Generate dashboard metrics
+
+== Phase 5: Model Updates (Optional) ==
+Dev -> MLflow: Query model performance
+MLflow -> Dev: Return metrics/logs
+Dev -> Local: Retrain/update model
+Dev -> GitHub: Push updated model
+GitHub -> Device: Pull model updates
+Device -> Device: Hot-swap models
+
+@enduml
