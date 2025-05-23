@@ -101,10 +101,11 @@ def load_labels(labels_path: str) -> List[str]:
 class TFLiteModel:
     """Simple TFLite model wrapper for inference."""
     
-    def __init__(self, model_path: str):
+    def __init__(self, model_path: str, target_size: Optional[Tuple[int, int]] = None):
         """Initialize the TFLite interpreter."""
         self.interpreter = tflite_Interpreter(model_path=model_path)
         self.interpreter.allocate_tensors()
+        self.target_size = target_size
         
         # Get input and output details
         self.input_details = self.interpreter.get_input_details()
@@ -126,9 +127,14 @@ class TFLiteModel:
         if image.shape[2] == 4:
             image = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
         
-        # Preprocess image
-        if image.shape[:2] != (self.input_height, self.input_width):
-            image = cv2.resize(image, (self.input_width, self.input_height))
+        # Preprocess image - use target_size if provided, otherwise use model's input size
+        if self.target_size:
+            target_height, target_width = self.target_size
+        else:
+            target_height, target_width = self.input_height, self.input_width
+            
+        if image.shape[:2] != (target_height, target_width):
+            image = cv2.resize(image, (target_width, target_height))
         
         # Prepare input tensor
         input_tensor = np.expand_dims(image, axis=0)
@@ -282,7 +288,10 @@ def main(config_path: str):
     labels_path = model_config.get("labels_path", "./model/labels_object.txt")
     threshold = model_config.get("threshold", 0.75)
     
-    model = TFLiteModel(model_path)
+    # Get inference resolution from config
+    inference_resolution = tuple(camera_config.get("inference_resolution", [224, 224]))
+    
+    model = TFLiteModel(model_path, target_size=inference_resolution)
     labels = load_labels(labels_path)
     
     # Initialize performance logger
@@ -325,56 +334,56 @@ def main(config_path: str):
     
     try:
         while running:
-            current_time = time.time()
+            loop_start_time = time.time()
             
-            # Check if it's time for the next inference
-            if current_time - last_inference_time >= inference_interval:
-                # Capture frame
-                frame = camera.get_frame()
-                if frame is None:
-                    logger.warning("Failed to capture frame")
-                    continue
-                
-                # Perform inference and measure time
-                inference_start = time.time()
-                predictions = model.predict(frame)
-                inference_time = time.time() - inference_start
-                
-                # Process predictions
-                if len(predictions) > 0:
-                    # Get top prediction
-                    top_idx = np.argmax(predictions)
-                    confidence = float(predictions[top_idx])
-                    predicted_class = labels[top_idx] if top_idx < len(labels) else f"class_{top_idx}"
-                    
-                    prediction_result = {
-                        "class": predicted_class,
-                        "confidence": confidence,
-                        "all_scores": predictions.tolist()
-                    }
-                    
-                    # Log if above threshold
-                    if confidence >= threshold:
-                        logger.info(f"Inference #{inference_count}: {predicted_class} ({confidence:.2%})")
-                else:
-                    prediction_result = {
-                        "class": "unknown",
-                        "confidence": 0.0,
-                        "all_scores": []
-                    }
-                
-                # Log performance metrics
-                performance_logger.log_inference(inference_time, prediction_result)
-                
-                inference_count += 1
-                last_inference_time = current_time
-                
-                # Log progress every 10 inferences
-                if inference_count % 10 == 0:
-                    logger.info(f"Completed {inference_count} inferences")
+            # Capture frame
+            frame = camera.get_frame()
+            if frame is None:
+                logger.warning("Failed to capture frame")
+                time.sleep(0.1)
+                continue
             
-            # Small sleep to prevent busy waiting
-            time.sleep(0.01)
+            # Perform inference and measure time
+            inference_start = time.time()
+            predictions = model.predict(frame)
+            inference_time = time.time() - inference_start
+            
+            # Process predictions
+            if len(predictions) > 0:
+                # Get top prediction
+                top_idx = np.argmax(predictions)
+                confidence = float(predictions[top_idx])
+                predicted_class = labels[top_idx] if top_idx < len(labels) else f"class_{top_idx}"
+                
+                prediction_result = {
+                    "class": predicted_class,
+                    "confidence": confidence,
+                    "all_scores": predictions.tolist()
+                }
+                
+                # Log if above threshold
+                if confidence >= threshold:
+                    logger.info(f"Inference #{inference_count}: {predicted_class} ({confidence:.2%})")
+            else:
+                prediction_result = {
+                    "class": "unknown",
+                    "confidence": 0.0,
+                    "all_scores": []
+                }
+            
+            # Log performance metrics
+            performance_logger.log_inference(inference_time, prediction_result)
+            
+            inference_count += 1
+            
+            # Log progress every 10 inferences
+            if inference_count % 10 == 0:
+                logger.info(f"Completed {inference_count} inferences")
+            
+            # Sleep to maintain the desired framerate
+            elapsed = time.time() - loop_start_time
+            if elapsed < inference_interval:
+                time.sleep(inference_interval - elapsed)
     
     except Exception as e:
         logger.error(f"Error in main loop: {e}")

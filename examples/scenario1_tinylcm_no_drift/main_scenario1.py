@@ -320,72 +320,72 @@ def main(config_path: str):
     
     try:
         while running:
-            current_time = time.time()
+            loop_start_time = time.time()
             
-            # Check if it's time for the next inference
-            if current_time - last_inference_time >= inference_interval:
-                # Capture frame
-                frame = camera.get_frame()
-                if frame is None:
-                    logger.warning("Failed to capture frame")
-                    continue
-                
-                # Start total timing
-                total_start = time.time()
-                
-                # Convert RGBA to RGB if necessary
-                if frame.shape[2] == 4:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
-                
-                # Resize image to inference resolution
-                target_size = tuple(camera_config.get("inference_resolution", [224, 224]))
-                resized_frame = resize_image(frame, target_size)
-                
-                # Feature extraction
-                feature_start = time.time()
-                features = feature_extractor.extract_features(resized_frame)
-                
-                # Apply transformation if available
-                if feature_transformer:
-                    features = feature_transformer.transform(features)
-                
-                feature_time = time.time() - feature_start
-                
-                # KNN inference
-                knn_start = time.time()
-                prediction, confidence = knn_classifier.predict(features)
-                knn_time = time.time() - knn_start
-                
-                total_time = time.time() - total_start
-                
-                # Prepare prediction result
-                prediction_result = {
-                    "class": prediction,
-                    "confidence": float(confidence),
-                    "knn_samples": 0  # We don't track samples in this scenario
-                }
-                
-                # Log performance metrics
-                performance_logger.log_inference(
-                    total_time=total_time,
-                    feature_extraction_time=feature_time,
-                    knn_inference_time=knn_time,
-                    prediction=prediction_result
-                )
-                
-                # Log if high confidence
-                if confidence >= config.get("model", {}).get("threshold", 0.75):
-                    logger.info(f"Inference #{inference_count}: {prediction} ({confidence:.2%})")
-                
-                inference_count += 1
-                last_inference_time = current_time
-                
-                # Log progress every 10 inferences
-                if inference_count % 10 == 0:
-                    logger.info(f"Completed {inference_count} inferences")
+            # Capture frame
+            frame = camera.get_frame()
+            if frame is None:
+                logger.warning("Failed to capture frame")
+                time.sleep(0.1)
+                continue
             
-            # Small sleep to prevent busy waiting
-            time.sleep(0.01)
+            # Start total timing
+            total_start = time.time()
+            
+            # Convert RGBA to RGB if necessary
+            if frame.shape[2] == 4:
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
+            
+            # Resize image to inference resolution
+            target_size = tuple(camera_config.get("inference_resolution", [224, 224]))
+            resized_frame = resize_image(frame, target_size)
+            
+            # Feature extraction
+            feature_start = time.time()
+            features = feature_extractor.extract_features(resized_frame)
+            
+            # Apply transformation if available
+            if feature_transformer:
+                features = feature_transformer.transform(features)
+            
+            feature_time = time.time() - feature_start
+            
+            # KNN inference
+            knn_start = time.time()
+            prediction, confidence = knn_classifier.predict(features)
+            knn_time = time.time() - knn_start
+            
+            total_time = time.time() - total_start
+            
+            # Prepare prediction result
+            prediction_result = {
+                "class": prediction,
+                "confidence": float(confidence),
+                "knn_samples": 0  # We don't track samples in this scenario
+            }
+            
+            # Log performance metrics
+            performance_logger.log_inference(
+                total_time=total_time,
+                feature_extraction_time=feature_time,
+                knn_inference_time=knn_time,
+                prediction=prediction_result
+            )
+            
+            # Log if high confidence
+            if confidence >= config.get("model", {}).get("threshold", 0.75):
+                logger.info(f"Inference #{inference_count}: {prediction} ({confidence:.2%})")
+            
+            inference_count += 1
+            
+            # Log progress every 10 inferences
+            if inference_count % 10 == 0:
+                logger.info(f"Completed {inference_count} inferences")
+            
+            # Sleep to maintain the desired framerate
+            elapsed = time.time() - loop_start_time
+            if elapsed < inference_interval:
+                time.sleep(inference_interval - elapsed)
     
     except Exception as e:
         logger.error(f"Error in main loop: {e}")
