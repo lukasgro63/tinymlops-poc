@@ -264,7 +264,8 @@ def main(config_path: str):
     camera = CameraHandler(
         resolution=tuple(camera_config.get("resolution", [640, 480])),
         framerate=camera_config.get("framerate", 1),
-        rotation=camera_config.get("rotation", 0)
+        rotation=camera_config.get("rotation", 0),
+        auto_start=False  # We'll start it manually
     )
     
     if not camera.start():
