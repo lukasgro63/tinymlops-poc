@@ -324,6 +324,10 @@ def main(config_path: str):
                 # Start total timing
                 total_start = time.time()
                 
+                # Convert RGBA to RGB if necessary
+                if frame.shape[2] == 4:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
+                
                 # Feature extraction
                 feature_start = time.time()
                 features = feature_extractor.extract(frame)

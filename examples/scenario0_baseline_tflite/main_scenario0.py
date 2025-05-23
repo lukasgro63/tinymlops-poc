@@ -117,6 +117,10 @@ class TFLiteModel:
     
     def predict(self, image: np.ndarray) -> np.ndarray:
         """Run inference on an image."""
+        # Convert RGBA to RGB if necessary
+        if image.shape[2] == 4:
+            image = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
+        
         # Preprocess image
         if image.shape[:2] != (self.input_height, self.input_width):
             image = cv2.resize(image, (self.input_width, self.input_height))
