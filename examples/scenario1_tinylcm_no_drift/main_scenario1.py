@@ -267,12 +267,20 @@ def main(config_path: str):
         rotation=camera_config.get("rotation", 0)
     )
     
-    # Start camera
+    # Initialize TinyLCM components BEFORE starting camera
+    feature_extractor, feature_transformer, knn_classifier = setup_tinylcm_components(config)
+    
+    # Initialize performance logger
+    performance_logger = PerformanceLogger()
+    
+    # Get inference interval from config
+    app_config = config.get("application", {})
+    inference_interval_ms = app_config.get("inference_interval_ms", 2000)
+    inference_interval = inference_interval_ms / 1000.0
+    
+    # NOW start camera after all initialization
     camera.start()
     logger.info("Camera started")
-    
-    # Wait for camera thread to initialize the hardware
-    time.sleep(1.0)
     
     # Warm-up: Wait for camera to initialize and provide frames
     logger.info("Warming up camera...")
@@ -286,17 +294,6 @@ def main(config_path: str):
     if frame is None:
         logger.error("Failed to get frame from camera after warm-up")
         sys.exit(1)
-    
-    # Initialize TinyLCM components
-    feature_extractor, feature_transformer, knn_classifier = setup_tinylcm_components(config)
-    
-    # Initialize performance logger
-    performance_logger = PerformanceLogger()
-    
-    # Get inference interval from config
-    app_config = config.get("application", {})
-    inference_interval_ms = app_config.get("inference_interval_ms", 2000)
-    inference_interval = inference_interval_ms / 1000.0
     
     # Main loop
     inference_count = 0

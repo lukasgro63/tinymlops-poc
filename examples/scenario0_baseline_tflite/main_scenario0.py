@@ -257,27 +257,7 @@ def main(config_path: str):
         rotation=camera_config.get("rotation", 0)
     )
     
-    # Start camera
-    camera.start()
-    logger.info("Camera started")
-    
-    # Wait for camera thread to initialize the hardware
-    time.sleep(1.0)
-    
-    # Warm-up: Wait for camera to initialize and provide frames
-    logger.info("Warming up camera...")
-    frame = None
-    for _ in range(20):
-        frame = camera.get_frame()
-        if frame is not None:
-            break
-        time.sleep(0.2)
-    
-    if frame is None:
-        logger.error("Failed to get frame from camera after warm-up")
-        sys.exit(1)
-    
-    # Initialize TFLite model
+    # Initialize TFLite model BEFORE starting camera
     model_config = config.get("model", {})
     model_path = model_config.get("model_path", "./model/model_object.tflite")
     labels_path = model_config.get("labels_path", "./model/labels_object.txt")
@@ -293,6 +273,23 @@ def main(config_path: str):
     app_config = config.get("application", {})
     inference_interval_ms = app_config.get("inference_interval_ms", 2000)
     inference_interval = inference_interval_ms / 1000.0
+    
+    # NOW start camera after all initialization
+    camera.start()
+    logger.info("Camera started")
+    
+    # Warm-up: Wait for camera to initialize and provide frames
+    logger.info("Warming up camera...")
+    frame = None
+    for _ in range(20):
+        frame = camera.get_frame()
+        if frame is not None:
+            break
+        time.sleep(0.2)
+    
+    if frame is None:
+        logger.error("Failed to get frame from camera after warm-up")
+        sys.exit(1)
     
     # Main loop
     inference_count = 0
