@@ -237,6 +237,8 @@ def setup_tinylcm_components(config: Dict) -> Tuple[TFLiteFeatureExtractor, Stan
     
     # Load initial state if provided
     initial_state_path = classifier_config.get("initial_state_path")
+    loaded_initial_state = False
+    
     if initial_state_path and Path(initial_state_path).exists():
         try:
             with open(initial_state_path, 'r') as f:
@@ -245,10 +247,43 @@ def setup_tinylcm_components(config: Dict) -> Tuple[TFLiteFeatureExtractor, Stan
             if "classifier" in loaded_state_data and isinstance(loaded_state_data["classifier"], dict):
                 knn_classifier.set_state(loaded_state_data["classifier"])
                 logger.info(f"Loaded KNN initial state from {initial_state_path}")
+                loaded_initial_state = True
             else:
                 logger.warning(f"Invalid state file format in {initial_state_path}")
         except Exception as e:
             logger.error(f"Failed to load KNN state: {e}")
+    
+    # If no initial state was loaded, create random fallback data
+    if not loaded_initial_state:
+        logger.warning("No initial KNN state loaded. Creating random fallback data.")
+        
+        # Get feature dimensions by processing a test image
+        test_image = np.zeros((224, 224, 3), dtype=np.uint8)
+        test_features = feature_extractor.extract_features(test_image)
+        
+        # Apply transformation if available
+        if feature_transformer:
+            test_features = feature_transformer.transform(test_features)
+        
+        feature_dim = test_features.shape[0]
+        
+        # Define classes to initialize (from config or default)
+        classes = ["lego", "stone", "leaf", "negative"]  # Default classes
+        samples_per_class = 10
+        
+        # Generate random features for each class
+        X_init = []
+        y_init = []
+        
+        for class_label in classes:
+            # Generate random features for this class
+            class_features = np.random.randn(samples_per_class, feature_dim).astype(np.float32)
+            X_init.extend(class_features)
+            y_init.extend([class_label] * samples_per_class)
+        
+        # Fit the classifier with random data
+        knn_classifier.fit(np.array(X_init), y_init)
+        logger.info(f"Initialized KNN with {len(X_init)} random samples for {len(classes)} classes")
     
     return feature_extractor, feature_transformer, knn_classifier
 
