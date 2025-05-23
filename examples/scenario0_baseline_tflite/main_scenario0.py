@@ -185,12 +185,10 @@ class PerformanceLogger:
         self.start_time = time.time()
         
         # Non-blocking I/O setup
-        import queue
-        import threading
+        self._running = True  # Must be set before starting thread
         self.log_queue = queue.Queue()
         self.writer_thread = threading.Thread(target=self._writer_worker, daemon=True)
         self.writer_thread.start()
-        self._running = True
         
         # Log system info at start
         self.log_system_info()
