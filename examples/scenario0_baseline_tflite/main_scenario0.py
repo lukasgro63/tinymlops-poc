@@ -254,7 +254,8 @@ def main(config_path: str):
     camera = CameraHandler(
         resolution=tuple(camera_config.get("resolution", [640, 480])),
         framerate=camera_config.get("framerate", 1),
-        rotation=camera_config.get("rotation", 0)
+        rotation=camera_config.get("rotation", 0),
+        auto_start=False  # Don't auto-start, we'll start manually after model init
     )
     
     # Initialize TFLite model BEFORE starting camera
@@ -281,15 +282,22 @@ def main(config_path: str):
     # Warm-up: Wait for camera to initialize and provide frames
     logger.info("Warming up camera...")
     frame = None
-    for _ in range(20):
+    warmup_attempts = 0
+    max_warmup_attempts = 50  # Increase attempts
+    
+    while warmup_attempts < max_warmup_attempts and frame is None:
         frame = camera.get_frame()
-        if frame is not None:
-            break
-        time.sleep(0.2)
+        if frame is None:
+            time.sleep(0.2)  # Wait 200ms between attempts
+            warmup_attempts += 1
+            if warmup_attempts % 10 == 0:
+                logger.info(f"Still warming up camera... attempt {warmup_attempts}/{max_warmup_attempts}")
     
     if frame is None:
-        logger.error("Failed to get frame from camera after warm-up")
+        logger.error(f"Failed to get frame from camera after {max_warmup_attempts} warm-up attempts")
         sys.exit(1)
+    else:
+        logger.info(f"Camera ready after {warmup_attempts} warm-up attempts")
     
     # Main loop
     inference_count = 0
