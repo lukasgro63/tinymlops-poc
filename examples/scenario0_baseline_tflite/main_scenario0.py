@@ -13,8 +13,10 @@ import json
 import logging
 import os
 import psutil
+import queue
 import signal
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -166,7 +168,7 @@ class TFLiteModel:
 
 
 class PerformanceLogger:
-    """Logs performance metrics to file."""
+    """Logs performance metrics to file with non-blocking I/O."""
     
     def __init__(self, log_dir: str = "./logs"):
         """Initialize the performance logger."""
@@ -179,7 +181,16 @@ class PerformanceLogger:
         
         # Performance metrics storage
         self.metrics = []
+        self.max_metrics = 1000  # Keep only last 1000 metrics in memory
         self.start_time = time.time()
+        
+        # Non-blocking I/O setup
+        import queue
+        import threading
+        self.log_queue = queue.Queue()
+        self.writer_thread = threading.Thread(target=self._writer_worker, daemon=True)
+        self.writer_thread.start()
+        self._running = True
         
         # Log system info at start
         self.log_system_info()
@@ -194,7 +205,7 @@ class PerformanceLogger:
             "python_version": sys.version,
             "opencv_version": cv2.__version__
         }
-        self._append_to_log(system_info)
+        self.log_queue.put(system_info)  # Non-blocking write
     
     def log_inference(self, inference_time: float, prediction: Dict[str, Any]):
         """Log a single inference with performance metrics."""
@@ -213,8 +224,11 @@ class PerformanceLogger:
             "uptime_seconds": time.time() - self.start_time
         }
         
+        # Limit metrics list size to prevent memory leak
+        if len(self.metrics) >= self.max_metrics:
+            self.metrics.pop(0)  # Remove oldest metric
         self.metrics.append(metric)
-        self._append_to_log(metric)
+        self.log_queue.put(metric)  # Non-blocking write
     
     def log_summary(self):
         """Log summary statistics."""
@@ -239,16 +253,33 @@ class PerformanceLogger:
             "total_runtime_seconds": time.time() - self.start_time
         }
         
-        self._append_to_log(summary)
+        self.log_queue.put(summary)  # Non-blocking write
         logger.info(f"Performance Summary: {json.dumps(summary, indent=2)}")
     
-    def _append_to_log(self, data: Dict):
-        """Append data to the log file."""
-        try:
-            with open(self.log_file, 'a') as f:
-                f.write(json.dumps(data) + '\n')
-        except Exception as e:
-            logger.error(f"Failed to write to performance log: {e}")
+    def _writer_worker(self):
+        """Background thread for writing logs."""
+        while self._running:
+            try:
+                # Get data from queue with timeout
+                data = self.log_queue.get(timeout=1.0)
+                with open(self.log_file, 'a') as f:
+                    f.write(json.dumps(data) + '\n')
+            except queue.Empty:
+                continue
+            except Exception as e:
+                logger.error(f"Failed to write to performance log: {e}")
+    
+    def stop(self):
+        """Stop the writer thread gracefully."""
+        self._running = False
+        # Flush remaining items
+        while not self.log_queue.empty():
+            try:
+                data = self.log_queue.get_nowait()
+                with open(self.log_file, 'a') as f:
+                    f.write(json.dumps(data) + '\n')
+            except:
+                pass
 
 
 def signal_handler(sig, frame):
@@ -394,6 +425,9 @@ def main(config_path: str):
         
         # Log final summary
         performance_logger.log_summary()
+        
+        # Stop performance logger
+        performance_logger.stop()
         
         logger.info(f"Completed {inference_count} inferences")
         logger.info("Scenario 0 completed")
