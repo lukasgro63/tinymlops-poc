@@ -261,6 +261,9 @@ def main(config_path: str):
     camera.start()
     logger.info("Camera started")
     
+    # Wait for camera thread to initialize the hardware
+    time.sleep(1.0)
+    
     # Warm-up: Wait for camera to initialize and provide frames
     logger.info("Warming up camera...")
     frame = None
