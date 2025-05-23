@@ -337,9 +337,13 @@ def main(config_path: str):
                 if frame.shape[2] == 4:
                     frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
                 
+                # Resize image to inference resolution
+                target_size = tuple(camera_config.get("inference_resolution", [224, 224]))
+                resized_frame = resize_image(frame, target_size)
+                
                 # Feature extraction
                 feature_start = time.time()
-                features = feature_extractor.extract_features(frame)
+                features = feature_extractor.extract_features(resized_frame)
                 
                 # Apply transformation if available
                 if feature_transformer:
