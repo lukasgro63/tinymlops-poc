@@ -275,7 +275,7 @@ def main(config_path: str):
     logger.info("Warming up camera...")
     frame = None
     for _ in range(20):
-        frame = camera.capture_frame()
+        frame = camera.get_frame()
         if frame is not None:
             break
         time.sleep(0.2)
@@ -308,7 +308,7 @@ def main(config_path: str):
             # Check if it's time for the next inference
             if current_time - last_inference_time >= inference_interval:
                 # Capture frame
-                frame = camera.capture_frame()
+                frame = camera.get_frame()
                 if frame is None:
                     logger.warning("Failed to capture frame")
                     continue
