@@ -264,12 +264,24 @@ def main(config_path: str):
     camera = CameraHandler(
         resolution=tuple(camera_config.get("resolution", [640, 480])),
         framerate=camera_config.get("framerate", 1),
-        rotation=camera_config.get("rotation", 0),
-        auto_start=False  # We'll start it manually
+        rotation=camera_config.get("rotation", 0)
     )
     
-    if not camera.start():
-        logger.error("Failed to start camera")
+    # Start camera
+    camera.start()
+    logger.info("Camera started")
+    
+    # Warm-up: Wait for camera to initialize and provide frames
+    logger.info("Warming up camera...")
+    frame = None
+    for _ in range(20):
+        frame = camera.capture_frame()
+        if frame is not None:
+            break
+        time.sleep(0.2)
+    
+    if frame is None:
+        logger.error("Failed to get frame from camera after warm-up")
         sys.exit(1)
     
     # Initialize TinyLCM components
