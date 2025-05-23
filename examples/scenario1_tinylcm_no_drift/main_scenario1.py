@@ -238,8 +238,17 @@ def setup_tinylcm_components(config: Dict) -> Tuple[TFLiteFeatureExtractor, Stan
     # Load initial state if provided
     initial_state_path = classifier_config.get("initial_state_path")
     if initial_state_path and Path(initial_state_path).exists():
-        knn_classifier.load_state(initial_state_path)
-        logger.info(f"Loaded KNN initial state from {initial_state_path}")
+        try:
+            with open(initial_state_path, 'r') as f:
+                loaded_state_data = json.load(f)
+            
+            if "classifier" in loaded_state_data and isinstance(loaded_state_data["classifier"], dict):
+                knn_classifier.set_state(loaded_state_data["classifier"])
+                logger.info(f"Loaded KNN initial state from {initial_state_path} with {len(knn_classifier.data)} samples")
+            else:
+                logger.warning(f"Invalid state file format in {initial_state_path}")
+        except Exception as e:
+            logger.error(f"Failed to load KNN state: {e}")
     
     return feature_extractor, feature_transformer, knn_classifier
 
