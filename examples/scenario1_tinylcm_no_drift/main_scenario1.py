@@ -387,7 +387,12 @@ def main(config_path: str):
             
             # KNN inference
             knn_start = time.time()
-            prediction, confidence = knn_classifier.predict(features)
+            predictions = knn_classifier.predict(np.array([features]))
+            prediction = predictions[0] if len(predictions) > 0 else "unknown"
+            
+            # Get confidence using predict_proba
+            probas = knn_classifier.predict_proba(np.array([features]))
+            confidence = float(np.max(probas[0])) if len(probas) > 0 else 0.0
             knn_time = time.time() - knn_start
             
             total_time = time.time() - total_start
