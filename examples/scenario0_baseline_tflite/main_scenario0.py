@@ -199,7 +199,7 @@ class PerformanceLogger:
     def log_inference(self, inference_time: float, prediction: Dict[str, Any]):
         """Log a single inference with performance metrics."""
         # Get current resource usage
-        cpu_percent = process.cpu_percent(interval=None)
+        cpu_percent = psutil.cpu_percent(interval=0.1)  # System-wide CPU usage
         memory_info = process.memory_info()
         memory_mb = memory_info.rss / (1024 * 1024)
         
