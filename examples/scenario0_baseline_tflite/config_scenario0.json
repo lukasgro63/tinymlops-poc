@@ -6,7 +6,7 @@
   },
   "camera": {
     "resolution": [640, 480],
-    "framerate": 1,
+    "framerate": 10,
     "rotation": 0,
     "inference_resolution": [224, 224]
   },
@@ -16,7 +16,7 @@
     "threshold": 0.75
   },
   "application": {
-    "inference_interval_ms": 2000,
+    "inference_interval_ms": 200,
     "display_frames": false,
     "save_debug_frames": false,
     "debug_output_dir": "./debug"
