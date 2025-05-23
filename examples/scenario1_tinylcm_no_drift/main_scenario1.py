@@ -244,7 +244,7 @@ def setup_tinylcm_components(config: Dict) -> Tuple[TFLiteFeatureExtractor, Stan
             
             if "classifier" in loaded_state_data and isinstance(loaded_state_data["classifier"], dict):
                 knn_classifier.set_state(loaded_state_data["classifier"])
-                logger.info(f"Loaded KNN initial state from {initial_state_path} with {len(knn_classifier.data)} samples")
+                logger.info(f"Loaded KNN initial state from {initial_state_path}")
             else:
                 logger.warning(f"Invalid state file format in {initial_state_path}")
         except Exception as e:
@@ -339,7 +339,7 @@ def main(config_path: str):
                 
                 # Feature extraction
                 feature_start = time.time()
-                features = feature_extractor.extract(frame)
+                features = feature_extractor.extract_features(frame)
                 
                 # Apply transformation if available
                 if feature_transformer:
@@ -358,7 +358,7 @@ def main(config_path: str):
                 prediction_result = {
                     "class": prediction,
                     "confidence": float(confidence),
-                    "knn_samples": len(knn_classifier.data)
+                    "knn_samples": 0  # We don't track samples in this scenario
                 }
                 
                 # Log performance metrics
