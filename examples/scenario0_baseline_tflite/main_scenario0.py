@@ -110,6 +110,11 @@ class TFLiteModel:
         self.input_details = self.interpreter.get_input_details()
         self.output_details = self.interpreter.get_output_details()
         
+        # Debug: Print model information
+        logger.info(f"Model has {len(self.output_details)} outputs")
+        for i, output in enumerate(self.output_details):
+            logger.info(f"Output {i}: shape={output['shape']}, dtype={output['dtype']}")
+        
         # Get input shape
         self.input_shape = self.input_details[0]['shape']
         self.input_height = self.input_shape[1]
@@ -140,7 +145,16 @@ class TFLiteModel:
         # Run inference
         self.interpreter.invoke()
         
-        # Get output
+        # Get output - try to find classification output
+        if len(self.output_details) > 1:
+            # Model has multiple outputs, try to find the classification layer
+            # Usually the classification output has shape [1, num_classes]
+            for output_detail in self.output_details:
+                output_data = self.interpreter.get_tensor(output_detail['index'])
+                if len(output_data.shape) == 2 and output_data.shape[1] < 100:  # Likely classification output
+                    return output_data[0]  # Remove batch dimension
+        
+        # Fallback to first output
         output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
         return output_data[0]  # Remove batch dimension
 
