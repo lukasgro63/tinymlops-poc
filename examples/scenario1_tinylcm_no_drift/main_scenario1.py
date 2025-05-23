@@ -222,8 +222,8 @@ def setup_tinylcm_components(config: Dict) -> Tuple[TFLiteFeatureExtractor, Stan
     transformer_config = tinylcm_config.get("feature_transformation", {})
     feature_transformer = None
     if transformer_config.get("enabled", False):
-        feature_transformer = StandardScalerPCATransformer.load_pretrained(
-            transformer_config.get("model_path")
+        feature_transformer = StandardScalerPCATransformer(
+            processor_path=transformer_config.get("model_path")
         )
     
     # KNN classifier
