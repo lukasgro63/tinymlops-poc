@@ -40,11 +40,7 @@ except ImportError:
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.camera_handler import CameraHandler
 from utils.device_id_manager import DeviceIDManager
-from utils.geolocation import \
-    SimpleGeolocator  # Import the simple geolocation utility
 from utils.preprocessors import resize_image
-from utils.sync_client import \
-    ExtendedSyncClient  # Use the extended version with additional features
 
 from tinylcm.core.classifiers.knn import LightweightKNN
 from tinylcm.core.data_logger.logger import DataLogger
@@ -68,7 +64,6 @@ logger = None
 running = True
 current_frame = None
 config = None
-sync_client = None
 feature_transformer = None  # Added global variable for feature transformer
 process = psutil.Process(os.getpid())
 
@@ -348,18 +343,16 @@ def on_drift_detected(drift_info: Dict[str, Any], *args) -> None:
         )
         logger.info(f"Drift event recorded in operational logs with ID: {drift_op_id}")
     
-    # Global reference to the sync client and current frame
-    global sync_client, current_frame
+    # Global reference to the current frame
+    global current_frame
     
-    # Save the current frame if drift image saving is enabled
+    # Save the current frame if drift image saving is enabled (but not for sync)
     image_path = None
     if config["tinylcm"]["features"]["save_drift_images"] and current_frame is not None:
         # Get device ID
         device_id = None
         if 'device_id_manager' in globals() and 'device_id_manager' in locals():
             device_id = device_id_manager.get_device_id()
-        elif hasattr(sync_client, 'device_id'):
-            device_id = sync_client.device_id
         else:
             import socket
             device_id = f"device-{socket.gethostname()}"
@@ -397,209 +390,7 @@ def on_drift_detected(drift_info: Dict[str, Any], *args) -> None:
         # Full path to the image
         image_path = date_dir / image_filename
         cv2.imwrite(str(image_path), rgb_frame)
-        logger.warning(f"DRIFT EVENT IMAGE SAVED ({drift_type}): {image_path} - Will be sent to server during next sync cycle")
-    
-    # If sync client is available, create and send a drift event package
-    if sync_client:
-        try:
-            # Send drift event information to server (create a custom package)
-            # First check if method exists and use appropriate one
-
-            # Prepare drift info for sending
-            drift_data = {
-                "detector_name": detector_name,
-                "reason": reason,
-                "metrics": metrics,
-                "drift_type": drift_type,  # Include the explicitly derived drift_type
-                "timestamp": datetime.now().isoformat()
-            }
-
-            # Get sync directory - check if it's available in various ways
-            sync_dir = "./sync_data"  # Default fallback
-
-            if hasattr(sync_client, 'sync_dir'):
-                sync_dir = sync_client.sync_dir
-            elif hasattr(sync_client, 'sync_interface') and hasattr(sync_client.sync_interface, 'storage_dir'):
-                sync_dir = sync_client.sync_interface.storage_dir
-            elif "sync_client" in config["tinylcm"]:
-                sync_dir = config["tinylcm"]["sync_client"].get("sync_dir", "./sync_data")
-
-            # Include image path if available
-            if image_path:
-                drift_data["image_path"] = str(image_path)
-
-            # Try to use the ExtendedSyncClient method if available
-            if hasattr(sync_client, 'create_and_send_drift_event_package'):
-                # This is the best case - use the extended client's method
-                # Create a FeatureSample-like object for the current state
-                from tinylcm.core.data_structures import FeatureSample
-
-                # For drift detection, make sure we have a consistent path to the image
-                # that follows the drift/device_id/drift_type/date/filename.jpg convention
-                rel_path = None
-                if image_path:
-                    # Get the relative path to use for consistent storage of drift images in the server
-                    # Check if the image_path already follows our convention
-                    if image_path.parent.parent.parent.name == "drift_images":
-                        # Already follows the convention, get relative path
-                        rel_path = str(image_path.relative_to(Path("./drift_images")))
-                    else:
-                        # Doesn't follow convention yet, so we'll use just the filename
-                        rel_path = image_path.name
-
-                    logger.info(f"Using drift image relative path: {rel_path}")
-
-                # Create the sample object with image path information
-                current_sample_obj = FeatureSample(
-                    sample_id=f"drift_{int(time.time())}",
-                    features=None,
-                    prediction=None,
-                    timestamp=time.time(),
-                    metadata={
-                        "confidence": 0.0,
-                        "raw_data_path": rel_path if rel_path else None
-                    }
-                )
-
-                # Use the specialized method
-                success = sync_client.create_and_send_drift_event_package(
-                    detector_name=detector_name,
-                    reason=reason,
-                    metrics=metrics,
-                    sample=current_sample_obj,
-                    image_path=str(image_path) if image_path else None
-                )
-                
-                # Log the drift type being used for better traceability
-                logger.info(f"Drift event sent with detector_name={detector_name} and drift_type={drift_type}")
-
-                logger.warning(f"DRIFT EVENT ({drift_type}) SENT: {'Success' if success else 'Failed'} - Package sent to server with image")
-                return  # Exit early if we used this method
-
-            # Fall back to manual package creation
-            # Get the correct directory structure - usually it's in the sync_interface
-            if hasattr(sync_client, 'sync_interface') and hasattr(sync_client.sync_interface, 'create_package'):
-                # Use the sync_interface to create package with proper structure
-                try:
-                    # Get device_id for the package
-                    dev_id = None
-                    if 'device_id_manager' in globals():
-                        dev_id = device_id_manager.get_device_id()
-                    elif hasattr(sync_client, 'device_id'):
-                        dev_id = sync_client.device_id
-                    else:
-                        import socket
-                        dev_id = f"device-{socket.gethostname()}"
-
-                    package_id = sync_client.sync_interface.create_package(
-                        device_id=dev_id,
-                        package_type="drift_event",
-                        description=f"Drift detected by {detector_name}: {reason}"
-                    )
-
-                    # Now create a temp file for the drift data
-                    import tempfile
-                    temp_dir = tempfile.mkdtemp()
-                    drift_file = os.path.join(temp_dir, "drift_event.json")
-
-                    with open(drift_file, 'w') as f:
-                        json.dump(drift_data, f)
-
-                    # Add to package
-                    sync_client.sync_interface.add_file_to_package(
-                        package_id=package_id,
-                        file_path=drift_file,
-                        file_type="drift_event"
-                    )
-
-                    # Add image if available
-                    if image_path:
-                        sync_client.sync_interface.add_file_to_package(
-                            package_id=package_id,
-                            file_path=str(image_path),
-                            file_type="image"
-                        )
-
-                    # Finalize the package
-                    sync_client.sync_interface.finalize_package(package_id)
-                    
-                    # Log the drift type being used for better traceability
-                    logger.info(f"Drift event (fallback sync) sent with detector_name={detector_name} and drift_type={drift_type}")
-
-                    # We'll use this package_id for future references
-                    return  # Exit early - we're done!
-                except Exception as e:
-                    logger.warning(f"Failed to create package using sync_interface: {e}")
-
-            # If we're still here, fall back to the most manual approach
-            packages_dir = os.path.join(sync_dir, "packages")
-            os.makedirs(packages_dir, exist_ok=True)
-
-            # Create a unique package ID
-            package_id = f"drift_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-
-            # Create the package directory - try different structures that SyncClient might recognize
-            # Structure 1: packages/package_id/
-            package_dir = os.path.join(packages_dir, package_id)
-            os.makedirs(package_dir, exist_ok=True)
-
-            # Create metadata.json - this is what SyncClient looks for
-            # Get device_id safely
-            dev_id = None
-            if 'device_id_manager' in globals():
-                dev_id = device_id_manager.get_device_id()
-            elif hasattr(sync_client, 'device_id'):
-                dev_id = sync_client.device_id
-            else:
-                # Last resort - use hostname
-                import socket
-                dev_id = f"device-{socket.gethostname()}"
-
-            metadata = {
-                "id": package_id,
-                "type": "drift_event",
-                "timestamp": time.time(),
-                "device_id": dev_id,  # Use the safely obtained device ID
-                "status": "pending"
-            }
-
-            metadata_file = os.path.join(package_dir, "metadata.json")
-            with open(metadata_file, 'w') as f:
-                json.dump(metadata, f)
-
-            # Create data.json with the drift information
-            # Before writing, make sure it has drift_type
-            if "drift_type" not in drift_data:
-                drift_data["drift_type"] = drift_type
-                
-            # Log the final drift data for debugging
-            logger.info(f"Writing drift data with drift_type={drift_data.get('drift_type')} to data.json")
-                
-            data_file = os.path.join(package_dir, "data.json")
-            with open(data_file, 'w') as f:
-                json.dump(drift_data, f)
-
-            # If we have an image, copy it to the package directory
-            if image_path:
-                img_dest = os.path.join(package_dir, "image.jpg")
-                try:
-                    import shutil
-                    shutil.copy(str(image_path), img_dest)
-                except Exception as e:
-                    logger.warning(f"Failed to copy drift image: {e}")
-
-            logger.info(f"Created drift event package: {package_id}")
-
-            # Now try to trigger synchronization
-            try:
-                # Force a sync cycle
-                if hasattr(sync_client, 'sync_all_pending_packages'):
-                    sync_client.sync_all_pending_packages()
-                    logger.info(f"Triggered sync after creating drift event package")
-            except Exception as e:
-                logger.warning(f"Failed to trigger sync: {e}")
-        except Exception as e:
-            logger.error(f"Failed to save/send drift event: {e}")
+        logger.warning(f"DRIFT EVENT IMAGE SAVED ({drift_type}): {image_path}")
 
 
 def handle_sigterm(signum, frame):
@@ -683,7 +474,7 @@ def apply_feature_transformation(features: np.ndarray) -> np.ndarray:
 
 def main():
     """Main function for the example application."""
-    global running, current_frame, config, sync_client, feature_transformer, performance_logger
+    global running, current_frame, config, feature_transformer, performance_logger
     
     parser = argparse.ArgumentParser(description="TinyLCM Autonomous Monitoring Example (Scenario 2.1 - Performance)")
     parser.add_argument("--config", type=str, default="config_scenario2_1.json",
@@ -1060,75 +851,7 @@ def main():
             )
         else:
             data_logger = None
-        
-        # Initialize ExtendedSyncClient for communication with TinySphere
-        sync_config = tinylcm_config["sync_client"]
-        
-        # Get geolocation configuration
-        geolocation_config = tinylcm_config.get("geolocation", {"enabled": False})
-        geolocation_enabled = geolocation_config.get("enabled", False)
-        geolocation_api_key = geolocation_config.get("api_key", None)
-        geolocation_cache_ttl = geolocation_config.get("cache_ttl", 86400)  # 24 hours default
-        geolocation_update_interval = geolocation_config.get("update_interval_seconds", 3600)  # 1 hour default
-        geolocation_fallback = geolocation_config.get("fallback_coordinates", [0.0, 0.0])
-        
-        logger.info(f"Geolocation enabled: {geolocation_enabled}")
-        
-        sync_client = ExtendedSyncClient(
-            server_url=sync_config["server_url"],
-            device_id=device_id,
-            api_key=sync_config["api_key"],
-            sync_dir=sync_config.get("sync_dir", "./sync_data"),
-            sync_interval_seconds=sync_config["sync_interval_seconds"],
-            max_retries=sync_config["max_retries"],
-            auto_register=sync_config["auto_register"],
-            enable_geolocation=geolocation_enabled,
-            geolocation_api_key=geolocation_api_key,
-            geolocation_cache_ttl=geolocation_cache_ttl,
-            geolocation_update_interval=geolocation_update_interval,
-            geolocation_fallback_coordinates=geolocation_fallback
-        )
-
-        # Set prediction image transfer attribute directly if available in config
-        if "enable_prediction_images" in sync_config:
-            sync_client.enable_prediction_images = sync_config.get("enable_prediction_images", False)
-
-        # Log prediction image transfer status
-        if sync_client.enable_prediction_images:
-            logger.info("Prediction image transfer to TinySphere enabled")
-        else:
-            logger.info("Prediction image transfer to TinySphere disabled")
             
-        # Log geolocation status
-        if sync_client.enable_geolocation:
-            logger.info("Geolocation enabled, device location will be sent to TinySphere")
-            # Force a geolocation update
-            try:
-                location = sync_client._update_geolocation()
-                logger.info(f"Initial geolocation: {location.get('latitude'):.6f}, {location.get('longitude'):.6f} (source: {location.get('source')})")
-            except Exception as e:
-                logger.warning(f"Failed to get initial geolocation: {e}")
-        else:
-            logger.info("Geolocation disabled")
-            
-        # Get and log platform details
-        device_info = sync_client._get_device_info()
-        logger.info(f"Device platform details: {device_info.get('platform', 'unknown')} " +
-                   f"{device_info.get('platform_version', 'unknown')} " +
-                   f"on {device_info.get('device_model', 'unknown')}")
-            
-        # Log exact location data being sent
-        if 'location' in device_info:
-            loc = device_info['location']
-            logger.info(f"Sending device location: lat={loc.get('latitude'):.6f}, lon={loc.get('longitude'):.6f}, source={loc.get('source')}")
-            
-        # Update device info with platform details and initial location
-        success = sync_client.update_device_info()
-        if success:
-            logger.info("Initial device information sent to TinySphere")
-        else:
-            logger.warning("Failed to send initial device information to TinySphere")
-        
         # Initialize InferencePipeline with the configured components
         pipeline = InferencePipeline(
             feature_extractor=feature_extractor,
@@ -1141,16 +864,6 @@ def main():
         # Also register the drift callback at the pipeline level to ensure it's called
         # when drift is detected during both normal processing and explicit drift checks
         pipeline.register_drift_callback(on_drift_detected)
-        
-        # Perform initial connection test to TinySphere
-        try:
-            status = sync_client.check_connection()
-            if status:
-                logger.info("Successfully connected to TinySphere server")
-            else:
-                logger.warning("Could not connect to TinySphere server - will continue and try again later")
-        except Exception as e:
-            logger.warning(f"Error checking connection to TinySphere server: {e}")
 
         # Manually collect system metrics once to verify they're working
         try:
@@ -1183,9 +896,6 @@ def main():
         
         last_drift_check_time = time.time()
         drift_check_interval = 0.1  # Check for drift very frequently (now used for logging only)
-        
-        last_sync_time = time.time()
-        sync_interval = sync_config["sync_interval_seconds"]
         
         while running:
             loop_start_time = time.time()
@@ -1338,15 +1048,6 @@ def main():
                         if frame_count % 10 == 0:
                             logger.info(f"Saved positive class {prediction} image to {image_path}")
 
-                        # Add image to sync client if enabled
-                        if config["tinylcm"]["features"].get("save_prediction_images", False) and sync_client and sync_client.enable_prediction_images:
-                            added = sync_client.add_prediction_image(
-                                image_path=str(image_path),
-                                prediction=prediction,
-                                confidence=confidence
-                            )
-                            if added and frame_count % 10 == 0:
-                                logger.debug(f"Added image {image_path} to sync queue")
                     except Exception as e:
                         logger.error(f"Error saving prediction image: {e}")
                 elif prediction == "negative":
@@ -1513,85 +1214,6 @@ def main():
                 drift_detected=drift_detected_in_frame
             )
             
-            # Periodically sync with TinySphere
-            if current_time - last_sync_time >= sync_interval:
-                # Initialize variables that might be used after the try block
-                sync_results = None
-                
-                try:
-                    # Get operational metrics from monitor
-                    if operational_monitor:
-                        try:
-                            metrics = operational_monitor.get_current_metrics()
-                            # Add detailed log to debug the metrics collection
-                            logger.info(f"Collected metrics keys: {list(metrics.keys())}")
-                            logger.info(f"System metrics included: {'system' in metrics}")
-
-                            # Send metrics to TinySphere
-                            logger.info("Sending metrics to TinySphere")
-                            success = sync_client.create_and_send_metrics_package(metrics)
-                            logger.info(f"Metrics package sent: {'Success' if success else 'Failed'}")
-                        except Exception as e:
-                            logger.error(f"Failed to collect or send metrics: {str(e)}")
-                    
-                    # Update device info with current location
-                    if sync_client.enable_geolocation:
-                        logger.info("Updating device location...")
-                        success = sync_client.update_device_info()
-                        if success:
-                            logger.info("Device location updated successfully")
-                        else:
-                            logger.warning("Failed to update device location")
-                    
-                    # Send operational logs to TinySphere (raw JSONL files)
-                    if operational_monitor:
-                        try:
-                            # Get operational logs directory from the operational monitor
-                            operational_logs_dir = operational_monitor.storage_dir
-                            session_id = operational_monitor.session_id
-                            
-                            logger.info(f"Sending operational logs from {operational_logs_dir}")
-                            success = sync_client.create_and_send_operational_logs_package(
-                                operational_logs_dir=str(operational_logs_dir),
-                                session_id=session_id
-                            )
-                            logger.info(f"Operational logs package sent: {'Success' if success else 'Failed'}")
-                        except Exception as e:
-                            logger.error(f"Error sending operational logs: {e}", exc_info=True)
-
-                    # Sync all pending packages
-                    logger.debug("Syncing pending packages with TinySphere")
-                    sync_results = sync_client.sync_all_pending_packages()
-                    
-                except Exception as e:
-                    logger.error(f"Error during TinySphere sync: {str(e)}")
-
-                # Process sync results
-                if sync_results:
-                    logger.info(f"Synced {len(sync_results)} packages with TinySphere")
-
-                    # Clean up transferred images if enabled
-                    if sync_client.enable_prediction_images and sync_config.get("cleanup_transferred_images", False):
-                        # Check if any prediction image packages were successfully synced
-                        prediction_image_packages = [r for r in sync_results
-                                                  if r.get("success") and r.get("package_type", "") == "prediction_images"]
-
-                        # Get list of transferred images for cleanup
-                        images_to_clean = []
-                        for pkg in prediction_image_packages:
-                            # Extract images from package details if available
-                            if "processed_images" in pkg:
-                                images_to_clean.extend(pkg["processed_images"])
-
-                        # Delete transferred images
-                        if images_to_clean:
-                            success_count, fail_count = sync_client.delete_transferred_images(images_to_clean)
-                            logger.info(f"Cleaned up {success_count} transferred images, {fail_count} failed")
-                else:
-                    logger.debug("No packages to sync with TinySphere")
-
-                last_sync_time = current_time
-            
             # Sleep to maintain the desired framerate
             elapsed = time.time() - loop_start_time
             if elapsed < inference_interval:
@@ -1608,58 +1230,6 @@ def main():
         if 'camera' in locals():
             camera.stop()
             logger.info("Camera stopped")
-        
-        # Perform final sync with TinySphere
-        logger.info("Performing final sync with TinySphere")
-        if 'sync_client' in locals() and sync_client:
-            try:
-                # Get final operational metrics and logs
-                if 'operational_monitor' in locals() and operational_monitor:
-                    try:
-                        # Send final metrics
-                        metrics = operational_monitor.get_current_metrics()
-                        success = sync_client.create_and_send_metrics_package(metrics)
-                        logger.info(f"Final metrics package sent: {'Success' if success else 'Failed'}")
-                        
-                        # Send all operational logs for the entire session
-                        operational_logs_dir = operational_monitor.storage_dir
-                        session_id = operational_monitor.session_id
-                        
-                        logger.info(f"Sending final operational logs from {operational_logs_dir}")
-                        success = sync_client.create_and_send_operational_logs_package(
-                            operational_logs_dir=str(operational_logs_dir),
-                            session_id=session_id
-                        )
-                        logger.info(f"Final operational logs package sent: {'Success' if success else 'Failed'}")
-                    except Exception as e:
-                        logger.error(f"Error sending final operational data: {e}", exc_info=True)
-
-                # Sync all pending packages
-                sync_results = sync_client.sync_all_pending_packages()
-                logger.info("Final sync completed")
-
-                # Final cleanup of transferred images if enabled
-                if sync_client.enable_prediction_images and sync_config.get("cleanup_transferred_images", False):
-                    # Check if any prediction image packages were successfully synced
-                    prediction_image_packages = [r for r in sync_results
-                                             if r.get("success") and r.get("package_type", "") == "prediction_images"]
-
-                    # Get list of transferred images for cleanup
-                    images_to_clean = []
-                    for pkg in prediction_image_packages:
-                        if "processed_images" in pkg:
-                            images_to_clean.extend(pkg["processed_images"])
-
-                    # Delete transferred images
-                    if images_to_clean:
-                        success_count, fail_count = sync_client.delete_transferred_images(images_to_clean)
-                        logger.info(f"Final cleanup: Removed {success_count} transferred images, {fail_count} failed")
-            except Exception as e:
-                logger.warning(f"Error during final sync: {e}")
-
-            # Close the client
-            sync_client.close()
-            logger.info("Sync client closed")
         
         # Log final performance summary
         if 'performance_logger' in locals():
