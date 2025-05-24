@@ -1,0 +1,113 @@
+{
+  "device": {
+    "name": "Raspberry Pi Zero 2W",
+    "description": "TinyLCM Performance Test - Drift Detection with 5Hz inference rate",
+    "log_level": "INFO"
+  },
+  "camera": {
+    "resolution": [
+      640,
+      480
+    ],
+    "framerate": 10,
+    "rotation": 0,
+    "inference_resolution": [
+      224,
+      224
+    ]
+  },
+  "model": {
+    "model_path": "./model/model_object.tflite",
+    "labels_path": "./model/labels_object.txt",
+    "threshold": 0.75
+  },
+  "tinylcm": {
+    "pipeline": {
+      "autonomous_monitor_warmup_samples": 0
+    },
+    "feature_extractor": {
+      "type": "TFLiteFeatureExtractor",
+      "model_path": "./model/model_object.tflite",
+      "feature_layer_index": 0,
+      "normalize_features": false,
+      "lazy_loading": false
+    },
+    "feature_transformation": {
+      "type": "StandardScalerPCA",
+      "model_path": "./model/feature_processor.pkl",
+      "enabled": true
+    },
+    "adaptive_classifier": {
+      "type": "LightweightKNN",
+      "k": 5,
+      "max_samples": 200,
+      "distance_metric": "euclidean",
+      "use_numpy": true,
+      "simple_confidence": true,
+      "initial_state_path": "./initial_state/knn_initial_state_objects.json"
+    },
+    "drift_detectors": [
+      {
+        "type": "KNNDistanceMonitor",
+        "delta":2, 
+        "lambda_threshold": 10,
+        "exit_threshold_factor": 0.7,
+        "high_confidence_threshold": 0.75,
+        "stable_known_classes": ["lego", "stone", "leaf", "negative"],
+        "reference_stats_path": "./initial_state/knn_reference_stats.json",
+        "warm_up_samples": 0,
+        "reference_update_interval": 10,
+        "reference_update_factor": 0.05,
+        "pause_reference_update_during_drift": true,
+        "drift_cooldown_period": 0,
+        "use_adaptive_thresholds": false,
+        "allow_runtime_threshold_adaptation": false,
+        "adaptive_delta_std_multiplier": 1.5,
+        "adaptive_lambda_std_multiplier": 5.0
+      }
+    ],
+    "operational_monitor": {
+      "track_system_metrics": true,
+      "track_inference_time": true,
+      "track_memory_usage": true,
+      "report_interval_seconds": 60
+    },
+    "sync_client": {
+      "server_url": "http://192.168.0.67:8000",
+      "api_key": "tinylcm-demo-key",
+      "sync_interval_seconds": 60,
+      "max_retries": 3,
+      "auto_register": true,
+      "sync_dir": "./sync_data",
+      "enable_prediction_images": false,
+      "cleanup_transferred_images": true
+    },
+    "features": {
+      "save_drift_images": false,
+      "save_prediction_images": false
+    },
+    "state_manager": {
+      "state_dir": "./state"
+    },
+    "data_logger": {
+      "enabled": true,
+      "log_dir": "./logs",
+      "log_images": false,
+      "log_drift_events": true,
+      "max_log_size_mb": 100
+    },
+    "geolocation": {
+      "enabled": false,
+      "api_key": null,
+      "cache_ttl": 86400,
+      "update_interval_seconds": 3600,
+      "fallback_coordinates": [0.0, 0.0]
+    }
+  },
+  "application": {
+    "inference_interval_ms": 200,
+    "display_frames": false,
+    "save_debug_frames": false,
+    "debug_output_dir": "./debug"
+  }
+}

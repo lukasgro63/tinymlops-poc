@@ -1,0 +1,47 @@
+{
+  "device": {
+    "name": "Raspberry Pi Zero 2W",
+    "description": "Scenario 1 - TinyLCM without Drift Detection Performance Test",
+    "log_level": "INFO"
+  },
+  "camera": {
+    "resolution": [640, 480],
+    "framerate": 10,
+    "rotation": 0,
+    "inference_resolution": [224, 224]
+  },
+  "model": {
+    "model_path": "../scenario2_drift_objects/model/model_object.tflite",
+    "labels_path": "../scenario2_drift_objects/model/labels_object.txt",
+    "threshold": 0.75
+  },
+  "tinylcm": {
+    "feature_extractor": {
+      "type": "TFLiteFeatureExtractor",
+      "model_path": "../scenario2_drift_objects/model/model_object.tflite",
+      "feature_layer_index": 0,
+      "normalize_features": false,
+      "lazy_loading": false
+    },
+    "feature_transformation": {
+      "type": "StandardScalerPCA",
+      "model_path": "../scenario2_drift_objects/model/feature_processor.pkl",
+      "enabled": true
+    },
+    "adaptive_classifier": {
+      "type": "LightweightKNN",
+      "k": 5,
+      "max_samples": 200,
+      "distance_metric": "euclidean",
+      "use_numpy": true,
+      "simple_confidence": true,
+      "initial_state_path": "../scenario2_drift_objects/initial_state/knn_initial_state_objects.json"
+    }
+  },
+  "application": {
+    "inference_interval_ms": 200,
+    "display_frames": false,
+    "save_debug_frames": false,
+    "debug_output_dir": "./debug"
+  }
+}
