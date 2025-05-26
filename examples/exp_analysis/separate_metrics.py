@@ -44,16 +44,35 @@ def load_scenario_data(filepath):
     return df
 
 # Setup
-data_dir = Path("examples/exp_analysis/data")
-output_dir = Path("examples/exp_analysis/output")
-output_dir.mkdir(exist_ok=True)
+script_dir = Path(__file__).parent.absolute()
+base_dir = script_dir.parent.parent  # This is the tinymlops-poc directory
+
+if script_dir.name == "exp_analysis":
+    # Running from the exp_analysis directory
+    data_dir = Path("data")
+    output_dir = Path("output")
+else:
+    # Running from another directory (e.g., project root)
+    data_dir = Path("examples/exp_analysis/data")
+    output_dir = Path("examples/exp_analysis/output")
+
+# Create output directory if it doesn't exist
+output_dir.mkdir(parents=True, exist_ok=True)
 
 # Find and load files
-scenario_files = {
-    "Baseline": max(data_dir.glob("performance_scenario0_*.json")),
-    "TinyLCM": max(data_dir.glob("performance_scenario1_*.json")),
-    "TinyLCM+Drift": max(data_dir.glob("performance_scenario2_1_*.json"))
-}
+try:
+    scenario_files = {
+        "Baseline": data_dir / "performance_scenario0.json",
+        "TinyLCM": data_dir / "performance_scenario1.json", 
+        "TinyLCM+Drift": data_dir / "performance_scenario2_1.json"
+    }
+    
+    # Verify files exist
+    for name, filepath in scenario_files.items():
+        if not filepath.exists():
+            print(f"Warning: File {filepath} not found.")
+except Exception as e:
+    print(f"Error finding scenario files: {e}")
 
 scenarios = {}
 for name, filepath in scenario_files.items():

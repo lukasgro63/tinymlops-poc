@@ -351,9 +351,21 @@ def plot_drift_analysis(scenarios_data: dict, save_path: Path = None):
 def main():
     """Main analysis function."""
     # Define data directory
-    data_dir = Path("examples/exp_analysis/data")
-    output_dir = Path("examples/exp_analysis/output")
-    output_dir.mkdir(exist_ok=True)
+    # Use absolute or proper relative paths depending on execution location
+    script_dir = Path(__file__).parent.absolute()
+    base_dir = script_dir.parent.parent  # This is the tinymlops-poc directory
+    
+    if script_dir.name == "exp_analysis":
+        # Running from the exp_analysis directory
+        data_dir = Path("data")
+        output_dir = Path("output") 
+    else:
+        # Running from another directory (e.g., project root)
+        data_dir = Path("examples/exp_analysis/data")
+        output_dir = Path("examples/exp_analysis/output")
+    
+    # Make sure the output directory exists, create parent directories as needed
+    output_dir.mkdir(parents=True, exist_ok=True)
     
     # Load data for all scenarios
     scenarios_data = {}
@@ -361,17 +373,17 @@ def main():
     try:
         # Scenario 0 - Baseline
         scenarios_data["scenario0"] = load_performance_data(
-            data_dir, "performance_scenario0_*.json"
+            data_dir, "performance_scenario0*.json"
         )
         
         # Scenario 1 - TinyLCM no drift
         scenarios_data["scenario1"] = load_performance_data(
-            data_dir, "performance_scenario1_*.json"
+            data_dir, "performance_scenario1*.json"
         )
         
         # Scenario 2.1 - TinyLCM with drift
         scenarios_data["scenario2_1"] = load_performance_data(
-            data_dir, "performance_scenario2_1_*.json"
+            data_dir, "performance_scenario2_1*.json"
         )
     except FileNotFoundError as e:
         print(f"Error loading data: {e}")

@@ -44,14 +44,34 @@ def load_scenario_data(filepath):
     return df
 
 # Load all three scenarios
-data_dir = Path("examples/exp_analysis/data")
+script_dir = Path(__file__).parent.absolute()
+base_dir = script_dir.parent.parent  # This is the tinymlops-poc directory
 
-# Find the latest files for each scenario
-scenario_files = {
-    "Baseline (S0)": max(data_dir.glob("performance_scenario0_*.json")),
-    "TinyLCM (S1)": max(data_dir.glob("performance_scenario1_*.json")),
-    "TinyLCM+Drift (S2.1)": max(data_dir.glob("performance_scenario2_1_*.json"))
-}
+if script_dir.name == "exp_analysis":
+    # Running from the exp_analysis directory
+    data_dir = Path("data")
+    output_dir = Path("output")
+    output_dir.mkdir(parents=True, exist_ok=True)
+else:
+    # Running from another directory (e.g., project root)
+    data_dir = Path("examples/exp_analysis/data")
+    output_dir = Path("examples/exp_analysis/output")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+# Find the files for each scenario - handling both naming patterns
+try:
+    scenario_files = {
+        "Baseline (S0)": data_dir / "performance_scenario0.json",
+        "TinyLCM (S1)": data_dir / "performance_scenario1.json",
+        "TinyLCM+Drift (S2.1)": data_dir / "performance_scenario2_1.json"
+    }
+
+    # Verify files exist
+    for name, filepath in scenario_files.items():
+        if not filepath.exists():
+            print(f"Warning: File {filepath} not found.")
+except Exception as e:
+    print(f"Error finding scenario files: {e}")
 
 # Load data
 scenarios = {}
@@ -207,7 +227,7 @@ fig.suptitle("TinyMLOps Performance Comparison: Baseline vs TinyLCM vs TinyLCM+D
              fontsize=16, fontweight="bold")
 
 plt.tight_layout()
-plt.savefig("examples/exp_analysis/output/performance_comparison.png", dpi=300, bbox_inches='tight')
+plt.savefig(output_dir / "performance_comparison.png", dpi=300, bbox_inches='tight')
 plt.show()
 
 # Print summary to console
