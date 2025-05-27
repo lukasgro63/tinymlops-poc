@@ -1,0 +1,5 @@
+0 coin
+1 leaf
+2 lego
+3 negative
+4 stone
