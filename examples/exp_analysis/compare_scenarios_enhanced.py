@@ -84,7 +84,7 @@ def load_single_run_data(file_path: Path, warmup_seconds: int = WARMUP_SECONDS) 
     
     df = pd.DataFrame(data)
     
-    # Filter only inference records
+    # Filter only inference records (exclude drift_event and other types)
     df = df[df["type"] == "inference"].copy()
     
     # Convert timestamp
@@ -167,7 +167,7 @@ def load_all_runs(data_dir: Path) -> dict:
                 print(f"  Warning: {pattern} not found")
     
     # Convert to DataFrames for easier analysis
-    for scenario in scenarios_data:
+    for scenario in list(scenarios_data.keys()):  # Create a copy of keys to avoid RuntimeError
         if scenarios_data[scenario]:
             # Create DataFrame from metrics (excluding raw_data)
             metrics_list = [{k: v for k, v in m.items() if k != 'raw_data'} 

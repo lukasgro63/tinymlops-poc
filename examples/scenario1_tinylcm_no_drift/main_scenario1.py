@@ -58,6 +58,7 @@ logger = None
 running = True
 current_frame = None
 config = None
+feature_transformer = None  # Added global variable for feature transformer
 process = psutil.Process(os.getpid())
 
 
@@ -210,6 +211,7 @@ def signal_handler(sig, frame):
 
 def setup_tinylcm_components(config: Dict) -> Tuple[TFLiteFeatureExtractor, StandardScalerPCATransformer, LightweightKNN]:
     """Initialize TinyLCM components without drift detection."""
+    global feature_transformer  # Make feature_transformer accessible globally
     tinylcm_config = config.get("tinylcm", {})
     
     # Feature extractor
@@ -227,6 +229,9 @@ def setup_tinylcm_components(config: Dict) -> Tuple[TFLiteFeatureExtractor, Stan
         feature_transformer = StandardScalerPCATransformer(
             processor_path=transformer_config.get("model_path")
         )
+        logger.info(f"Initialized StandardScalerPCATransformer from {transformer_config.get('model_path')}")
+    else:
+        logger.warning("Feature transformation is disabled in config!")
     
     # KNN classifier
     classifier_config = tinylcm_config.get("adaptive_classifier", {})
@@ -262,12 +267,17 @@ def setup_tinylcm_components(config: Dict) -> Tuple[TFLiteFeatureExtractor, Stan
         # Get feature dimensions by processing a test image
         test_image = np.zeros((224, 224, 3), dtype=np.uint8)
         test_features = feature_extractor.extract_features(test_image)
+        logger.info(f"Test image raw features shape: {test_features.shape}")
         
         # Apply transformation if available
         if feature_transformer:
             test_features = feature_transformer.transform(test_features)
+            logger.info(f"Test image transformed features shape: {test_features.shape}")
+        else:
+            logger.warning("No feature transformer during initialization - using raw features!")
         
         feature_dim = test_features.shape[0]
+        logger.info(f"Final feature dimension for KNN: {feature_dim}")
         
         # Define classes to initialize (from config or default)
         classes = ["lego", "stone", "leaf", "negative"]  # Default classes
@@ -381,9 +391,18 @@ def main(config_path: str):
             feature_start = time.time()
             features = feature_extractor.extract_features(resized_frame)
             
+            # Log feature shape before transformation (only occasionally)
+            if inference_count % 50 == 0:
+                logger.info(f"Raw features shape: {features.shape}")
+            
             # Apply transformation if available
             if feature_transformer:
                 features = feature_transformer.transform(features)
+                if inference_count % 50 == 0:
+                    logger.info(f"Transformed features shape: {features.shape}")
+            else:
+                if inference_count % 50 == 0:
+                    logger.warning("No feature transformer available - using raw features!")
             
             feature_time = time.time() - feature_start
             

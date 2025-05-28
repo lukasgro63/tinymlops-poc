@@ -11,8 +11,8 @@
     "inference_resolution": [224, 224]
   },
   "model": {
-    "model_path": "../scenario2_drift_objects/model/model_object.tflite",
-    "labels_path": "../scenario2_drift_objects/model/labels_object.txt",
+    "model_path": "./model/model_classification.tflite",
+    "labels_path": "./model/labels_classification.txt",
     "threshold": 0.75
   },
   "application": {
