@@ -136,7 +136,9 @@ class PerformanceLogger:
                      total_time: float,
                      feature_extraction_time: float,
                      knn_inference_time: float,
-                     prediction: Dict[str, Any]):
+                     drift_check_time: float,
+                     prediction: Dict[str, Any],
+                     drift_detected: bool = False):
         """Log a single inference with detailed timing breakdown."""
         # Get current resource usage
         cpu_percent = psutil.cpu_percent(interval=0.1)  # System-wide CPU usage
@@ -149,9 +151,11 @@ class PerformanceLogger:
             "total_time_ms": total_time * 1000,
             "feature_extraction_time_ms": feature_extraction_time * 1000,
             "knn_inference_time_ms": knn_inference_time * 1000,
+            "drift_check_time_ms": drift_check_time * 1000,
             "cpu_percent": cpu_percent,
             "memory_mb": memory_mb,
             "prediction": prediction,
+            "drift_detected": drift_detected,
             "uptime_seconds": time.time() - self.start_time
         }
         
@@ -170,8 +174,10 @@ class PerformanceLogger:
         total_times = [m["total_time_ms"] for m in inference_metrics]
         feature_times = [m["feature_extraction_time_ms"] for m in inference_metrics]
         knn_times = [m["knn_inference_time_ms"] for m in inference_metrics]
+        drift_times = [m.get("drift_check_time_ms", 0) for m in inference_metrics]
         cpu_percents = [m["cpu_percent"] for m in inference_metrics]
         memory_mbs = [m["memory_mb"] for m in inference_metrics]
+        drift_detections = [m.get("drift_detected", False) for m in inference_metrics]
         
         summary = {
             "timestamp": datetime.now().isoformat(),
@@ -184,10 +190,13 @@ class PerformanceLogger:
             "max_total_time_ms": np.max(total_times),
             "avg_feature_extraction_time_ms": np.mean(feature_times),
             "avg_knn_inference_time_ms": np.mean(knn_times),
+            "avg_drift_check_time_ms": np.mean(drift_times),
             "avg_cpu_percent": np.mean(cpu_percents),
             "avg_memory_mb": np.mean(memory_mbs),
             "max_memory_mb": np.max(memory_mbs),
-            "total_runtime_seconds": time.time() - self.start_time
+            "total_runtime_seconds": time.time() - self.start_time,
+            "total_drift_events": 0,  # Always 0 for scenario1
+            "drift_detection_rate": 0.0  # Always 0 for scenario1
         }
         
         self._append_to_log(summary)
@@ -209,7 +218,7 @@ def signal_handler(sig, frame):
     running = False
 
 
-def setup_tinylcm_components(config: Dict) -> Tuple[TFLiteFeatureExtractor, StandardScalerPCATransformer, LightweightKNN]:
+def setup_tinylcm_components(config: Dict) -> InferencePipeline:
     """Initialize TinyLCM components without drift detection."""
     global feature_transformer  # Make feature_transformer accessible globally
     tinylcm_config = config.get("tinylcm", {})
@@ -297,7 +306,36 @@ def setup_tinylcm_components(config: Dict) -> Tuple[TFLiteFeatureExtractor, Stan
         knn_classifier.fit(np.array(X_init), y_init)
         logger.info(f"Initialized KNN with {len(X_init)} random samples for {len(classes)} classes")
     
-    return feature_extractor, feature_transformer, knn_classifier
+    # Initialize operational monitor (same as scenario2_1)
+    monitor_config = tinylcm_config.get("operational_monitor", {})
+    operational_monitor = OperationalMonitor(
+        storage_dir=tinylcm_config.get("data_logger", {}).get("log_dir", "./logs"),
+        collect_system_metrics=monitor_config.get("track_system_metrics", True),
+        system_metrics_interval=monitor_config.get("report_interval_seconds", 30)
+    )
+    logger.info(f"Operational monitor initialized with:")
+    logger.info(f"- collect_system_metrics: {monitor_config.get('track_system_metrics', True)}")
+    logger.info(f"- system_metrics_interval: {monitor_config.get('report_interval_seconds', 30)}")
+    
+    # Initialize data logger if enabled (same as scenario2_1)
+    logger_config = tinylcm_config.get("data_logger", {})
+    if logger_config.get("enabled", True):
+        data_logger = DataLogger(
+            storage_dir=logger_config.get("log_dir", "./logs")
+        )
+    else:
+        data_logger = None
+    
+    # Initialize InferencePipeline WITHOUT drift detectors
+    pipeline = InferencePipeline(
+        feature_extractor=feature_extractor,
+        classifier=knn_classifier,
+        autonomous_monitors=[],  # Empty list - no drift detectors
+        operational_monitor=operational_monitor,
+        data_logger=data_logger
+    )
+    
+    return pipeline
 
 
 def main(config_path: str):
@@ -311,9 +349,20 @@ def main(config_path: str):
     setup_logging(config.get("device", {}).get("log_level", "INFO"))
     logger.info("Starting Scenario 1 - TinyLCM without Drift Detection")
     
+    # Create necessary directories (same as scenario2_1)
+    logs_dir = Path("./logs")
+    logs_dir.mkdir(exist_ok=True)
+    state_dir = Path("./state")
+    state_dir.mkdir(exist_ok=True)
+    
     # Set up signal handler
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Initialize DeviceIDManager (same as scenario2_1)
+    device_id_manager = DeviceIDManager(device_id_file="device_id.txt")
+    device_id = device_id_manager.get_device_id()
+    logger.info(f"Device ID: {device_id}")
     
     # Initialize camera
     camera_config = config.get("camera", {})
@@ -324,8 +373,8 @@ def main(config_path: str):
         auto_start=False  # Don't auto-start, we'll start manually after model init
     )
     
-    # Initialize TinyLCM components BEFORE starting camera
-    feature_extractor, feature_transformer, knn_classifier = setup_tinylcm_components(config)
+    # Initialize TinyLCM pipeline BEFORE starting camera
+    pipeline = setup_tinylcm_components(config)
     
     # Initialize performance logger
     performance_logger = PerformanceLogger()
@@ -376,9 +425,6 @@ def main(config_path: str):
                 time.sleep(0.1)
                 continue
             
-            # Start total timing
-            total_start = time.time()
-            
             # Convert RGBA to RGB if necessary
             if frame.shape[2] == 4:
                 frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
@@ -387,50 +433,74 @@ def main(config_path: str):
             target_size = tuple(camera_config.get("inference_resolution", [224, 224]))
             resized_frame = resize_image(frame, target_size)
             
-            # Feature extraction
-            feature_start = time.time()
-            features = feature_extractor.extract_features(resized_frame)
+            # Create sample ID (same as scenario2_1)
+            sample_id = f"{device_id}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
             
-            # Log feature shape before transformation (only occasionally)
-            if inference_count % 50 == 0:
-                logger.info(f"Raw features shape: {features.shape}")
+            # Start timing for the complete inference
+            total_start_time = time.time()
             
-            # Apply transformation if available
-            if feature_transformer:
+            # Time feature extraction separately
+            feature_start_time = time.time()
+            
+            # Extract features manually first (same as scenario2_1)
+            features = pipeline.feature_extractor.extract_features(resized_frame)
+            
+            # Apply feature transformation if available
+            if feature_transformer is not None:
                 features = feature_transformer.transform(features)
-                if inference_count % 50 == 0:
-                    logger.info(f"Transformed features shape: {features.shape}")
+            
+            feature_extraction_time = time.time() - feature_start_time
+            
+            # Time KNN inference (which happens inside the pipeline)
+            knn_start_time = time.time()
+            
+            # Use the pipeline.process() method (same as scenario2_1)
+            try:
+                result = pipeline.process(
+                    input_data=features,  # Pass the transformed features
+                    label=None,  # No ground truth label available
+                    sample_id=sample_id,
+                    timestamp=time.time(),
+                    extract_features=False  # Tell pipeline not to extract features again
+                )
+                
+                knn_inference_time = time.time() - knn_start_time
+                
+            except Exception as e:
+                logger.error(f"Error processing frame: {e}")
+                result = None
+                knn_inference_time = 0
+            
+            # Calculate total time
+            total_time = time.time() - total_start_time
+            
+            # Extract prediction and confidence from result
+            if result:
+                prediction = result.get("prediction", "unknown")
+                confidence = result.get("confidence", 0.0)
+                prediction_result = {
+                    "class": prediction,
+                    "confidence": float(confidence),
+                    "knn_samples": len(pipeline.classifier.X_train) if hasattr(pipeline.classifier, 'X_train') else 0
+                }
             else:
-                if inference_count % 50 == 0:
-                    logger.warning("No feature transformer available - using raw features!")
+                prediction_result = {
+                    "class": "error",
+                    "confidence": 0.0,
+                    "knn_samples": 0
+                }
             
-            feature_time = time.time() - feature_start
+            # Since no drift detection, drift_check_time is 0
+            drift_check_time = 0
             
-            # KNN inference
-            knn_start = time.time()
-            predictions = knn_classifier.predict(np.array([features]))
-            prediction = predictions[0] if len(predictions) > 0 else "unknown"
-            
-            # Get confidence using predict_proba
-            probas = knn_classifier.predict_proba(np.array([features]))
-            confidence = float(np.max(probas[0])) if len(probas) > 0 else 0.0
-            knn_time = time.time() - knn_start
-            
-            total_time = time.time() - total_start
-            
-            # Prepare prediction result
-            prediction_result = {
-                "class": prediction,
-                "confidence": float(confidence),
-                "knn_samples": 0  # We don't track samples in this scenario
-            }
-            
-            # Log performance metrics
+            # Log performance metrics (same format as scenario2_1)
             performance_logger.log_inference(
                 total_time=total_time,
-                feature_extraction_time=feature_time,
-                knn_inference_time=knn_time,
-                prediction=prediction_result
+                feature_extraction_time=feature_extraction_time,
+                knn_inference_time=knn_inference_time,
+                drift_check_time=drift_check_time,
+                prediction=prediction_result,
+                drift_detected=False  # Always False since no drift detection
             )
             
             # Log if high confidence
