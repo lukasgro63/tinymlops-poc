@@ -1,1 +1,25 @@
-
+Test_Type,Metric,Configuration_1,Configuration_2,Statistic_Value,p_value,Significance_Result,Effect_Size_Value,Effect_Size_Interpretation,Hypothesis_Tested,Hypothesis_Result
+Shapiro-Wilk,CPU,Baseline TFLite,N/A,0.9564598711928164,0.783142366079633,Normal,N/A,N/A,Normality,Normal
+Shapiro-Wilk,Memory,Baseline TFLite,N/A,0.9243767331298516,0.5585580862778179,Normal,N/A,N/A,Normality,Normal
+Shapiro-Wilk,Latency,Baseline TFLite,N/A,0.9917336634217414,0.9853992521215974,Normal,N/A,N/A,Normality,Normal
+Shapiro-Wilk,CPU,TinyLCM (no drift),N/A,0.9229485424155348,0.549136907566641,Normal,N/A,N/A,Normality,Normal
+Shapiro-Wilk,Memory,TinyLCM (no drift),N/A,0.8218511685997149,0.12066126620399197,Normal,N/A,N/A,Normality,Normal
+Shapiro-Wilk,Latency,TinyLCM (no drift),N/A,0.9168196310598705,0.50963424078537,Normal,N/A,N/A,Normality,Normal
+Shapiro-Wilk,CPU,TinyLCM (drift detection),N/A,0.9675173661876408,0.8590933456764679,Normal,N/A,N/A,Normality,Normal
+Shapiro-Wilk,Memory,TinyLCM (drift detection),N/A,0.8373746365315692,0.15779479856684503,Normal,N/A,N/A,Normality,Normal
+Shapiro-Wilk,Latency,TinyLCM (drift detection),N/A,0.8091904904951865,0.09608415617935326,Normal,N/A,N/A,Normality,Normal
+Mann-Whitney U,CPU,TinyLCM (no drift),Baseline TFLite,15.0,0.6904761904761905,Not significant at α=0.05,0.2,small,Difference,Not significant
+Mann-Whitney U,Memory,TinyLCM (no drift),Baseline TFLite,25.0,0.007936507936507936,Significant at α=0.05,1.0,large,Difference,Significant
+Mann-Whitney U,Latency,TinyLCM (no drift),Baseline TFLite,25.0,0.007936507936507936,Significant at α=0.05,1.0,large,Difference,Significant
+Mann-Whitney U,CPU,TinyLCM (drift detection),Baseline TFLite,20.0,0.15079365079365079,Not significant at α=0.05,0.6,large,Difference,Not significant
+Mann-Whitney U,Memory,TinyLCM (drift detection),Baseline TFLite,25.0,0.007936507936507936,Significant at α=0.05,1.0,large,Difference,Significant
+Mann-Whitney U,Latency,TinyLCM (drift detection),Baseline TFLite,25.0,0.007936507936507936,Significant at α=0.05,1.0,large,Difference,Significant
+Mann-Whitney U,CPU,TinyLCM (drift detection),TinyLCM (no drift),14.0,0.8412698412698413,Not significant at α=0.05,0.12,negligible,Difference,Not significant
+Mann-Whitney U,Memory,TinyLCM (drift detection),TinyLCM (no drift),0.0,0.007936507936507936,Significant at α=0.05,-1.0,large,Difference,Significant
+Mann-Whitney U,Latency,TinyLCM (drift detection),TinyLCM (no drift),0.0,0.007936507936507936,Significant at α=0.05,-1.0,large,Difference,Significant
+One-sample Wilcoxon,Latency overhead,TinyLCM (no drift),50% threshold,0.0,0.03125,p < 0.05,23.989840503659913,Median: 24.0%,H1: Latency overhead < 50%,H1 accepted
+One-sample Wilcoxon,Latency overhead,TinyLCM (drift detection),50% threshold,0.0,0.03125,p < 0.05,21.514499343117492,Median: 21.5%,H1: Latency overhead < 50%,H1 accepted
+One-sample Wilcoxon,CPU usage,TinyLCM (no drift),50% threshold,0.0,0.03125,p < 0.05,3.7174311926605506,Median: 3.7%,H2: CPU < 50%,H2 CPU accepted
+Descriptive,Peak memory,TinyLCM (no drift),256 MiB threshold,5.0,N/A,5/5 below threshold,231.46484375,Max: 231.5 MiB,H2: Peak Memory < 256 MiB,H2 Memory accepted
+One-sample Wilcoxon,CPU usage,TinyLCM (drift detection),50% threshold,0.0,0.03125,p < 0.05,4.062068965517241,Median: 4.1%,H2: CPU < 50%,H2 CPU accepted
+Descriptive,Peak memory,TinyLCM (drift detection),256 MiB threshold,5.0,N/A,5/5 below threshold,225.6015625,Max: 225.6 MiB,H2: Peak Memory < 256 MiB,H2 Memory accepted
