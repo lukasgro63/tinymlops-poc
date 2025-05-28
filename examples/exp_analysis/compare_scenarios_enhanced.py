@@ -208,6 +208,35 @@ def calculate_cliffs_delta(x1: np.ndarray, x2: np.ndarray) -> tuple:
     return delta, interpretation
 
 
+def calculate_cohens_d(x1: np.ndarray, x2: np.ndarray) -> tuple:
+    """Calculate Cohen's d effect size for two independent samples."""
+    n1, n2 = len(x1), len(x2)
+    
+    # Calculate means
+    mean1, mean2 = np.mean(x1), np.mean(x2)
+    
+    # Calculate pooled standard deviation
+    var1, var2 = np.var(x1, ddof=1), np.var(x2, ddof=1)
+    pooled_var = ((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2)
+    pooled_std = np.sqrt(pooled_var)
+    
+    # Calculate Cohen's d
+    d = (mean1 - mean2) / pooled_std if pooled_std > 0 else 0
+    
+    # Interpret effect size (Cohen's conventions)
+    abs_d = abs(d)
+    if abs_d < 0.2:
+        interpretation = "negligible"
+    elif abs_d < 0.5:
+        interpretation = "small"
+    elif abs_d < 0.8:
+        interpretation = "medium"
+    else:
+        interpretation = "large"
+    
+    return d, interpretation
+
+
 def perform_statistical_tests(scenarios_data: dict) -> pd.DataFrame:
     """Perform comprehensive statistical tests on the runs per scenario."""
     results = []
@@ -289,8 +318,54 @@ def perform_statistical_tests(scenarios_data: dict) -> pd.DataFrame:
                     })
                     print(f"  {metric}: p={p_value:.4f} ({significant}), δ={delta:.3f} ({delta_interp})")
     
-    # 3. Hypothesis H1: Latency Overhead < 50%
-    print("\n=== 3. Hypothesis H1 (Latency Overhead < 50%) ===")
+    # 3. Welch's t-tests for scenario comparisons (parametric alternative)
+    print("\n=== 3. Welch's t-Tests (Parametric Scenario Comparisons) ===")
+    
+    for s1, s0 in comparisons:
+        df1_key = f"{s1}_df"
+        df0_key = f"{s0}_df"
+        
+        if df1_key not in scenarios_data or df0_key not in scenarios_data:
+            continue
+            
+        df1 = scenarios_data[df1_key]
+        df0 = scenarios_data[df0_key]
+        
+        if df1.empty or df0.empty:
+            continue
+            
+        print(f"\n{SCENARIO_NAMES[s1]} vs {SCENARIO_NAMES[s0]}:")
+        
+        for metric, col in [("CPU", "cpu_mean"), ("Memory", "memory_peak"), ("Latency", "latency_mean")]:
+            if col in df1.columns and col in df0.columns:
+                values1 = df1[col].values
+                values0 = df0[col].values
+                
+                if len(values1) >= 3 and len(values0) >= 3:  # Need sufficient samples
+                    # Welch's t-test (equal_var=False)
+                    stat, p_value = stats.ttest_ind(values1, values0, equal_var=False)
+                    significant = "Significant" if p_value < ALPHA else "Not significant"
+                    
+                    # Calculate Cohen's d
+                    d, d_interp = calculate_cohens_d(values1, values0)
+                    
+                    results.append({
+                        "Test_Type": "Welch's t-test",
+                        "Metric": metric,
+                        "Configuration_1": SCENARIO_NAMES[s1],
+                        "Configuration_2": SCENARIO_NAMES[s0],
+                        "Statistic_Value": stat,
+                        "p_value": p_value,
+                        "Significance_Result": f"{significant} at α={ALPHA}",
+                        "Effect_Size_Value": d,
+                        "Effect_Size_Interpretation": d_interp,
+                        "Hypothesis_Tested": "Difference (parametric)",
+                        "Hypothesis_Result": significant
+                    })
+                    print(f"  {metric}: p={p_value:.4f} ({significant}), d={d:.3f} ({d_interp})")
+    
+    # 4. Hypothesis H1: Latency Overhead < 50%
+    print("\n=== 4. Hypothesis H1 (Latency Overhead < 50%) ===")
     
     if "scenario0_df" in scenarios_data and "latency_mean" in scenarios_data["scenario0_df"].columns:
         baseline_latencies = scenarios_data["scenario0_df"]["latency_mean"].values
@@ -323,8 +398,8 @@ def perform_statistical_tests(scenarios_data: dict) -> pd.DataFrame:
                 })
                 print(f"{SCENARIO_NAMES[scenario]}: Median overhead = {np.median(pct_increases):.1f}%, p={p_value:.4f} ({h1_result})")
     
-    # 4. Hypothesis H2: Resource Constraints
-    print("\n=== 4. Hypothesis H2 (CPU < 50%, Memory < 256 MiB) ===")
+    # 5. Hypothesis H2: Resource Constraints
+    print("\n=== 5. Hypothesis H2 (CPU < 50%, Memory < 256 MiB) ===")
     
     for scenario in ["scenario1", "scenario2"]:
         df_key = f"{scenario}_df"
